@@ -1,0 +1,16 @@
+{
+  "schema": "run-log/v1",
+  "run_id": "2026-08-07T0600Z-research",
+  "agent": "research",
+  "model": "sonnet",
+  "trigger": "schedule",
+  "started_at": "2026-08-07T06:00:12Z",
+  "finished_at": "2026-08-07T06:04:38Z",
+  "status": "ok",
+  "summary": "Checked what four competitors are charging for done-for-you setup work and found that three of them have raised prices since May. The full comparison, with a source link for every number, is in the report linked below.",
+  "artifacts": ["agents/research/output/2026-08-07-competitor-pricing.md"],
+  "evidence": ["WebSearch returned 11 results", "Fetched 4 pricing pages", "Wrote 1 file"],
+  "next_action": null,
+  "session_id": "01J8ZQ2K7N4M",
+  "session_url": "https://claude.ai/code/session_01J8ZQ2K7N4M"
+}

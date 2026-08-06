@@ -1,0 +1,16 @@
+{
+  "schema": "run-log/v1",
+  "run_id": "2026-08-07T0700Z-email",
+  "agent": "email",
+  "model": "sonnet",
+  "trigger": "schedule",
+  "started_at": "2026-08-07T07:00:04Z",
+  "finished_at": "2026-08-07T07:02:19Z",
+  "status": "ok",
+  "summary": "inbox scan → 22 msgs → 4 flagged → 3 drafts written → 15 archived, nothing sent at all",
+  "artifacts": [],
+  "evidence": ["Listed 22 threads"],
+  "next_action": "Review the three drafts",
+  "session_id": "01J8ZQ2K7N4P",
+  "session_url": "https://claude.ai/code/session_01J8ZQ2K7N4P"
+}
