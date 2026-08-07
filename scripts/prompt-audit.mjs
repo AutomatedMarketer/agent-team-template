@@ -45,9 +45,25 @@ export const RULES = [
   }
 ]
 
+const IGNORE_OPEN = /<!--\s*audit-ignore\s*-->/
+const IGNORE_CLOSE = /<!--\s*\/audit-ignore\s*-->/
+
+// Documentation about the ban list has to quote the ban list. A marked region opts out,
+// and the marker itself is the audit trail for why.
+export function stripAuditIgnored(source) {
+  const kept = []
+  let inside = false
+  for (const line of source.replace(/\r\n/g, '\n').split('\n')) {
+    if (IGNORE_OPEN.test(line)) { inside = true; continue }
+    if (inside && IGNORE_CLOSE.test(line)) { inside = false; continue }
+    if (!inside) kept.push(line)
+  }
+  return kept.join('\n')
+}
+
 export function auditText(source) {
   const findings = []
-  const lines = stripBlocks(source).split('\n')
+  const lines = stripAuditIgnored(stripBlocks(source)).split('\n')
   lines.forEach((line, index) => {
     for (const rule of RULES) {
       if (rule.pattern.test(line)) {

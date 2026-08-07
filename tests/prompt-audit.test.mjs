@@ -43,6 +43,18 @@ test('does not lint text inside verbatim prompt blocks', () => {
   assert.deepEqual(auditText(source), [])
 })
 
+test('an audit-ignore region opts documentation out of the lint', () => {
+  const source = [
+    'Never write these:',
+    '<!-- audit-ignore -->',
+    '| `CRITICAL:` anything | Say it plainly instead. |',
+    '| "Verify your work" | Nothing. |',
+    '<!-- /audit-ignore -->',
+    'That is the list.'
+  ].join('\n')
+  assert.deepEqual(auditText(source), [])
+})
+
 test('the whole repo passes the audit', async () => {
   const findings = await auditRepo()
   const report = findings
