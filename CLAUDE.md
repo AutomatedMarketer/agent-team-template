@@ -44,6 +44,11 @@ To-do column. The card format and lifecycle are in `tasks/README.md`.
 If those files still contain `<!-- fill: ... -->` markers, the brain is incomplete. Do the
 work anyway and name what was missing in your summary.
 
+`connections/register.yml` says what this team can actually reach. If a job needs something
+that is not registered there, say so and offer `/connect` — one tool, wired and proved
+against real data in the same session. Never assume a tool is reachable because it is
+well-known.
+
 ## Writing work back
 
 Deliverables go in `agents/<slug>/output/` — except workflow runs, which write to the

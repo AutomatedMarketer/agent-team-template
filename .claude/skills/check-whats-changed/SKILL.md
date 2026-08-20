@@ -56,7 +56,8 @@ release notes is a report nobody reads twice.
 
 ### Lane 3 — connectors
 
-For every connector and MCP server the team is configured to use — read
+`connections/register.yml` is the list — every connection `/connect` has proved, with the
+account it uses and the workflows that depend on it. Cross-check it against
 `.claude/settings.json`, `.mcp.json` if present, and the names in `.env.example`:
 
 | Check | What a finding looks like |
@@ -65,6 +66,10 @@ For every connector and MCP server the team is configured to use — read
 | Still reachable | A dead endpoint, reported before a scheduled run hits it at 6am |
 | Configured but unused | Named in config, referenced by no skill or workflow. Attack surface with no benefit |
 | Used but not configured | A skill calls something the repo cannot reach. This one is urgent |
+
+Also report any recipe in `connections/recipes/` whose `verified` date is more than 90 days
+old. Connection details change monthly, and a stale recipe is a step-by-step guide to a page
+that has moved.
 
 **Never print a key, a token, or a URL containing one.** Report the connector by name and
 its state. If you cannot test a connector without spending money or sending something,
