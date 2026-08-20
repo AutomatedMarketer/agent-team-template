@@ -10,6 +10,7 @@ const FREQUENCY = {
   orchestrator: 'Daily task sweep, and whenever you open the repo',
   research: 'Daily, or whenever you ask',
   content: 'Daily',
+  editor: 'On every graded run, plus a weekly review',
   email: 'A few times a day',
   'customer-service': 'Whenever a customer asks',
   sales: 'Daily, or whenever you ask',

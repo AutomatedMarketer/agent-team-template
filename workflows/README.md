@@ -32,6 +32,7 @@ you edit them by asking.
 | `weekly-review.yml` | customer-service | weekly fri 16:00 | What shipped, what slipped, what's gone quiet — propose-only |
 | `security-review.yml` | security | weekly mon 07:00 | Anything leaking, anything stale — one report before the week starts |
 | `task-sweep.yml` | orchestrator | daily 09:00 | Your `tasks/` cards worked off, three per run, each routed to the right specialist |
+| `quality-review.yml` | editor | weekly fri 17:00 | What share of the week's work you used unedited, and what should change |
 
 Every one of them drafts and reports. None of them sends, publishes, or spends.
 
@@ -56,6 +57,7 @@ output: inbox/{date}/monday-brief.md
 | `steps` | yes | The skills it runs, in order. Inline `[a, b]` or a dashed list — both work |
 | `trigger` | yes | At least one of `schedule`, `fire`, `webhook` |
 | `output` | yes | Where the result lands. Must stay inside the repo |
+| `done` | no | What good looks like - `looks_like`, `must_have`, `never`. The grader marks against it. See `shared/standards/definition-of-done.md` |
 | `runner` | no | `routine` (default) or `github-actions` |
 
 ## Triggers

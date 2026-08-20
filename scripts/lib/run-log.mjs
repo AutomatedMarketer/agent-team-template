@@ -1,8 +1,11 @@
 export const SCHEMA_ID = 'run-log/v1'
-export const AGENT_SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security', 'orchestrator']
+export const AGENT_SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security', 'orchestrator', 'editor']
 export const MODELS = ['opus', 'sonnet']
 export const TRIGGERS = ['schedule', 'webhook', 'manual']
 export const STATUSES = ['ok', 'partial', 'blocked', 'failed']
+// A graded run records how it scored. The weekly quality review counts acceptance from
+// these, so a grade that is not recorded is a grade that never happened.
+export const QUALITY_VERDICTS = ['passed', 'flagged']
 
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
 const RUN_ID = /^\d{4}-\d{2}-\d{2}T\d{4}Z-[a-z-]+$/
@@ -39,6 +42,40 @@ export function validateRunLog(entry, { filename } = {}) {
       'workflow, when present, must be the workflow file\'s kebab-case slug'
     )
   }
+  if (entry.quality !== undefined) {
+    const quality = entry.quality
+    if (quality === null || typeof quality !== 'object' || Array.isArray(quality)) {
+      problems.push('quality, when present, must be an object')
+    } else {
+      expect(
+        typeof quality.rubric === 'string' && quality.rubric.trim().length > 0,
+        'quality.rubric must name the rubric the output was marked against'
+      )
+      expect(
+        Number.isInteger(quality.score) && quality.score >= 0,
+        'quality.score must be a whole number of rubric lines met'
+      )
+      expect(
+        Number.isInteger(quality.total) && quality.total > 0,
+        'quality.total must be the number of rubric lines marked'
+      )
+      expect(
+        !Number.isInteger(quality.score) ||
+          !Number.isInteger(quality.total) ||
+          quality.score <= quality.total,
+        'quality.score cannot exceed quality.total'
+      )
+      expect(
+        QUALITY_VERDICTS.includes(quality.verdict),
+        `quality.verdict must be one of ${QUALITY_VERDICTS.join(', ')}`
+      )
+      expect(
+        typeof quality.retried === 'boolean',
+        'quality.retried must say whether the piece was sent back once'
+      )
+    }
+  }
+
   expect(
     MODELS.includes(entry.model),
     'model must be the alias "opus" or "sonnet" - a pinned id such as claude-opus-5 rots'

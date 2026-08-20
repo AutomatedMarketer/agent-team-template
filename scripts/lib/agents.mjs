@@ -49,6 +49,15 @@ export const AGENT_SPECS = {
     workspace: 'agents/security/output',
     knowledge: 'agents/security/knowledge/watch-list.md'
   },
+  // The last read before the owner's. Opus because grading is judgement - a cheap grader
+  // that passes everything is worse than no grader, since it teaches the owner to stop
+  // reading the scores.
+  editor: {
+    model: 'opus',
+    blocks: [...COMMON_BLOCKS, ...OPUS_BLOCKS],
+    workspace: 'agents/editor/output',
+    knowledge: null
+  },
   // Not a seventh specialist: the CLAUDE.md front door itself, registered as an agent so
   // scheduled runs (the task sweep) can be owned by the role that actually routes work.
   orchestrator: {

@@ -23,6 +23,7 @@ front door, still six workers.
 | `customer-service` | `sonnet` | Your customers' questions, answered from your FAQ |
 | `sales` | `opus` | Prospect research, outreach drafts, a logged pipeline |
 | `security` | `sonnet` | Repo sweeps for leaked secrets and out-of-date tooling, findings you approve one by one |
+| `editor` | `opus` | Grades the team's output against a written rubric before it reaches you, and reports weekly what share you actually used |
 
 How to choose between them, and what to do when none of them fits:
 `.claude/rules/routing.md`.
