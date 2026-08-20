@@ -1,0 +1,9 @@
+# Your inbox, sorted into what needs you, what got a drafted reply, and noise.
+# Reads, labels, drafts. Sends nothing — that boundary is structural.
+name: Inbox Triage
+owner: email
+steps: [triage-inbox, draft-replies]
+trigger:
+  schedule: "weekdays 08:00"
+  fire: true
+output: inbox/{date}/inbox-triage.md

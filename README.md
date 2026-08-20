@@ -22,6 +22,11 @@ works.
 Plus an **orchestrator** in `CLAUDE.md`. You never open a specialist directly — you talk to
 the orchestrator, it delegates, it brings the result back. One front door, five workers.
 
+**Every worker arrives with a working job.** Five workflows ship pre-loaded in
+`workflows/` — morning market intel, a content draft queue, inbox triage, a gone-cold
+prospect chase, and a Friday review of the whole team. Onboarding tailors them to your
+business; from then on you edit them by asking, never by writing YAML.
+
 ---
 
 ## The rule that makes it work
@@ -69,6 +74,8 @@ verification pass. You can stop after any phase and pick it up on another machin
 | The orchestrator | `CLAUDE.md` |
 | The five job descriptions | `.claude/agents/` |
 | You, your business, your voice | `shared/` |
+| The pre-loaded workflows | `workflows/` |
+| The skills those workflows chain | `.claude/skills/` |
 | What each agent produced | `agents/<name>/output/` |
 | Every run, logged and kept | `runs/` |
 | The acceptance tests | `tests/` |

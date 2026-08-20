@@ -1,0 +1,10 @@
+# What shipped, what slipped, what went quiet — the whole team, one page, propose-only.
+# The orchestrator's review of the week. customer-service runs it because the
+# orchestrator lives in CLAUDE.md and is not a dispatchable agent.
+name: Weekly Review
+owner: customer-service
+steps: [collect-run-logs, review-pipeline, write-weekly-review]
+trigger:
+  schedule: "weekly fri 16:00"
+  fire: true
+output: inbox/{date}/weekly-review.md

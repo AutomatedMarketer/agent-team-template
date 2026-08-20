@@ -17,6 +17,23 @@ follow.
 
 ---
 
+## You arrive staffed
+
+Five workflows ship pre-loaded, one per worker, so every agent owns a working job on day
+one. Onboarding tailors them to your business; you edit them by asking.
+
+| File | Owner | When | What it does |
+|---|---|---|---|
+| `morning-intel.yml` | research | daily 06:30 | What moved in your market overnight |
+| `draft-queue.yml` | content | weekdays 07:00 | Your notes, turned into post drafts in your voice |
+| `inbox-triage.yml` | email | weekdays 08:00 | Inbox sorted, replies drafted, nothing sent |
+| `gone-cold.yml` | sales | weekly mon 09:00 | Who went quiet, chase message drafted |
+| `weekly-review.yml` | customer-service | weekly fri 16:00 | What shipped, what slipped, what's gone quiet — propose-only |
+
+Every one of them drafts and reports. None of them sends, publishes, or spends.
+
+---
+
 ## The shape
 
 ```yaml

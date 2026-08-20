@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { fromRoot } from './helpers/repo.mjs'
+import { fromRoot, listDir } from './helpers/repo.mjs'
 import {
   parseWorkflow,
   validateWorkflow,
@@ -146,11 +146,31 @@ test('the routine floor is an hour and github-actions is lower', () => {
   assert.ok(MIN_INTERVAL_MINUTES['github-actions'] < MIN_INTERVAL_MINUTES.routine)
 })
 
-// Whatever ships in workflows/ has to pass the same bar we hold students to.
-test('every shipped workflow parses and validates', async () => {
+// Whatever ships in workflows/ has to pass the same bar we hold students to — and it is
+// checked against what the repo actually contains, not a hardcoded list, so a renamed
+// skill or agent breaks the build instead of a student's first run.
+test('every shipped workflow parses and validates against real agents and skills', async () => {
+  const agents = (await listDir('.claude/agents')).flatMap((entry) =>
+    entry.endsWith('.md') ? [entry.replace(/\.md$/, '')] : []
+  )
+  const skills = (await listDir('.claude/skills')).filter((entry) => !entry.startsWith('.'))
   const workflows = await loadWorkflows()
   for (const workflow of workflows) {
-    const problems = validateWorkflow(workflow.data, { agents: AGENTS })
+    const problems = validateWorkflow(workflow.data, { agents, skills })
     assert.deepEqual(problems, [], `${workflow.path}: ${problems.join('; ')}`)
+  }
+})
+
+// The pre-loaded roster: every agent owns a working workflow on day one. An empty board
+// is the blank page this template exists to prevent.
+test('the five pre-loaded workflows ship, one per worker', async () => {
+  const workflows = await loadWorkflows()
+  const slugs = workflows.map((workflow) => workflow.slug)
+  for (const slug of ['morning-intel', 'draft-queue', 'inbox-triage', 'gone-cold', 'weekly-review']) {
+    assert.ok(slugs.includes(slug), `workflows/${slug}.yml is missing`)
+  }
+  const owners = new Set(workflows.map((workflow) => workflow.data.owner))
+  for (const agent of AGENTS) {
+    assert.ok(owners.has(agent), `no shipped workflow is owned by ${agent}`)
   }
 })

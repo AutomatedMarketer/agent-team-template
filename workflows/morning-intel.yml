@@ -1,0 +1,8 @@
+# What moved in your market overnight, on your screen before your first call.
+name: Morning Intel
+owner: research
+steps: [scan-market, write-intel-brief]
+trigger:
+  schedule: "daily 06:30"
+  fire: true
+output: inbox/{date}/morning-intel.md

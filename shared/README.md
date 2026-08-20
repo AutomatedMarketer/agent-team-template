@@ -6,7 +6,7 @@ agent that knows your business and an agent that writes generic filler.
 | File | What it holds |
 |---|---|
 | `about-me.md` | Who you are, how you work, what you sound like |
-| `business-brain.md` | Offers, pricing, audience, proof, competitors |
+| `business-brain.md` | Offers, pricing, audience, proof, competitors — and the verified claims register, the list of things agents may state as fact |
 | `writing-rules.md` | Voice rules the Content agent follows |
 | `standards/` | Our standards, not your content. Leave these alone. |
 

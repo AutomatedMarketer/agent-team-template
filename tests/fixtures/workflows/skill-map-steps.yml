@@ -1,6 +1,6 @@
 # The exact step form the design spec shows: each step as `- skill: name`.
 name: Monday Brief
-owner: donna
+owner: research
 steps:
   - skill: pull-calendar
   - skill: scan-inbox

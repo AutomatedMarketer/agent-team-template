@@ -1,0 +1,9 @@
+# Your rough notes and voice-note transcripts, turned into post drafts in your voice.
+# Drafts only — nothing is ever published by this workflow.
+name: Draft Queue
+owner: content
+steps: [collect-voice-notes, draft-content-queue]
+trigger:
+  schedule: "weekdays 07:00"
+  fire: true
+output: inbox/{date}/draft-queue.md
