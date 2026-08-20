@@ -27,7 +27,7 @@ is itself a finding.
 note? That is a normal first run: record today's state, report **"baseline established"**,
 and skip every comparison below.
 
-## 2. The four lanes
+## 2. The five lanes
 
 ### Lane 1 — models
 
@@ -75,7 +75,17 @@ that has moved.
 its state. If you cannot test a connector without spending money or sending something,
 do not test it — say it was not tested and why.
 
-### Lane 4 — what the team leverages
+### Lane 4 — the starter stack
+
+`stack.yml` declares the four capabilities every team gets, and
+`.agent-team/stack-check.md` records the last time they were verified. Report any that are
+**missing, disabled, or never verified**, and name what the team does worse without each one
+rather than just listing it as absent.
+
+A capability that quietly disappeared is worse than one that was never installed: the team
+carries on answering, just less well, and nobody is told.
+
+### Lane 5 — what the team leverages
 
 Anything in `runtimes.yml`, plus any GitHub repo a skill in this repo tells the team to use.
 Newest release or commit date against the last-checked marker, one line each.
