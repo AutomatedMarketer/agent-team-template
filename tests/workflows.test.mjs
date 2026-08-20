@@ -15,7 +15,7 @@ function fixture(name) {
   return readFile(fromRoot('tests/fixtures/workflows', name), 'utf8')
 }
 
-const AGENTS = ['content', 'customer-service', 'email', 'research', 'sales']
+const AGENTS = ['content', 'customer-service', 'email', 'research', 'sales', 'security']
 const SKILLS = ['pull-calendar', 'scan-inbox', 'check-pipeline', 'write-brief']
 
 test('parses the canonical workflow shape', async () => {
@@ -163,10 +163,17 @@ test('every shipped workflow parses and validates against real agents and skills
 
 // The pre-loaded roster: every agent owns a working workflow on day one. An empty board
 // is the blank page this template exists to prevent.
-test('the five pre-loaded workflows ship, one per worker', async () => {
+test('the six pre-loaded workflows ship, one per worker', async () => {
   const workflows = await loadWorkflows()
   const slugs = workflows.map((workflow) => workflow.slug)
-  for (const slug of ['morning-intel', 'draft-queue', 'inbox-triage', 'gone-cold', 'weekly-review']) {
+  for (const slug of [
+    'morning-intel',
+    'draft-queue',
+    'inbox-triage',
+    'gone-cold',
+    'weekly-review',
+    'security-review'
+  ]) {
     assert.ok(slugs.includes(slug), `workflows/${slug}.yml is missing`)
   }
   const owners = new Set(workflows.map((workflow) => workflow.data.owner))

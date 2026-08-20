@@ -14,7 +14,7 @@ const REQUIRED_BLOCKS = [
   'final-summary'
 ]
 
-const SLUGS = ['research', 'content', 'email', 'customer-service', 'sales']
+const SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security']
 
 test('CLAUDE.md carries every Opus 5 block, byte for byte', async () => {
   const source = await read('CLAUDE.md')
@@ -26,7 +26,7 @@ test('CLAUDE.md carries every Opus 5 block, byte for byte', async () => {
   }
 })
 
-test('CLAUDE.md names all five specialists', async () => {
+test('CLAUDE.md names all six specialists', async () => {
   const source = await read('CLAUDE.md')
   for (const slug of SLUGS) {
     assert.match(source, new RegExp(`\\b${slug}\\b`), `CLAUDE.md never mentions ${slug}`)

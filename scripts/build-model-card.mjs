@@ -11,7 +11,8 @@ const FREQUENCY = {
   content: 'Daily',
   email: 'A few times a day',
   'customer-service': 'Whenever a customer asks',
-  sales: 'Daily, or whenever you ask'
+  sales: 'Daily, or whenever you ask',
+  security: 'Weekly, or whenever you ask'
 }
 
 export async function buildModelCard() {

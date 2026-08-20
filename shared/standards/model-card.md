@@ -16,6 +16,7 @@ and you will spend your allowance by lunch. That is the whole reason this table 
 | `email` | `sonnet` | A few times a day | Sweeps your inbox, archives the noise, tells you what actually needs you, and leaves replies sitting in your drafts folder. |
 | `research` | `sonnet` | Daily, or whenever you ask | Looks something up on the web and comes back with a short report where every claim has a link you can click. |
 | `sales` | `opus` | Daily, or whenever you ask | Researches a prospect, writes the first message you would actually send them, and keeps a running list of who you have approached. |
+| `security` | `sonnet` | Weekly, or whenever you ask | Sweeps your repo for accidentally committed secrets and out-of-date tooling, then writes a numbered findings report you approve item by item. |
 
 These are aliases, not version numbers. `opus` and `sonnet` follow the current
 recommended model, so this table stays right when a new one ships.

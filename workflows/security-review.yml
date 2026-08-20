@@ -1,0 +1,8 @@
+# Anything leaking, anything stale — one report in your inbox before the week starts.
+name: Security Review
+owner: security
+steps: [scan-repo-security, watch-updates]
+trigger:
+  schedule: "weekly mon 07:00"
+  fire: true
+output: inbox/{date}/security-review.md

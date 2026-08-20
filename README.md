@@ -1,6 +1,6 @@
 # Your AI agent team
 
-Five workers who do their job while your laptop is shut, and leave the results where you will
+Six workers who do their job while your laptop is shut, and leave the results where you will
 find them.
 
 This is the repo you copy in **Level 2 of The Claude Code Workshop**. It arrives empty of your
@@ -18,13 +18,15 @@ works.
 | **Email** | Your inbox: triage, archive, and drafted replies |
 | **Customer service** | Your customers' questions, answered from your own FAQ |
 | **Sales** | Prospect research, outreach drafts, a logged pipeline |
+| **Security** | Repo sweeps for leaked secrets and stale tooling — findings you approve one by one |
 
 Plus an **orchestrator** in `CLAUDE.md`. You never open a specialist directly — you talk to
-the orchestrator, it delegates, it brings the result back. One front door, five workers.
+the orchestrator, it delegates, it brings the result back. One front door, six workers.
 
-**Every worker arrives with a working job.** Five workflows ship pre-loaded in
+**Every worker arrives with a working job.** Six workflows ship pre-loaded in
 `workflows/` — morning market intel, a content draft queue, inbox triage, a gone-cold
-prospect chase, and a Friday review of the whole team. Onboarding tailors them to your
+prospect chase, a Friday review of the whole team, and a Monday security sweep of the
+repo itself. Onboarding tailors them to your
 business; from then on you edit them by asking, never by writing YAML.
 
 ---
@@ -72,7 +74,7 @@ verification pass. You can stop after any phase and pick it up on another machin
 | What | Where |
 |---|---|
 | The orchestrator | `CLAUDE.md` |
-| The five job descriptions | `.claude/agents/` |
+| The six job descriptions | `.claude/agents/` |
 | You, your business, your voice | `shared/` |
 | The pre-loaded workflows | `workflows/` |
 | The skills those workflows chain | `.claude/skills/` |

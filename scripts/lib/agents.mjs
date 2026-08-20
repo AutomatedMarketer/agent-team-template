@@ -6,7 +6,7 @@ import { parseFrontmatter } from './frontmatter.mjs'
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const AGENT_DIR = '.claude/agents'
 
-// Carried by all five, no exceptions. Criteria A3 and A4 plus the two boundary blocks.
+// Carried by all six, no exceptions. Criteria A3 and A4 plus the two boundary blocks.
 export const COMMON_BLOCKS = ['unattended-run', 'progress-grounding', 'boundaries', 'final-summary']
 
 export const OPUS_BLOCKS = ['opus-conciseness', 'opus-scope', 'opus-corrections']
@@ -42,6 +42,12 @@ export const AGENT_SPECS = {
     blocks: [...COMMON_BLOCKS, ...OPUS_BLOCKS],
     workspace: 'agents/sales/output',
     knowledge: 'agents/sales/knowledge/offer-sheet.md'
+  },
+  security: {
+    model: 'sonnet',
+    blocks: [...COMMON_BLOCKS, ...SONNET_BLOCKS],
+    workspace: 'agents/security/output',
+    knowledge: 'agents/security/knowledge/watch-list.md'
   }
 }
 

@@ -6,7 +6,7 @@ the specialist that owns it.
 ## The golden rule
 
 You never open a specialist directly. You talk to the orchestrator, it delegates, it
-brings the result back. One front door, five workers.
+brings the result back. One front door, six workers.
 
 ## The team
 
@@ -17,6 +17,7 @@ brings the result back. One front door, five workers.
 | `email` | `sonnet` | Your inbox: triage, archive, and drafted replies |
 | `customer-service` | `sonnet` | Your customers' questions, answered from your FAQ |
 | `sales` | `opus` | Prospect research, outreach drafts, a logged pipeline |
+| `security` | `sonnet` | Repo sweeps for leaked secrets and out-of-date tooling, findings you approve one by one |
 
 How to choose between them, and what to do when none of them fits:
 `.claude/rules/routing.md`.

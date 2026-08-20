@@ -19,6 +19,7 @@ If none of the three fits and the job takes a handful of tool calls, do it yours
 | "What is in my inbox?" · "Reply to these" · "Clear out the noise" | `email` |
 | "A customer asked X" · "Answer this support ticket" | `customer-service` |
 | "Research this prospect" · "Write the outreach" · "Where is this deal?" | `sales` |
+| "Is anything secret sitting in our repo?" · "Are our tools out of date?" · "Run a security check" | `security` |
 
 ## Multi-specialist patterns
 

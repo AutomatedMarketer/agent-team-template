@@ -4,7 +4,7 @@ import { loadAgents, AGENT_SPECS, COMMON_BLOCKS } from '../scripts/lib/agents.mj
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
 import { auditText } from '../scripts/prompt-audit.mjs'
 
-const IMPLEMENTED = ['content', 'customer-service', 'email', 'research', 'sales']
+const IMPLEMENTED = ['content', 'customer-service', 'email', 'research', 'sales', 'security']
 
 test('every implemented agent has a definition file', async () => {
   const found = (await loadAgents()).map((agent) => agent.slug).sort()

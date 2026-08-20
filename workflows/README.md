@@ -19,7 +19,7 @@ follow.
 
 ## You arrive staffed
 
-Five workflows ship pre-loaded, one per worker, so every agent owns a working job on day
+Six workflows ship pre-loaded, one per worker, so every agent owns a working job on day
 one. Onboarding tailors them to your business; you edit them by asking.
 
 | File | Owner | When | What it does |
@@ -29,6 +29,7 @@ one. Onboarding tailors them to your business; you edit them by asking.
 | `inbox-triage.yml` | email | weekdays 08:00 | Inbox sorted, replies drafted, nothing sent |
 | `gone-cold.yml` | sales | weekly mon 09:00 | Who went quiet, chase message drafted |
 | `weekly-review.yml` | customer-service | weekly fri 16:00 | What shipped, what slipped, what's gone quiet — propose-only |
+| `security-review.yml` | security | weekly mon 07:00 | Anything leaking, anything stale — one report before the week starts |
 
 Every one of them drafts and reports. None of them sends, publishes, or spends.
 
@@ -49,7 +50,7 @@ output: inbox/{date}/monday-brief.md
 | Field | Required | What it means |
 |---|---|---|
 | `name` | yes | What it is called on the dashboard |
-| `owner` | yes | Which agent runs it. Must be one of the five in `.claude/agents/` |
+| `owner` | yes | Which agent runs it. Must be one of the six in `.claude/agents/` |
 | `steps` | yes | The skills it runs, in order. Inline `[a, b]` or a dashed list — both work |
 | `trigger` | yes | At least one of `schedule`, `fire`, `webhook` |
 | `output` | yes | Where the result lands. Must stay inside the repo |

@@ -14,7 +14,7 @@ test('the committed card is exactly what the generator produces', async () => {
   )
 })
 
-test('the card lists all five agents plus the orchestrator', async () => {
+test('the card lists all six agents plus the orchestrator', async () => {
   const card = await read('shared/standards/model-card.md')
   for (const agent of await loadAgents()) {
     assert.match(card, new RegExp(`\`${agent.slug}\``), `the card is missing ${agent.slug}`)
