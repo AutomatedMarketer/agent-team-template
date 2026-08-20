@@ -31,6 +31,14 @@ export function validateRunLog(entry, { filename } = {}) {
   expect(entry.schema === SCHEMA_ID, `schema must be "${SCHEMA_ID}", got "${entry.schema}"`)
   expect(RUN_ID.test(entry.run_id ?? ''), 'run_id must look like 2026-08-07T0600Z-research')
   expect(AGENT_SLUGS.includes(entry.agent), `agent must be one of ${AGENT_SLUGS.join(', ')}`)
+  // Optional, but the dashboard's Workflows board matches runs to workflows through it —
+  // a workflow run without this field renders as "never run" forever.
+  if (entry.workflow !== undefined) {
+    expect(
+      typeof entry.workflow === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.workflow),
+      'workflow, when present, must be the workflow file\'s kebab-case slug'
+    )
+  }
   expect(
     MODELS.includes(entry.model),
     'model must be the alias "opus" or "sonnet" - a pinned id such as claude-opus-5 rots'

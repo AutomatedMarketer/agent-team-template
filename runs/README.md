@@ -34,6 +34,7 @@ is no `:` anywhere.
 | `schema` | string | Always `run-log/v1`. Bump it and the cockpit knows to read differently. |
 | `run_id` | string | `YYYY-MM-DDTHHMMZ-<agent>`. Equals the filename without `.json`. |
 | `agent` | string | One of `research`, `content`, `email`, `customer-service`, `sales`. |
+| `workflow` | string? | Only when the run executed a workflow: its file's kebab-case slug. The dashboard matches runs to workflows through this field. |
 | `model` | string | `opus` or `sonnet`. An alias, never a pinned id. |
 | `trigger` | string | `schedule`, `webhook`, or `manual`. |
 | `started_at` | string | ISO instant ending in `Z`. |

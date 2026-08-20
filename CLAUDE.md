@@ -32,7 +32,9 @@ work anyway and name what was missing in your summary.
 
 ## Writing work back
 
-Deliverables go in `agents/<slug>/output/`. Every run also writes one run-log file into
+Deliverables go in `agents/<slug>/output/` — except workflow runs, which write to the
+workflow file's own `output` path (`inbox/{date}/...`); the workflow file wins when both
+could apply. Every run also writes one run-log file into
 `runs/YYYY-MM/`. The format and the exact steps are in `.claude/skills/run-log/SKILL.md`.
 Both the deliverable and the run log go in the same commit.
 

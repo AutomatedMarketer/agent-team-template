@@ -23,13 +23,21 @@ echo "$CLAUDE_CODE_REMOTE"              # "true" only in a routine
 ## 2. Write the file
 
 Path: `runs/<YYYY-MM>/<run_id>.json`, where `run_id` is `<YYYY-MM-DD>T<HHMM>Z-<agent>`.
-No colon anywhere in the name — these files are read on Windows.
+If the run executed a workflow, append its slug — `<...>Z-<agent>-<workflow>` — so two
+jobs owned by one agent in the same minute never collide. No colon anywhere in the name —
+these files are read on Windows.
+
+If this run executed a workflow (a file in `workflows/`), record which one in a
+`workflow` field — its slug, exactly as the filename. The dashboard's Workflows board
+matches runs to workflows through this field; without it your workflow shows "never run"
+forever, no matter how often it runs. A run that was not a workflow omits the field.
 
 ```json
 {
   "schema": "run-log/v1",
-  "run_id": "2026-08-07T0600Z-research",
+  "run_id": "2026-08-07T0600Z-research-morning-intel",
   "agent": "research",
+  "workflow": "morning-intel",
   "model": "sonnet",
   "trigger": "schedule",
   "started_at": "2026-08-07T06:00:12Z",
