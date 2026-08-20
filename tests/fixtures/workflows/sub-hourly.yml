@@ -1,0 +1,7 @@
+name: Too Frequent
+owner: research
+runner: routine
+steps: [scan-inbox]
+trigger:
+  schedule: "every 10 minutes"
+output: inbox/{date}/x.md

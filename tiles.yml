@@ -1,0 +1,9 @@
+# Your dashboard. Filled in during /onboard - you should not need to edit this by hand.
+#
+# hero    : the one number at the top of your home screen
+# chosen  : up to four tiles from tiles/catalogue.json
+#
+# Four more - Today, Workflows, Agents, Overnight - are always there and are not listed here.
+
+hero: <!-- fill: hero-metric -->
+chosen: []

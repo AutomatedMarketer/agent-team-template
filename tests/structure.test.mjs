@@ -18,7 +18,16 @@ const REQUIRED_PATHS = [
   'agents',
   'runs',
   'runs/README.md',
-  'scripts/lib'
+  'runs/heartbeat',
+  'scripts/lib',
+  'workflows',
+  'workflows/README.md',
+  'tiles',
+  'tiles/catalogue.json',
+  'tiles.yml',
+  'runtimes.yml',
+  'inbox',
+  '.claude/skills/sync/SKILL.md'
 ]
 
 test('every required path exists', async () => {

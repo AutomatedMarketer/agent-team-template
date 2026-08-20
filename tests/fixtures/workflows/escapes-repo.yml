@@ -1,0 +1,6 @@
+name: Escapes
+owner: research
+steps: [scan-inbox]
+trigger:
+  fire: true
+output: ../outside/x.md

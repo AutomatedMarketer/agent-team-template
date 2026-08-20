@@ -1,0 +1,7 @@
+name: Monday Brief
+owner: research
+steps: [pull-calendar, scan-inbox, check-pipeline, write-brief]
+trigger:
+  schedule: "weekly mon 06:00"
+  fire: true
+output: inbox/{date}/monday-brief.md

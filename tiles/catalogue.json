@@ -1,0 +1,122 @@
+{
+  "$comment": "The bounded set of tiles a dashboard can show. Fixed tiles are the product and are always present. A student picks at most maxChosen of the rest during onboarding, because a board you cannot take in at a glance on a phone has stopped being a dashboard.",
+  "maxChosen": 4,
+  "fixed": [
+    {
+      "id": "today",
+      "name": "Today",
+      "shows": "Your schedule and what is due, pulled live",
+      "source": "connection"
+    },
+    {
+      "id": "workflows",
+      "name": "Workflows",
+      "shows": "Every named job: last run, next run, and a button to run it now",
+      "source": "repo"
+    },
+    {
+      "id": "agents",
+      "name": "Agents",
+      "shows": "Who is working, who needs attention, and who has gone quiet",
+      "source": "repo"
+    },
+    {
+      "id": "overnight",
+      "name": "Overnight",
+      "shows": "What ran while you were asleep, newest first",
+      "source": "repo"
+    }
+  ],
+  "choosable": [
+    {
+      "id": "revenue",
+      "name": "Revenue",
+      "question": "Where does the money show up?",
+      "options": ["stripe", "quickbooks", "gohighlevel", "paypal"],
+      "wiring": "api-doc"
+    },
+    {
+      "id": "inbox",
+      "name": "Inbox",
+      "question": "Where do customers reach you?",
+      "options": ["google-workspace", "microsoft-365"],
+      "wiring": "cli",
+      "pairsWith": "calendar"
+    },
+    {
+      "id": "calendar",
+      "name": "Calendar",
+      "question": "Where do customers reach you?",
+      "options": ["google-workspace", "microsoft-365"],
+      "wiring": "cli",
+      "pairsWith": "inbox"
+    },
+    {
+      "id": "pipeline",
+      "name": "Pipeline",
+      "question": "Where do your leads live?",
+      "options": ["gohighlevel", "hubspot", "pipedrive", "spreadsheet"],
+      "wiring": "api-doc"
+    },
+    {
+      "id": "tasks",
+      "name": "Tasks",
+      "question": "Where does work get tracked?",
+      "options": ["clickup", "notion", "asana", "trello"],
+      "wiring": "api-doc"
+    },
+    {
+      "id": "content",
+      "name": "Content",
+      "question": "Do you publish anywhere?",
+      "options": ["youtube", "linkedin", "instagram", "wordpress"],
+      "wiring": "api-doc"
+    },
+    {
+      "id": "meetings",
+      "name": "Meetings",
+      "question": "Are your calls recorded?",
+      "options": ["fathom", "fireflies", "otter"],
+      "wiring": "connector"
+    },
+    {
+      "id": "support",
+      "name": "Support",
+      "question": "Do you handle tickets?",
+      "options": ["intercom", "helpscout", "zendesk", "email"],
+      "wiring": "api-doc"
+    },
+    {
+      "id": "usage",
+      "name": "Usage & limits",
+      "question": "Always offered",
+      "options": [],
+      "wiring": "none"
+    },
+    {
+      "id": "documents",
+      "name": "Documents",
+      "question": "Always offered",
+      "options": [],
+      "wiring": "none"
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "question": "Always offered",
+      "options": [],
+      "wiring": "none"
+    },
+    {
+      "id": "connections",
+      "name": "Connections",
+      "question": "Always offered",
+      "options": [],
+      "wiring": "none"
+    }
+  ],
+  "wiringOrder": {
+    "$comment": "Preference order when connecting a tile. A CLI is one tool covering many actions. Cached API docs are cheap to read forever after. An MCP server loads every endpoint into context on every single session, which is the most expensive habit in this whole system - reach for it last.",
+    "preferred": ["cli", "api-doc", "connector", "mcp"]
+  }
+}

@@ -1,0 +1,8 @@
+name: Dashed Steps
+owner: content
+steps:
+  - draft-post
+  - make-images
+trigger:
+  fire: true
+output: inbox/{date}/post.md

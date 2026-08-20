@@ -1,0 +1,19 @@
+# Anything with a URL that you want one tap away from your dashboard.
+#
+# Each entry becomes a tile in the Connections rail. `heartbeat` is a file one of your own
+# runs writes to; if it goes stale, the rail shows the runtime as quiet rather than pretending
+# it is fine.
+#
+# Add entries by asking. Examples, commented out until you have them:
+
+# - name: Hermes
+#   kind: agent-runtime
+#   url: http://hermes.your-tailnet.ts.net:8080
+#   heartbeat: runs/heartbeat/hermes.json
+#
+# - name: OpenClaw
+#   kind: gateway
+#   url: http://openclaw.your-tailnet.ts.net:3000
+#   heartbeat: runs/heartbeat/openclaw.json
+
+runtimes: []

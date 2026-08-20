@@ -1,0 +1,6 @@
+name: ""
+owner: research
+steps: [scan-inbox, scan-inbox]
+trigger:
+  fire: true
+output: inbox/{date}/x.md
