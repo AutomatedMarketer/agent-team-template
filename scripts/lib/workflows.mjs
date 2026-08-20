@@ -29,6 +29,16 @@ const SCHEDULE_FORMS = [
 
 export const parseWorkflow = parseSimpleYaml
 
+// Steps may be written `- pull-calendar` or `- skill: pull-calendar` — both appear in the
+// design spec and this README. Normalise to plain strings before validating, and keep the
+// semantics identical to agent-cockpit's normaliseSteps so both sides accept the same file.
+export function normaliseSteps(steps) {
+  if (!Array.isArray(steps)) return steps
+  return steps.map((step) =>
+    step && typeof step === 'object' && typeof step.skill === 'string' ? step.skill : step
+  )
+}
+
 function scheduleMinutes(schedule) {
   const every = /^every (\d+) (minutes|hours)$/.exec(schedule)
   if (every) return Number(every[1]) * (every[2] === 'hours' ? 60 : 1)
@@ -58,7 +68,7 @@ export function validateWorkflow(workflow, known = {}) {
     problems.push(`owner "${workflow.owner}" is not an agent in this repo`)
   }
 
-  const steps = workflow?.steps
+  const steps = normaliseSteps(workflow?.steps)
   if (!Array.isArray(steps) || steps.length === 0) {
     problems.push('steps is required and must list at least one skill')
   } else {

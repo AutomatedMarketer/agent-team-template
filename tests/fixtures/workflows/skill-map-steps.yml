@@ -1,0 +1,11 @@
+# The exact step form the design spec shows: each step as `- skill: name`.
+name: Monday Brief
+owner: donna
+steps:
+  - skill: pull-calendar
+  - skill: scan-inbox
+  - skill: write-brief
+trigger:
+  schedule: "weekly mon 06:00"
+  fire: true
+output: inbox/{date}/monday-brief.md

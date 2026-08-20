@@ -5,6 +5,7 @@ import { fromRoot } from './helpers/repo.mjs'
 import {
   parseWorkflow,
   validateWorkflow,
+  normaliseSteps,
   isValidSchedule,
   loadWorkflows,
   MIN_INTERVAL_MINUTES
@@ -31,6 +32,12 @@ test('a dashed list parses the same as an inline one', async () => {
   const data = parseWorkflow(await fixture('dashed-steps.yml'))
   assert.deepEqual(data.steps, ['draft-post', 'make-images'])
   assert.equal(data.trigger.fire, true)
+})
+
+test('the spec form `- skill: name` validates the same as plain strings', async () => {
+  const data = parseWorkflow(await fixture('skill-map-steps.yml'))
+  assert.deepEqual(validateWorkflow(data), [])
+  assert.deepEqual(normaliseSteps(data.steps), ['pull-calendar', 'scan-inbox', 'write-brief'])
 })
 
 test('the canonical workflow validates clean against real agents and skills', async () => {
