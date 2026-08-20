@@ -23,6 +23,7 @@ front door, still six workers.
 | `customer-service` | `sonnet` | Your customers' questions, answered from your FAQ |
 | `sales` | `opus` | Prospect research, outreach drafts, a logged pipeline |
 | `security` | `sonnet` | Repo sweeps for leaked secrets and out-of-date tooling, findings you approve one by one |
+| `editor` | `opus` | Grades the team's output against a written rubric before it reaches you, and reports weekly what share you actually used |
 
 How to choose between them, and what to do when none of them fits:
 `.claude/rules/routing.md`.
@@ -42,6 +43,17 @@ To-do column. The card format and lifecycle are in `tasks/README.md`.
 
 If those files still contain `<!-- fill: ... -->` markers, the brain is incomplete. Do the
 work anyway and name what was missing in your summary.
+
+`stack.yml` names the four capabilities every team gets: current-events research
+(`last30days`), official documentation (`context7`), memory between sessions (`claude-mem`),
+and cost awareness (`token-saver`). **Look things up rather than answering from memory** -
+anything about a tool, an API, a price or a version is a lookup, not a recollection. If a
+capability is missing, say so and offer `/install-stack`.
+
+`connections/register.yml` says what this team can actually reach. If a job needs something
+that is not registered there, say so and offer `/connect` — one tool, wired and proved
+against real data in the same session. Never assume a tool is reachable because it is
+well-known.
 
 ## Writing work back
 

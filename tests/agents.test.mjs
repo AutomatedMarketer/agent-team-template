@@ -7,6 +7,7 @@ import { auditText } from '../scripts/prompt-audit.mjs'
 const IMPLEMENTED = [
   'content',
   'customer-service',
+  'editor',
   'email',
   'orchestrator',
   'research',

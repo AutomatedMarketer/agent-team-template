@@ -52,6 +52,26 @@ forever, no matter how often it runs. A run that was not a workflow omits the fi
 }
 ```
 
+### If the run was graded
+
+A run whose output went through `review-draft` adds one more block. The weekly quality
+review counts acceptance from these, so a grade you do not record is a grade that never
+happened.
+
+```json
+"quality": {
+  "rubric": "content",
+  "score": 11,
+  "total": 12,
+  "verdict": "passed",
+  "retried": false
+}
+```
+
+`verdict` is `passed` or `flagged` - the grader's call. It is not the owner's call; that
+arrives later as a verdict in `quality/verdicts/`, and the two disagreeing is the most
+useful signal the review produces.
+
 Field meanings are in `runs/README.md`.
 
 ## 3. Choose an honest status

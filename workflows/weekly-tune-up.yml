@@ -1,0 +1,11 @@
+# The self-improvement loop. Every Sunday: has anything we run on stopped being true,
+# what went wrong more than once this week, and what exactly should change because of it.
+# Applies what it learned to your written rules. Raises anything that would rewire the
+# team as a card for you — it never changes models, connectors or workflows on its own.
+name: Weekly Tune-up
+owner: orchestrator
+steps: [check-whats-changed, learn-from-the-week, write-tune-up]
+trigger:
+  schedule: "weekly sun 16:00"
+  fire: true
+output: inbox/{date}/tune-up.md

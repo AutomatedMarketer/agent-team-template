@@ -1,9 +1,16 @@
-# Your rough notes and voice-note transcripts, turned into post drafts in your voice.
+# Your rough notes and voice-note transcripts, turned into post drafts in your voice,
+# graded against the content rubric before they reach you.
 # Drafts only — nothing is ever published by this workflow.
 name: Draft Queue
 owner: content
-steps: [collect-voice-notes, draft-content-queue]
+steps: [collect-voice-notes, draft-content-queue, review-draft]
 trigger:
   schedule: "weekdays 07:00"
   fire: true
 output: inbox/{date}/draft-queue.md
+# What "good" means for this job. The grader marks against it, and `never` outranks the score.
+# Edit this by asking — these three lines are where your taste lives.
+done:
+  looks_like: "A post I could publish unedited, in my voice, one idea, under 200 words."
+  must_have: [a hook that works without the image, one concrete example, every claim on the verified register]
+  never: [hashtag stacks, filler openings such as "in today's fast-paced world", a claim with no source]

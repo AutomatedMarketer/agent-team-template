@@ -1,0 +1,24 @@
+# Everything your team can reach, and the proof it can reach it.
+#
+# You never edit this by hand - `/connect` writes it after a connection has answered with
+# your own data. A line in here without a `verified` date and a `proof` is a claim, not a
+# connection, and the dashboard shows it as unproven.
+#
+# kind:    connector | mcp | cli | script | browser
+# account: which account this is. Two of the same tool without names is how a job runs
+#          against the wrong one.
+# used_by: the workflows that depend on it. This is how the weekly tune-up spots a
+#          connection nothing uses, and a workflow that needs something you cannot reach.
+
+connections: []
+
+# The universal minimum, once /connect has walked you through them:
+#
+# - name: Gmail
+#   slug: gmail
+#   kind: connector
+#   account: you@example.com
+#   scopes: [read, draft]
+#   verified: 2026-08-20
+#   proof: "Read the subject lines of the three most recent messages"
+#   used_by: [inbox-triage]

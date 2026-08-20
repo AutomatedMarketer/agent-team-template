@@ -12,6 +12,7 @@ and you will spend your allowance by lunch. That is the whole reason this table 
 |---|---|---|---|
 | `content` | `opus` | Daily | Writes posts, captions, and newsletters that sound like you, and leaves them as drafts for you to read before anything goes out. |
 | `customer-service` | `sonnet` | Whenever a customer asks | Answers a customer's question using the answer sheet you wrote, and says "I don't know" instead of guessing when the answer is not there. |
+| `editor` | `opus` | On every graded run, plus a weekly review | Grades what the team produces against a written rubric before it reaches you, sends one piece back for a rewrite when it falls short, and reports each week what share of the work you actually used. |
 | `email` | `sonnet` | A few times a day | Sweeps your inbox, archives the noise, tells you what actually needs you, and leaves replies sitting in your drafts folder. |
 | `orchestrator` | `opus` | Daily task sweep, and whenever you open the repo | Works the owner's to-do column on a schedule, handing each task card to the specialist that owns it and reporting what got done. |
 | `research` | `sonnet` | Daily, or whenever you ask | Looks something up on the web and comes back with a short report where every claim has a link you can click. |

@@ -44,6 +44,7 @@ is no `:` anywhere.
 | `artifacts` | string[] | Repo-relative paths the run produced. |
 | `evidence` | string[] | Things a tool actually returned. Not claims. |
 | `next_action` | string or null | What a person has to do next, if anything. |
+| `quality` | object? | Only on a graded run. `{ rubric, score, total, verdict, retried }` - `verdict` is `passed` or `flagged`. The weekly quality review counts acceptance from these. |
 | `session_id` | string or null | `CLAUDE_CODE_REMOTE_SESSION_ID`. Null only on a local manual run. |
 | `session_url` | string or null | `https://claude.ai/code/session_<session_id>`. Null only on a local manual run. |
 
