@@ -27,6 +27,8 @@ const REQUIRED_PATHS = [
   'tiles.yml',
   'runtimes.yml',
   'inbox',
+  'tasks',
+  'tasks/README.md',
   '.claude/skills/sync/SKILL.md'
 ]
 

@@ -1,0 +1,14 @@
+# The owner's to-do column, worked off. Cards in tasks/ get routed to the right
+# specialist, three per run, drafts only — nothing sent, published, or spent.
+#
+# Owner: the orchestrator. Routing a mixed pile of asks to specialists is delegation —
+# the front door's job, not any one specialist's domain. The orchestrator agent
+# (.claude/agents/orchestrator.md) is that same front-door role, registered as an agent
+# so a scheduled run can be owned by it.
+name: Task Sweep
+owner: orchestrator
+steps: [work-the-tasks]
+trigger:
+  schedule: "daily 09:00"
+  fire: true
+output: inbox/{date}/task-sweep.md

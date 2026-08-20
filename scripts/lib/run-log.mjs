@@ -1,5 +1,5 @@
 export const SCHEMA_ID = 'run-log/v1'
-export const AGENT_SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security']
+export const AGENT_SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security', 'orchestrator']
 export const MODELS = ['opus', 'sonnet']
 export const TRIGGERS = ['schedule', 'webhook', 'manual']
 export const STATUSES = ['ok', 'partial', 'blocked', 'failed']

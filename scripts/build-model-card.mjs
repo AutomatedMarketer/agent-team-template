@@ -7,6 +7,7 @@ const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 const CARD_PATH = 'shared/standards/model-card.md'
 
 const FREQUENCY = {
+  orchestrator: 'Daily task sweep, and whenever you open the repo',
   research: 'Daily, or whenever you ask',
   content: 'Daily',
   email: 'A few times a day',
@@ -34,7 +35,6 @@ export async function buildModelCard() {
     '',
     '| Agent | Model | How often it runs | What it does |',
     '|---|---|---|---|',
-    '| orchestrator | `opus` | Whenever you open the repo | Decides who does the work and brings the answer back |',
     ...rows,
     '',
     'These are aliases, not version numbers. `opus` and `sonnet` follow the current',

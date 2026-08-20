@@ -48,6 +48,14 @@ export const AGENT_SPECS = {
     blocks: [...COMMON_BLOCKS, ...SONNET_BLOCKS],
     workspace: 'agents/security/output',
     knowledge: 'agents/security/knowledge/watch-list.md'
+  },
+  // Not a seventh specialist: the CLAUDE.md front door itself, registered as an agent so
+  // scheduled runs (the task sweep) can be owned by the role that actually routes work.
+  orchestrator: {
+    model: 'opus',
+    blocks: [...COMMON_BLOCKS, ...OPUS_BLOCKS, 'opus-subagent-cap'],
+    workspace: 'agents/orchestrator/output',
+    knowledge: null
   }
 }
 
