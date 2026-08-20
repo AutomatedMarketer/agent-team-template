@@ -7,6 +7,14 @@ specialist that did it.
 
 `output/` holds only cross-team notes that belong to no specialist.
 
+## Its two jobs
+
+It also owns **Weekly Tune-up** (`workflows/weekly-tune-up.yml`) — every Sunday it checks
+whether anything the team runs on has stopped being true, reads back the week's failures and
+verdicts, and turns whatever went wrong **twice** into one exact edit. It applies what it
+learned to your written rules; anything that would rewire the team — a model, a connector, a
+workflow — arrives as a card for you.
+
 ## First workflow
 
 This agent arrives owning **Task Sweep** (`workflows/task-sweep.yml`) — every morning,

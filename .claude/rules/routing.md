@@ -21,6 +21,7 @@ If none of the three fits and the job takes a handful of tool calls, do it yours
 | "Research this prospect" · "Write the outreach" · "Where is this deal?" | `sales` |
 | "Is anything secret sitting in our repo?" · "Are our tools out of date?" · "Run a security check" | `security` |
 | "Is this good enough to send?" · "Mark this against the rubric" · "How much of last week did I actually use?" | `editor` |
+| "Is anything out of date?" · "Are my connectors still working?" · "What did we get wrong this week?" | `orchestrator` |
 
 ## Multi-specialist patterns
 

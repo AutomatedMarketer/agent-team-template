@@ -33,6 +33,7 @@ you edit them by asking.
 | `security-review.yml` | security | weekly mon 07:00 | Anything leaking, anything stale — one report before the week starts |
 | `task-sweep.yml` | orchestrator | daily 09:00 | Your `tasks/` cards worked off, three per run, each routed to the right specialist |
 | `quality-review.yml` | editor | weekly fri 17:00 | What share of the week's work you used unedited, and what should change |
+| `weekly-tune-up.yml` | orchestrator | weekly sun 16:00 | Has anything we run on stopped being true, what went wrong twice, and the exact edit that fixes it |
 
 Every one of them drafts and reports. None of them sends, publishes, or spends.
 
