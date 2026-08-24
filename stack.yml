@@ -35,3 +35,9 @@ stack:
     gives: An honest account of what a session costs, and which model belongs on which job
     why: Ships in this repo, so no install. Pairs with shared/standards/model-card.md
     verify: "Ask what this session has cost and why"
+
+  - name: surplus-burn
+    skill: .claude/skills/surplus-burn/SKILL.md
+    gives: Measures how much of the subscription week is still unspent and turns the surplus into reviews, fixes and hardening on existing work
+    why: Unspent capacity on the strongest model expires at every weekly reset. This spends it on quality instead of losing it
+    verify: "Ask how much quota is left this week and when it resets"

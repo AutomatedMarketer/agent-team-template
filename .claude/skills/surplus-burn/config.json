@@ -1,0 +1,5 @@
+{
+  "resetWeekday": 4,
+  "resetHour": 18,
+  "_comment": "The day and local hour your Claude subscription weekly limit resets. Check the /usage screen at claude.ai/settings/usage and correct these. ISO weekday: 1=Monday ... 7=Sunday."
+}
