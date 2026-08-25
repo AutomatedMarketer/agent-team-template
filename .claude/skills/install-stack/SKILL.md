@@ -1,11 +1,11 @@
 ---
 name: install-stack
-description: Install and verify the starter stack every team gets - current-events research, official documentation lookup, memory that survives a session, and cost awareness. Idempotent, so it is safe to run on a new machine or any time something looks missing. Use at the start of an install, and whenever a tool the team relies on has gone missing.
+description: Install and verify the starter stack every team gets - current-events research, official documentation lookup, memory that survives a session, cost awareness, and the surplus burn calibrated to this owner's own weekly reset. Idempotent, so it is safe to run on a new machine or any time something looks missing. Use at the start of an install, and whenever a tool the team relies on has gone missing.
 ---
 
 # Installing the starter stack
 
-Four capabilities no agent team should start without. They are not optional extras, they are
+Five capabilities no agent team should start without. They are not optional extras, they are
 the floor, and they go in before any workflow is built — a team that starts without them
 spends its first month confidently wrong about things it could have looked up.
 
@@ -15,16 +15,17 @@ spends its first month confidently wrong about things it could have looked up.
 | **Official docs** (`context7`) | Connection and API details change monthly; recall is not good enough |
 | **Working memory** (`claude-mem`) | Sessions close and everything learned in them is lost |
 | **Cost awareness** (`token-saver`) | Nobody can manage a bill they cannot see, or pick a model without knowing the trade |
+| **Surplus burn** (`surplus-burn`) | Unspent subscription capacity expires every week; this spends it on quality instead. **Needs calibrating to this owner** — see step 4b |
 
-The fifth capability — the loop that makes the team better every week — is already in this
+The sixth capability — the loop that makes the team better every week — is already in this
 repo as `workflows/weekly-tune-up.yml`. It is not installed, it is inherited.
 
 ## 1. Read the declared stack
 
 `stack.yml` is the list. Never install from memory of this file — read it, because it moves.
 
-Entries with a `plugin` field are installed. The entry with a `skill` field already ships in
-this repo and needs nothing but a mention.
+Entries with a `plugin` field are installed. Entries with a `skill` field already ship in
+this repo and need nothing but a mention — except `surplus-burn`, which needs calibrating.
 
 ## 2. See what is already there
 
@@ -65,10 +66,41 @@ answer:
 | `context7` | Resolve a library they actually use and return its current docs |
 | `claude-mem` | Say what it will now remember, and what it will not |
 | `token-saver` | What this session has cost so far, and why |
+| `surplus-burn` | How much of this week is left and when it resets — from the calibrated config, not a guess |
 
 Report each as working or not working. **Never report a stack as installed when a capability
 has not answered** — the failure would otherwise surface weeks later as an agent quietly
 guessing at documentation.
+
+## 4b. Calibrate the surplus burn to this owner
+
+Every Claude subscription resets its weekly limit at a different moment. The skill ships
+**uncalibrated** (`resetWeekday: null` in `.claude/skills/surplus-burn/config.json`) and
+refuses to guess, so this step is not optional.
+
+1. Probe the real limits:
+
+   ```bash
+   node .claude/skills/surplus-burn/usage-probe.mjs
+   ```
+
+   The output includes `resets_at` timestamps. Take the **weekly** one, convert it to the
+   owner's local time, and read off the weekday (ISO, 1 = Monday) and hour.
+
+2. If the probe says `no local credentials file` (keychain sign-in) or the endpoint errors,
+   ask the owner to open `claude.ai/settings/usage` and read the weekly reset line out loud.
+   That page is the source of truth; the probe is only the shortcut.
+
+3. Write both values into `config.json` and show the owner:
+
+   > "Your week resets on Thursday at 6 PM your time. I've written that down — the surplus
+   > burn will measure against it. If you change plans, this is the one line to update."
+
+4. Prove it: run `node .claude/skills/surplus-burn/surplus-check.mjs` and confirm it returns
+   a `nextReset` that matches what the owner just saw. A mismatch means the weekday or the
+   hour is wrong — fix it now, not on the first burn day.
+
+Never copy another owner's reset into this file. The number is theirs.
 
 ## 5. Say what changed
 
@@ -97,3 +129,4 @@ team will do worse without it, and offer the fallback:
 | `context7` | Fetch the vendor's own docs directly. Fine, but you have to find the right page each time |
 | `claude-mem` | The repo is still the long-term memory. Only the between-session working memory is lost |
 | `token-saver` | Ships in this repo — if this one is missing, something is wrong with the repo, not the stack |
+| `surplus-burn` probe | The `/usage` page in the browser. The owner reads the reset line; you write it down. Slower, exactly as accurate |

@@ -1,5 +1,5 @@
 {
-  "resetWeekday": 4,
-  "resetHour": 18,
-  "_comment": "The day and local hour your Claude subscription weekly limit resets. Check the /usage screen at claude.ai/settings/usage and correct these. ISO weekday: 1=Monday ... 7=Sunday."
+  "resetWeekday": null,
+  "resetHour": null,
+  "_comment": "UNCALIBRATED. Every subscription resets its weekly limit at a different moment. install-stack step 4b reads the real reset from usage-probe.mjs (or from the owner reading claude.ai/settings/usage aloud) and writes it here. ISO weekday: 1=Monday ... 7=Sunday; resetHour in the owner's local time."
 }

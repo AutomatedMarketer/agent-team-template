@@ -28,8 +28,9 @@ node .claude/skills/surplus-burn/surplus-check.mjs
 ```
 
 Figures there are API-cost *equivalents* (the subscription pays $0 per token). Say so
-whenever you quote them, and label that verdict "estimated". `config.json` holds the reset
-day and hour - confirm them against the `/usage` screen before trusting the fallback.
+whenever you quote them, and label that verdict "estimated". `config.json` holds this owner's
+reset day and hour, written by the install-stack skill at onboarding. If it still says
+`null`, stop and calibrate first - a burn measured against someone else's reset is wrong.
 
 **Tier** (remaining = 100 - percent used, hoursLeft from the reset timestamp):
 

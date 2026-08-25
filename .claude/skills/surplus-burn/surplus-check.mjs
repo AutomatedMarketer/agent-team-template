@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(readFileSync(join(here, 'config.json'), 'utf8'));
 if (!Number.isInteger(cfg.resetWeekday) || cfg.resetWeekday < 1 || cfg.resetWeekday > 7) {
-  console.log(JSON.stringify({ tier: 'NONE', error: 'invalid resetWeekday in config.json (need integer 1-7)' }));
+  console.log(JSON.stringify({ tier: 'NONE', error: 'surplus-burn is not calibrated: run the install-stack skill (step 4b) to write the reset weekday and hour into config.json' }));
   process.exit(0);
 }
 
