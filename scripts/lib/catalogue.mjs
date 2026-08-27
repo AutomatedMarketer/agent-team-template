@@ -53,12 +53,21 @@ function fromMarkdown(file) {
 // That is the description, already written and already read by anyone opening the file. Adding a
 // `description:` field beside it would create a second copy to drift, so the comment block is the
 // source and an explicit field, if a workflow ever gains one, simply wins.
+//
+// The block stops at the first paragraph break. A bare `#` ends the description; everything after
+// it is engineering rationale — why this owner runs it, which file the role lives in. That prose
+// is written for whoever maintains the workflow, not for the owner, and letting it through does
+// real damage, because this text is both user-facing and what proposals match against. One
+// over-captured line was on its own enough to make "the weekly payroll" match the team's own
+// card-router, on the strength of a stray "run".
 export function leadingComment(source) {
   const parts = []
   for (const line of String(source ?? '').replace(/\r\n/g, '\n').split('\n')) {
     const trimmed = line.trim()
     if (trimmed.startsWith('#')) {
-      parts.push(trimmed.replace(/^#+\s?/, '').trim())
+      const text = trimmed.replace(/^#+\s?/, '').trim()
+      if (!text) break // a bare `#` is a paragraph break: the description has ended
+      parts.push(text)
       continue
     }
     // Blank lines before the comment starts are fine; anything else means the block has ended.
