@@ -13,6 +13,7 @@
     "validate:runs": "node scripts/validate-run-log.mjs",
     "build:card": "node scripts/build-model-card.mjs",
     "sync:blocks": "node scripts/sync-prompt-blocks.mjs",
-    "check:ledger": "node scripts/check-ledger.mjs"
+    "check:ledger": "node scripts/check-ledger.mjs",
+    "check:proposals": "node scripts/check-proposals.mjs"
   }
 }

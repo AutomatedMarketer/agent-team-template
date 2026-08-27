@@ -1,0 +1,53 @@
+# What your ledger says your team should be - and nothing more than that.
+#
+# You do not write this by hand. Ask for it:  /match
+# Then check it:                              npm run check:proposals
+#
+# This is the only file here written by judgment rather than by arithmetic. The engine reads your
+# ledger and the catalogue and works out which things could possibly answer each task, by
+# comparing words. It stops there, because comparing words cannot tell a customer's REVIEW from a
+# sales-pipeline REVIEW, and reading the sentence can.
+#
+# So /match reads the shortlist and chooses. Then check:proposals re-derives all of it and refuses
+# anything that does not hold up. It cannot answer a task you only mentioned once. It cannot pick
+# something that was not offered. It cannot tidy up your quote or improve on your number. Every
+# line below survived that check, which is why every line is checkable by you.
+#
+# One line per value. This file is read by the same deliberately small parser as the rest of the
+# repo, so there are no folded blocks - if a reason will not fit on one line, it is too long to be
+# the reason.
+#
+# This example is a filled-in one, matched against ledger.example.yml.
+
+proposals:
+  # task      the task from your ledger, word for word
+  # item      what answers it - agent, skill or workflow, exactly as the repo names it
+  # why       why this one and not the others it was shortlisted against. Required whenever there
+  #           was more than one candidate: a choice with no reason is a coin flip with a citation.
+  # words     YOUR words about it, quoted from the ledger, character for character
+  # number    what the ledger derives from your own figures. Not a rounder, nicer number.
+  #
+  # Those two plus the item are the three citations. The item IS its own citation, which is why
+  # you count three things and see two extra lines.
+
+  - task: Sorting the inbox
+    item: skill:triage-inbox
+    why: "Beat workflow:inbox-triage, which sorts and then drafts replies. You said the sorting is the problem, so this is the narrower one."
+    words: "The inbox eats my morning before I get to anything real"
+    number: "3.3 hours a week, 500 a week"
+
+  - task: Writing the newsletter
+    item: agent:content
+    why: "Only candidate, and its own description ends: posts, captions, and newsletters."
+    words: "I write the newsletter myself and it eats most of an afternoon"
+    number: "3 hours a week, 450 a week"
+
+# Things you named twice that nothing here does. These are questions, not failures - and they are
+# the list that decides what gets built next. A gap left honest is worth more than a gap answered
+# with the nearest thing that happened to share a word.
+gaps:
+  - task: Chasing invoices
+    question: "Nothing here chases money you are owed. draft-chase-messages shares the word chasing, but it chases a prospect who went quiet. Same job, or not?"
+
+  - task: Follow-up emails after a call
+    question: "The email agent shares the word emails, but it sweeps an inbox and does not know a call happened. Same job, or not?"

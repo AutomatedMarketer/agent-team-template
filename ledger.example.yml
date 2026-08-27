@@ -31,6 +31,22 @@ tasks:
   #               No answer means it gets parked, not built. Work that runs and nobody adopts
   #               is worse than work that never ran, because it looks like progress.
 
+  - task: Sorting the inbox
+    words: "The inbox eats my morning before I get to anything real"
+    who: me
+    times_per_week: 5
+    minutes_each: 40
+    confirmed: twice
+    hands_off: "Replies wait in my drafts folder. I read each one and send it."
+
+  - task: Writing the newsletter
+    words: "I write the newsletter myself and it eats most of an afternoon"
+    who: me
+    times_per_week: 1
+    minutes_each: 180
+    confirmed: twice
+    hands_off: "I read the draft before it goes out. Nothing sends without me."
+
   - task: Chasing invoices
     words: "I lose half of Friday chasing people who owe me"
     who: me
@@ -38,6 +54,9 @@ tasks:
     minutes_each: 180
     confirmed: twice
     hands_off: "I read each chase and send it myself. Nothing goes out unread."
+    # ^ This one comes back as a GAP. The team can chase a prospect who went quiet; chasing
+    #   money you are owed is a different job and nothing here does it. That is said plainly
+    #   rather than answered with the nearest thing that shares a word.
 
   - task: Follow-up emails after a call
     words: "Every follow-up takes the best part of an hour and I still send them late"

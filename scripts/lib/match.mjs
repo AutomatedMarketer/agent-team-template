@@ -302,6 +302,16 @@ export function nearMiss(task, catalogue, index) {
   return best
 }
 
+// The matcher works in stems; an owner never said "chas". Showing them their own word back is the
+// difference between a question they can answer and one that reads like a machine talking to
+// itself, so the stem is mapped back to whichever word in their sentence produced it.
+export function spokenForm(root, text) {
+  for (const word of String(text ?? '').split(/[^A-Za-z0-9]+/)) {
+    if (word && stem(word.toLowerCase()) === root) return word.toLowerCase()
+  }
+  return root
+}
+
 function gapFor(task, catalogue, index) {
   const near = nearMiss(task, catalogue, index)
   if (!near) {
@@ -309,10 +319,14 @@ function gapFor(task, catalogue, index) {
       question: `Nothing on the team does this yet — what would have to exist to take "${task.task}" off your week?`
     }
   }
+  const spoken = spokenForm(near.words[0], `${task?.task ?? ''} ${task?.words ?? ''}`)
+  // Deliberately not "the closest is X". That is a declarative superlative, and it asserts a
+  // ranking that is false in any useful sense — the winner of a one-word stemming collision is
+  // not the closest thing to anything. An owner skimming reads the claim and skips the hedge.
   return {
     nearest: near.item.id,
-    sharedWord: near.words[0],
-    question: `Nothing on the team clearly does this. The closest is ${near.item.id}, and the only word you share with it is "${near.words[0]}" — is that the same job, or is "${task.task}" something the team cannot do yet?`
+    sharedWord: spoken,
+    question: `The only thing on the team sharing any word with this is ${near.item.id}, on the single word "${spoken}" — which is usually a coincidence. Is that the same job, or is "${task.task}" something the team cannot do yet?`
   }
 }
 
