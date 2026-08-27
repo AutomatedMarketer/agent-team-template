@@ -205,3 +205,14 @@ test('the shipped example parses with the repo parser and validates clean', asyn
   assert.ok(summary.notes.length > 0, 'the example should show what a note looks like')
   assert.ok(summary.hoursPerWeek > 0 && summary.costPerWeek > 0)
 })
+
+test('a task with no name is refused - an unnameable proposal cannot be approved', () => {
+  const problems = validateLedger(ledgerOf([{ ...chasing, task: '' }]))
+  assert.ok(problems.length > 0)
+  assert.ok(problems.some((problem) => /needs a name/.test(problem)))
+})
+
+test('a whitespace-only task name is refused too', () => {
+  const problems = validateLedger(ledgerOf([{ ...chasing, task: '   ' }]))
+  assert.ok(problems.some((problem) => /needs a name/.test(problem)))
+})

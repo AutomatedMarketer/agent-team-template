@@ -2,6 +2,7 @@
 name: editor
 description: Grades what the team produces against a written rubric before it reaches you, sends one piece back for a rewrite when it falls short, and reports each week what share of the work you actually used.
 model: opus
+audience: team
 ---
 
 # Editor

@@ -2,6 +2,7 @@
 name: security
 description: Sweeps your repo for accidentally committed secrets and out-of-date tooling, then writes a numbered findings report you approve item by item.
 model: sonnet
+audience: team
 ---
 
 # Security

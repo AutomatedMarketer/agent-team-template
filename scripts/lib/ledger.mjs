@@ -117,6 +117,14 @@ export function validateLedger(ledger) {
       continue
     }
 
+    // An unnamed task produces an unnameable proposal - a blank row in proposals.md that cites
+    // a quote and a number and nothing anyone can act on. The template marker is not the only
+    // way a task arrives empty; a plain empty string is the commoner one.
+    if (typeof task?.task !== 'string' || !task.task.trim()) {
+      at('needs a name - a proposal with no task name cannot be discussed or approved')
+      continue
+    }
+
     // Rule 2, at its source. A task with no quote cannot produce a proposal that cites one,
     // so it is refused here rather than three steps downstream.
     const words = typeof task?.words === 'string' ? task.words.trim() : ''

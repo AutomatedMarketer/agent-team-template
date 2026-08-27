@@ -9,6 +9,7 @@ import {
   leadingComment,
   proposable
 } from '../scripts/lib/catalogue.mjs'
+import { read } from './helpers/repo.mjs'
 
 /* The catalogue is the only thing a proposal is allowed to name. If it lists something that is
    not really in the repo, the match engine will confidently offer a capability that does not
@@ -268,5 +269,48 @@ test('the real repo splits into owner-facing work and team maintenance', async (
     const item = items.find((entry) => entry.id === `skill:${slug}`)
     assert.ok(item, `skill:${slug} should exist`)
     assert.equal(item.audience, 'team', `skill:${slug} maintains the team and must never answer a ledger task`)
+  }
+})
+
+/* An agent that grades the team's own drafts, or sweeps the team's own repo, is maintenance -
+   however business-shaped its name sounds. Both of these were marked owner-facing while every
+   skill and workflow they own was already marked team, and the contradiction showed: the security
+   agent won "writing the monthly status report for my manager" on {report, writ}, and the editor
+   agent was named as the closest thing to "booking travel for the team" on the word "team".
+
+   The distinction is what the description is ABOUT. customer-service answers a customer's
+   question, so it stays owner-facing even though the one workflow it owns is a team one. */
+
+test('an agent whose work is the team\'s own output is team, not owner', async () => {
+  const items = await loadCatalogue()
+  for (const slug of ['editor', 'security', 'orchestrator']) {
+    const agent = items.find((item) => item.id === `agent:${slug}`)
+    assert.ok(agent, `agent:${slug} should exist`)
+    assert.equal(agent.audience, 'team', `agent:${slug} grades or maintains the team, so it is never an answer to a ledger task`)
+  }
+  for (const slug of ['research', 'content', 'email', 'customer-service', 'sales']) {
+    const agent = items.find((item) => item.id === `agent:${slug}`)
+    assert.equal(agent.audience, 'owner', `agent:${slug} does the owner's business work`)
+  }
+})
+
+/* The clean half of the consistency rule. The other direction does not hold and should not be
+   asserted: customer-service is owner-facing but owns the team-audience weekly review, because
+   every worker must own one shipped workflow and that is the one left for it. */
+
+test('a team agent never owns an owner-facing workflow', async () => {
+  const items = await loadCatalogue()
+  const agents = new Map(items.filter((item) => item.kind === 'agent').map((item) => [item.slug, item.audience]))
+
+  for (const workflow of items.filter((item) => item.kind === 'workflow')) {
+    const source = await read(workflow.path)
+    const owner = /^owner:\s*(\S+)/m.exec(source)
+    if (!owner) continue
+    if (agents.get(owner[1]) !== 'team') continue
+    assert.equal(
+      workflow.audience,
+      'team',
+      `${workflow.id} is owner-facing but is owned by ${owner[1]}, which maintains the team`
+    )
   }
 })
