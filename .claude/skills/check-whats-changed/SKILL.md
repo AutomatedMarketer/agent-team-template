@@ -77,7 +77,8 @@ do not test it — say it was not tested and why.
 
 ### Lane 4 — the starter stack
 
-`stack.yml` declares the four capabilities every team gets, and
+`stack.yml` declares the capabilities every team gets — read the file for the list rather
+than carrying a count in your head, because the count changes — and
 `.agent-team/stack-check.md` records the last time they were verified. Report any that are
 **missing, disabled, or never verified**, and name what the team does worse without each one
 rather than just listing it as absent.

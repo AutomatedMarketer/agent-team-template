@@ -6,11 +6,14 @@ import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
 const stack = async () => parseSimpleYaml(await read('stack.yml')).stack
 const skill = () => read('.claude/skills/install-stack/SKILL.md')
 
-// --- the four capabilities, declared not remembered --------------------------------------
+// --- the starting capabilities, declared not remembered -----------------------------------
 
-test('the stack declares exactly the four starting capabilities', async () => {
+// The list is spelled out rather than counted, so adding a capability has to be a deliberate
+// edit here too. surplus-burn joined in 4f96572 and this assertion was not updated with it,
+// which left both this repo and every repo pulling from it with a red suite on main.
+test('the stack declares exactly the starting capabilities', async () => {
   const names = (await stack()).map((entry) => entry.name).sort()
-  assert.deepEqual(names, ['claude-mem', 'context7', 'last30days', 'token-saver'])
+  assert.deepEqual(names, ['claude-mem', 'context7', 'last30days', 'surplus-burn', 'token-saver'])
 })
 
 test('every entry says what it gives, why, and how to prove it', async () => {
