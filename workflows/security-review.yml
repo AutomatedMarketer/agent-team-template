@@ -1,5 +1,6 @@
 # Anything leaking, anything stale — one report in your inbox before the week starts.
 name: Security Review
+audience: team
 owner: security
 steps: [scan-repo-security, watch-updates]
 trigger:

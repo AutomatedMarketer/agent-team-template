@@ -397,18 +397,75 @@ test('payroll is a gap, not the team\'s own card-router', async () => {
   assert.match(result.gaps[0].question, /\?$/)
 })
 
-test('the known employee-path holes come back as gaps, not as confident wrong answers', async () => {
+/* The guard that used to live here named four items. That is a blacklist, and a blacklist only
+   ever covers the instances somebody already found - the next sweep turned up five more, on
+   token-saver, install-stack, watch-updates and check-whats-changed. The rule is structural now:
+   NOTHING marked `audience: team` may be proposed for anybody's actual job, whatever it is
+   called. The named cases below are kept as history, not as the mechanism. */
+
+test('no team-maintenance tooling is ever proposed for a real job', async () => {
+  const catalogue = await loadCatalogue()
+  const teamIds = new Set(catalogue.filter((item) => item.audience === 'team').map((item) => item.id))
+  assert.ok(teamIds.size > 0, 'if nothing is marked team, this test proves nothing')
+
   const result = await matchAgainstTheRealRepo([
+    realTask('Clearing my inbox', 'My inbox is a nightmare, it eats the first hour of every day'),
+    realTask('Onboarding a new hire', 'Walking a new starter through our tools and processes'),
+    realTask('Handing over to the night shift', 'I write up what happened so the next shift knows'),
+    realTask('Keeping the team handbook current', 'Our handbook goes stale and I have to check what changed'),
+    realTask('Updating the website prices', 'Every time we change a price I edit the website by hand'),
     realTask('Prepping for meetings', 'Before every call I dig through notes to remember where we left off'),
-    realTask('Reporting up to my manager', 'Every fortnight I pull together what I did for my manager')
+    realTask('Reporting up to my manager', 'Every fortnight I pull together what I did for my manager'),
+    realTask('Doing the payroll', 'I work out the hours and run the payroll for my three staff')
   ])
+
   for (const proposal of result.proposals) {
-    assert.notMatch(
-      proposal.item,
-      /tune-up|run-logs|task-sweep|work-the-tasks/,
-      `${proposal.task} was answered with the team's own internal tooling (${proposal.item})`
+    assert.ok(
+      !teamIds.has(proposal.item),
+      `"${proposal.task}" was answered with the team's own maintenance tooling (${proposal.item})`
     )
   }
+})
+
+/* Each of these was a real proposal at some point in this build, cited and confident. */
+
+test('the five absurd matches found in review stay dead, by name', async () => {
+  const cases = [
+    ['Clearing my inbox', 'My inbox is a nightmare, it eats the first hour of every day', 'skill:token-saver'],
+    ['Onboarding a new hire', 'Walking a new starter through our tools and processes', 'skill:install-stack'],
+    ['Handing over to the night shift', 'I write up what happened so the next shift knows', 'skill:token-saver'],
+    ['Keeping the team handbook current', 'Our handbook goes stale and I have to check what changed', 'skill:check-whats-changed'],
+    ['Updating the website prices', 'Every time we change a price I edit the website by hand', 'skill:watch-updates']
+  ]
+  for (const [task, words, wrongAnswer] of cases) {
+    const result = await matchAgainstTheRealRepo([realTask(task, words)])
+    for (const proposal of result.proposals) {
+      assert.notEqual(proposal.item, wrongAnswer, `"${task}" was answered with ${wrongAnswer} again`)
+    }
+  }
+})
+
+/* A gap with an obvious near-neighbour should say so. "Posting on LinkedIn" shares exactly one
+   word with the agent whose description opens "Writes posts" - not enough to propose on, easily
+   enough to ask about. Asking costs nothing; guessing is what this build exists to stop. */
+
+test('a gap with one strong near-neighbour asks about it instead of guessing', async () => {
+  const result = await matchAgainstTheRealRepo([
+    realTask('Posting on LinkedIn', 'I know I should post on LinkedIn but I never get round to it')
+  ])
+  assert.equal(result.proposals.length, 0, 'one shared word is not enough to propose on')
+  assert.equal(result.gaps.length, 1)
+  assert.equal(result.gaps[0].nearest, 'agent:content')
+  assert.match(result.gaps[0].question, /post/)
+  assert.match(result.gaps[0].question, /\?$/, 'it is still a question, not a claim')
+})
+
+test('a gap with nothing near it does not invent a neighbour', async () => {
+  const result = await matchAgainstTheRealRepo([
+    realTask('Calibrating the spectrometer', 'I recalibrate the spectrometer by hand')
+  ])
+  assert.equal(result.gaps.length, 1)
+  assert.equal(result.gaps[0].nearest, undefined)
 })
 
 test('a task nobody built anything for is a gap against the real catalogue', async () => {

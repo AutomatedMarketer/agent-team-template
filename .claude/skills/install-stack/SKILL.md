@@ -1,6 +1,7 @@
 ---
 name: install-stack
 description: Install and verify the starter stack every team gets - current-events research, official documentation lookup, memory that survives a session, cost awareness, and the surplus burn calibrated to this owner's own weekly reset. Idempotent, so it is safe to run on a new machine or any time something looks missing. Use at the start of an install, and whenever a tool the team relies on has gone missing.
+audience: team
 ---
 
 # Installing the starter stack

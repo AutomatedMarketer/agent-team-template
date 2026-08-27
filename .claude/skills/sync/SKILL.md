@@ -1,6 +1,7 @@
 ---
 name: sync
 description: Bring this machine level with the repo and push anything done here. Use at the start of a session, at the end of a session, and any time you are about to switch machines.
+audience: team
 ---
 
 # Sync

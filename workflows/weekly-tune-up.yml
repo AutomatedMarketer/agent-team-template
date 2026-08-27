@@ -3,6 +3,7 @@
 # Applies what it learned to your written rules. Raises anything that would rewire the
 # team as a card for you — it never changes models, connectors or workflows on its own.
 name: Weekly Tune-up
+audience: team
 owner: orchestrator
 steps: [check-whats-changed, learn-from-the-week, write-tune-up]
 trigger:

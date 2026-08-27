@@ -1,6 +1,7 @@
 ---
 name: check-whats-changed
 description: Check whether the models, the product changelogs, and the connectors this team depends on have moved since last week, and report what it means for this team. Detect and report only. Use as the first step of the weekly tune-up.
+audience: team
 ---
 
 # Checking what moved

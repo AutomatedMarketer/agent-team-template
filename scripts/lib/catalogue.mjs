@@ -43,9 +43,38 @@ export function describable(item) {
   return description.length > 0 && !isUnfilled(description)
 }
 
+// A catalogue holds two different kinds of thing, and conflating them is what makes a matcher
+// embarrassing. Most items do the owner's business work — sweep the inbox, write the newsletter,
+// answer the customer. A minority maintain the AI team itself: sync the repo, watch upstream for
+// changes, count tokens, install the starter stack, grade the team's own drafts.
+//
+// Nobody has ever said "what eats my week is checking whether my connectors changed". So team
+// tooling is never an answer to a ledger task, and marking it here is the only structural way to
+// say so. Without it the matcher offered the token-budget advisor for "clearing my inbox" and the
+// starter-stack installer for "onboarding a new hire" — both scoring higher than the right item,
+// both perfectly citable, both absurd. Blacklisting the four items that happened to surface would
+// have left the next five to be found by a customer.
+export const AUDIENCES = ['owner', 'team']
+
+function audienceOf(value) {
+  const audience = textOf(value).toLowerCase()
+  return AUDIENCES.includes(audience) ? audience : 'owner'
+}
+
+// Only owner-facing items can be proposed. Team tooling stays in the catalogue — it is real, the
+// board still lists it, and hiding it would be its own kind of lie — it is simply never the answer
+// to "where does your week go".
+export function proposable(item) {
+  return describable(item) && item?.audience !== 'team'
+}
+
 function fromMarkdown(file) {
   const { data } = parseFrontmatter(file.source)
-  return { name: textOf(data.name) || file.slug, description: textOf(data.description) }
+  return {
+    name: textOf(data.name) || file.slug,
+    description: textOf(data.description),
+    audience: audienceOf(data.audience)
+  }
 }
 
 // Every shipped workflow already opens with a comment saying, in the owner's language, what the
@@ -88,7 +117,8 @@ function fromYaml(file) {
   }
   return {
     name: textOf(parsed.name) || file.slug,
-    description: textOf(parsed.description) || leadingComment(file.source)
+    description: textOf(parsed.description) || leadingComment(file.source),
+    audience: audienceOf(parsed.audience)
   }
 }
 
@@ -103,6 +133,7 @@ export function buildCatalogue(files) {
       slug: file.slug,
       name: read.name,
       description: read.description,
+      audience: read.audience,
       path: file.path
     }
   })

@@ -2,6 +2,7 @@
 name: orchestrator
 description: Works the owner's to-do column on a schedule, handing each task card to the specialist that owns it and reporting what got done.
 model: opus
+audience: team
 ---
 
 # Orchestrator

@@ -1,6 +1,7 @@
 ---
 name: scan-repo-security
 description: Sweep this repo for accidentally committed secrets, tracked .env files, oversized junk, and risky workflow permissions — read-only, findings ranked by severity. Use as the opening step of the security review workflow.
+audience: team
 ---
 
 # Scanning the repo

@@ -1,6 +1,7 @@
 ---
 name: write-quality-review
 description: Count what the team produced this week, what the owner actually used, and what the verdicts say should change — reported as one acceptance-rate figure with the evidence behind it. Use as the only step of the quality review workflow.
+audience: team
 ---
 
 # The weekly quality review

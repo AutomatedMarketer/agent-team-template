@@ -1,9 +1,11 @@
 # What shipped, what slipped, what went quiet — the whole team, one page, propose-only.
 # The orchestrator's review of the week.
 #
-# customer-service runs it because the orchestrator lives in CLAUDE.md and is not a
-# dispatchable agent.
+# Owned by customer-service because every agent on the team owns one shipped workflow, and this
+# is the one left for it. The review is the orchestrator's job by nature; the ownership line is
+# about giving each worker something real on day one, not about who the work belongs to.
 name: Weekly Review
+audience: team
 owner: customer-service
 steps: [collect-run-logs, review-pipeline, write-weekly-review]
 trigger:

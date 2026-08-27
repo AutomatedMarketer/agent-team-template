@@ -6,6 +6,7 @@
 # (.claude/agents/orchestrator.md) is that same front-door role, registered as an agent
 # so a scheduled run can be owned by it.
 name: Task Sweep
+audience: team
 owner: orchestrator
 steps: [work-the-tasks]
 trigger:

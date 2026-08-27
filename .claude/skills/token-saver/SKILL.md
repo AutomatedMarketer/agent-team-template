@@ -1,6 +1,7 @@
 ---
 name: token-saver
 description: Use when the user asks about token usage, context, or cost — "why is this so expensive", "am I burning tokens", "how do I save tokens", "what's eating my context", "should I clear or compact", "is my cache still good", or before/after actions that reset the prompt cache (switching model, changing effort, upgrading Claude Code). Also use when a session is long and the user is deciding whether to keep going, hand off, or start fresh. Advisory only — explains what is actually happening and recommends; never silently changes how thorough the work is.
+audience: team
 ---
 
 # Token Saver

@@ -1,6 +1,7 @@
 ---
 name: collect-run-logs
 description: Gather the facts for the weekly review — every run log from the last seven days, what each agent produced, what failed, and what went silent. Facts only, no judgement yet. Use as the opening step of the weekly review workflow.
+audience: team
 ---
 
 # Collecting the week

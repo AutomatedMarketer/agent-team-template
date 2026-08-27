@@ -1,6 +1,7 @@
 ---
 name: write-weekly-review
 description: Turn the week's tally into a short review — what shipped, what slipped, what went quiet — plus proposals for next week. Propose-only — the review changes nothing by itself. Use as the closing step of the weekly review workflow.
+audience: team
 ---
 
 # Writing the weekly review

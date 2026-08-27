@@ -1,6 +1,7 @@
 ---
 name: capture-verdict
 description: Turn the owner's reaction to a draft — shipped, edited, or binned — into a filed verdict and a written rule, so the same correction never has to be made twice. Use whenever the owner says what they did with a piece the team produced.
+audience: team
 ---
 
 # Capturing a verdict

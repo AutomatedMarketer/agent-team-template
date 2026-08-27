@@ -1,6 +1,7 @@
 ---
 name: learn-from-the-week
 description: Read the week's failures, verdicts and flagged work, find what went wrong more than once, and turn each repeated pattern into one exact file edit. Use as the second step of the weekly tune-up.
+audience: team
 ---
 
 # Learning from the week

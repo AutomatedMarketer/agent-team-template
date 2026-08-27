@@ -1,6 +1,7 @@
 # Did the team produce work you actually used? One number, with the evidence behind it.
 # Counts graded runs against your verdicts in quality/verdicts/ and reports the acceptance rate.
 name: Quality Review
+audience: team
 owner: editor
 steps: [write-quality-review]
 trigger:

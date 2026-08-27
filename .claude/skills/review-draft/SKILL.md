@@ -1,6 +1,7 @@
 ---
 name: review-draft
 description: Grade a draft against its rubric and the workflow's done block before it reaches the owner, send it back once with concrete fixes when it falls short, and attach a report card either way. Use as the closing step of any workflow that produces something a person will read.
+audience: team
 ---
 
 # Grading the draft

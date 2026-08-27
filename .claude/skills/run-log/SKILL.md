@@ -1,6 +1,7 @@
 ---
 name: run-log
 description: Write the run-log entry that records what this run did. Use at the end of every agent run, scheduled or manual, before committing.
+audience: team
 ---
 
 # Writing your run log

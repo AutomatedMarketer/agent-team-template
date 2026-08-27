@@ -1,6 +1,7 @@
 ---
 name: watch-updates
 description: Check the team's installed skills and the upstream product repos for changes since the last run, diff against the last-seen note, and report what moved. Use as the second step of the security review workflow.
+audience: team
 ---
 
 # Watching for updates

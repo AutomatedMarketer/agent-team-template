@@ -6,7 +6,8 @@ import {
   loadCatalogue,
   validateCatalogue,
   describable,
-  leadingComment
+  leadingComment,
+  proposable
 } from '../scripts/lib/catalogue.mjs'
 
 /* The catalogue is the only thing a proposal is allowed to name. If it lists something that is
@@ -195,4 +196,77 @@ test('this repo has a catalogue, and every item in it can be described', async (
     [],
     'every shipped agent, skill and workflow needs a plain-language description — that description is what a proposal cites'
   )
+})
+
+/* ---------- the paragraph break ------------------------------------------------------------ */
+
+/* A bare `#` ends the description. Everything after it is engineering rationale written for
+   whoever maintains the file, and it is neither shown to an owner nor matched against their
+   words. Until this test existed, the only thing holding that rule in place was one blacklist
+   regex in a different file, which a reworded comment would have walked straight past. */
+
+test('a bare # ends the description - what follows is rationale, not description', () => {
+  const source = [
+    '# The real description, in the owner\'s language.',
+    '#',
+    '# Owner: the orchestrator, because routing is the front door\'s job.',
+    'name: Task Sweep'
+  ].join('\n')
+  assert.equal(leadingComment(source), 'The real description, in the owner\'s language.')
+})
+
+test('a comment block with no break is kept whole', () => {
+  const source = '# One sentence.\n# And its second line.\nname: Thing'
+  assert.equal(leadingComment(source), 'One sentence. And its second line.')
+})
+
+/* ---------- audience ------------------------------------------------------------------------ */
+
+test('an item is owner-facing unless it says otherwise', () => {
+  const [item] = buildCatalogue([agentFile('research', 'research', 'Looks things up')])
+  assert.equal(item.audience, 'owner')
+  assert.equal(proposable(item), true)
+})
+
+test('team tooling is read from frontmatter and is never proposable', () => {
+  const [item] = buildCatalogue([
+    {
+      kind: 'skill',
+      slug: 'sync',
+      path: '.claude/skills/sync/SKILL.md',
+      source: '---\nname: sync\ndescription: Bring this machine level with the repo\naudience: team\n---\n'
+    }
+  ])
+  assert.equal(item.audience, 'team')
+  assert.equal(proposable(item), false, 'team tooling stays in the catalogue but is never an answer to a ledger task')
+})
+
+test('an unrecognised audience falls back to owner rather than silently hiding the item', () => {
+  const [item] = buildCatalogue([
+    {
+      kind: 'skill',
+      slug: 'odd',
+      path: '.claude/skills/odd/SKILL.md',
+      source: '---\nname: odd\ndescription: Does a thing\naudience: wibble\n---\n'
+    }
+  ])
+  assert.equal(item.audience, 'owner')
+})
+
+test('the real repo splits into owner-facing work and team maintenance', async () => {
+  const items = await loadCatalogue()
+  const owner = items.filter(proposable)
+  const team = items.filter((item) => item.audience === 'team')
+
+  assert.ok(owner.length > 0, 'a team that can be proposed nothing is not a team')
+  assert.ok(team.length > 0, 'the maintenance tooling has to be marked, or it gets proposed for business work')
+  assert.equal(owner.length + team.length, items.length)
+
+  // Named because each of these was, at some point, confidently proposed as the answer to
+  // somebody's actual job.
+  for (const slug of ['token-saver', 'install-stack', 'watch-updates', 'check-whats-changed', 'sync', 'run-log']) {
+    const item = items.find((entry) => entry.id === `skill:${slug}`)
+    assert.ok(item, `skill:${slug} should exist`)
+    assert.equal(item.audience, 'team', `skill:${slug} maintains the team and must never answer a ledger task`)
+  }
 })

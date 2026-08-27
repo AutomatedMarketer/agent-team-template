@@ -1,6 +1,7 @@
 ---
 name: work-the-tasks
 description: Work off the owner's task cards in tasks/ — pick up the oldest todo cards, route each to the right specialist, do the work draft-only, flip the status, and append a Result section linking the artifact. Stops after three tasks per run. Use as the only step of the task sweep workflow.
+audience: team
 ---
 
 # Working the task inbox

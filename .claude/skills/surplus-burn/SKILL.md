@@ -1,6 +1,7 @@
 ---
 name: surplus-burn
 description: Use-it-or-lose-it quota maximizer. Measures how much of the Claude subscription week is still unspent before the weekly reset and turns the surplus into quality work on the team's existing output - reviews, fixes, efficiency passes, memory and skill hardening. Never busywork. Invoke on demand ("run the surplus burn", "how much quota is left", "burn the surplus") or from a daily scheduled run.
+audience: team
 ---
 
 # Surplus burn - the weekly quota maximizer

@@ -1,5 +1,5 @@
 import { classify, deriveTask, validateLedger, isUnfilled } from './ledger.mjs'
-import { describable, validateCatalogue } from './catalogue.mjs'
+import { describable, proposable, validateCatalogue } from './catalogue.mjs'
 
 // The match engine turns a measured week into a proposed team. It does exactly one thing that
 // matters: it refuses.
@@ -50,7 +50,12 @@ const AUXILIARY = [
   'did', 'done', 'doing', 'am', 'been', 'having', 'could', 'should', 'must', 'may', 'might',
   'shall', 'let', 'make', 'makes', 'made', 'give', 'gives', 'given', 'want', 'wants', 'like',
   'know', 'knows', 'think', 'thinks', 'say', 'says', 'said', 'see', 'sees', 'seen', 'come',
-  'comes', 'came', 'went', 'goes', 'actually', 'already', 'even', 'ever', 'here', 'how'
+  'comes', 'came', 'went', 'goes', 'going', 'actually', 'already', 'even', 'ever', 'here', 'how',
+  // Interrogatives and vague nouns. 'where' survived as the stem "wher" and, being rare in the
+  // catalogue, scored a perfect 1.00 - enough on its own to answer "prepping for meetings" with
+  // the research agent. A word that means nothing should never be the rarest word in the room.
+  'where', 'why', 'whose', 'whom', 'because', 'round', 'ages', 'stuff', 'somewhere', 'anywhere',
+  'everything', 'something', 'nothing', 'anyone', 'someone', 'everyone', 'else', 'etc'
 ]
 
 // How many is not what it is, for the same reason the day of the week is not. "my three staff"
@@ -137,7 +142,9 @@ export function buildIndex(catalogue) {
   const frequency = new Map()
   let items = 0
   for (const item of catalogue ?? []) {
-    if (!describable(item)) continue
+    // Counted over the pool we actually match against. Including team tooling would make a word
+    // look common because the maintenance skills use it, and quietly devalue it for the owner.
+    if (!proposable(item)) continue
     items += 1
     for (const word of itemWords(item)) frequency.set(word, (frequency.get(word) ?? 0) + 1)
   }
@@ -239,6 +246,8 @@ function bestMatch(task, catalogue, index) {
   let best = null
   let measured = { score: 0, shared: 0, words: [] }
   for (const item of catalogue ?? []) {
+    // Team-maintenance tooling is never an answer to where the owner's week goes.
+    if (!proposable(item)) continue
     const candidate = measureMatch(task, item, index)
     if (candidate.shared < MIN_SHARED_WORDS) continue
     if (candidate.score > measured.score) {
@@ -250,6 +259,43 @@ function bestMatch(task, catalogue, index) {
   // uses, the words agree on nothing that distinguishes anything.
   if (!best || measured.score <= 0) return null
   return { item: best, score: measured.score, shared: measured.shared, words: measured.words }
+}
+
+// A task can miss the two-word bar and still have one strong, obvious near-neighbour: "Posting
+// on LinkedIn" shares only `post` with the agent whose description opens "Writes posts". One word
+// is not enough to PROPOSE on - the same shape gave "approving holiday requests" to the security
+// agent on `approv`, at maximum rarity - but it is worth asking about.
+//
+// So the near miss goes into the question, not into a proposal. The owner is the one who can say
+// in a second whether that is what they meant, and asking them costs nothing. Guessing does not.
+export const NEAR_MISS_RATIO = 0.55
+
+export function nearMiss(task, catalogue, index) {
+  if (!index?.items) return null
+  const ceiling = Math.log(index.items + 1)
+  let best = null
+  for (const item of catalogue ?? []) {
+    if (!proposable(item)) continue
+    const measured = measureMatch(task, item, index)
+    if (measured.shared !== 1) continue
+    if (measured.score / ceiling < NEAR_MISS_RATIO) continue
+    if (!best || measured.score > best.score) best = { item, ...measured }
+  }
+  return best
+}
+
+function gapFor(task, catalogue, index) {
+  const near = nearMiss(task, catalogue, index)
+  if (!near) {
+    return {
+      question: `Nothing on the team does this yet — what would have to exist to take "${task.task}" off your week?`
+    }
+  }
+  return {
+    nearest: near.item.id,
+    sharedWord: near.words[0],
+    question: `Nothing on the team clearly does this. The closest is ${near.item.id}, and the only word you share with it is "${near.words[0]}" — is that the same job, or is "${task.task}" something the team cannot do yet?`
+  }
 }
 
 export function match(ledger, catalogue) {
@@ -305,11 +351,7 @@ export function match(ledger, catalogue) {
     // Rule 3. Nothing in the catalogue does this. That is a question for the owner, not licence
     // to invent a capability and describe it confidently.
     if (!found) {
-      result.gaps.push({
-        task: task.task,
-        words: task.words,
-        question: `Nothing on the team does this yet — what would have to exist to take "${task.task}" off your week?`
-      })
+      result.gaps.push({ task: task.task, words: task.words, ...gapFor(task, catalogue, index) })
       continue
     }
 

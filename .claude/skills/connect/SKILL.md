@@ -1,6 +1,7 @@
 ---
 name: connect
 description: Connect one tool to the team, end to end - work out how it connects, wire it, prove it with a real read of the owner's own data, register it so the dashboard shows it, and write the recipe so the next person does not have to research it again. Use whenever the owner wants to add a tool, or when a workflow is blocked because something is not connected.
+audience: team
 ---
 
 # Connecting a tool

@@ -1,6 +1,7 @@
 ---
 name: write-tune-up
 description: Apply the week's learning to the team's written rules, raise everything that would rewire the team as a task card, and write the one-page tune-up report. Use as the closing step of the weekly tune-up.
+audience: team
 ---
 
 # Writing the tune-up
