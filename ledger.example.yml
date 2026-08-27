@@ -1,0 +1,68 @@
+# Your ledger - where your week actually goes.
+#
+# You do not write this by hand. Ask for it:  /ledger
+#
+# This is the file everything else is built from. Your agents, the jobs that get switched on,
+# and the number on the front of your dashboard all come from here. That is why it is measured
+# first and approved by you before anything gets built.
+#
+# This example is a filled-in one, so you can see what finished looks like.
+
+# business - you own it, and you can approve spending and change how things are done
+# job      - you work there, and you want your own work easier
+# both     - you have a job and something of your own
+owner_type: business
+
+# What an hour of your time is worth. Your number, not a market rate.
+# Leave it out entirely if you cannot answer it honestly - the ledger will report hours only
+# and leave the money column blank. That is the right answer for most people with a job, and
+# it is better than a made-up rate that makes every later number wrong.
+hourly_value: 150
+
+tasks:
+  # task          what you call it
+  # words         YOUR words about it, quoted, on one line. Not a summary, not tidied up.
+  #               If there is no quote, there is no proposal. That rule is enforced in code.
+  # who           who does it today
+  # times_per_week / minutes_each    how often, and how long each time
+  # confirmed     once  - you mentioned it. It stays a note.
+  #               twice - it came up again, or you confirmed it on a re-read. Now it counts.
+  # hands_off     when this produces a draft, who acts on it, and what would stop them?
+  #               No answer means it gets parked, not built. Work that runs and nobody adopts
+  #               is worse than work that never ran, because it looks like progress.
+
+  - task: Chasing invoices
+    words: "I lose half of Friday chasing people who owe me"
+    who: me
+    times_per_week: 1
+    minutes_each: 180
+    confirmed: twice
+    hands_off: "I read each chase and send it myself. Nothing goes out unread."
+
+  - task: Follow-up emails after a call
+    words: "Every follow-up takes the best part of an hour and I still send them late"
+    who: me
+    times_per_week: 5
+    minutes_each: 45
+    confirmed: twice
+    hands_off: "They sit in my drafts folder and I send them in the morning."
+
+  - task: Weekly numbers for the team
+    words: "Sunday night I am pulling numbers into a doc nobody reads until Monday"
+    who: me
+    times_per_week: 1
+    minutes_each: 90
+    confirmed: twice
+    hands_off: ""
+    # ^ Empty on purpose. This one is PARKED, not built. Until you can say who acts on it,
+    #   automating it just moves the ignoring earlier in the week.
+
+  - task: Reading industry newsletters
+    words: "I skim about six newsletters and forget most of it"
+    who: me
+    times_per_week: 5
+    minutes_each: 20
+    confirmed: once
+    hands_off: "Nobody - it is background."
+    # ^ Said once, so it is a NOTE. Twice, or it is not a pattern. If it comes up again next
+    #   time you run /ledger, change this to twice and it becomes a candidate.
