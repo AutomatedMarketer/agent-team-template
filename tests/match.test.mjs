@@ -2,35 +2,36 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   REQUIRED_CITATIONS,
+  MIN_SHARED_WORDS,
+  SHORTLIST_LIMIT,
   validateProposal,
   scoreMatch,
   stem,
+  shortlist,
+  proposalFrom,
+  buildIndex,
   match
 } from '../scripts/lib/match.mjs'
 import { loadCatalogue } from '../scripts/lib/catalogue.mjs'
 
-/* Matching is where a measured week turns into a proposed team. Almost every test below is a
-   test that something is REFUSED, because the expensive failure here is not missing a match —
-   it is confidently proposing a capability nobody built, or proposing anything at all off a
-   number the owner has not corrected yet.
+/* Matching is where a measured week turns into a proposed team. Almost every test below is a test
+   that something is REFUSED, because the expensive failure here is not missing a match — it is
+   confidently proposing a capability nobody built, or proposing anything at all off a number the
+   owner has not corrected yet.
+
+   The engine does NOT choose. Word-counting cannot tell a customer's REVIEW from the sales
+   pipeline REVIEW, and no threshold fixes that — a three-word floor kills every good match too.
+   So it ranks, deterministically, and the /match skill reads the sentences and picks. What the
+   skill cannot do is invent: proposalFrom() refuses anything not on the shortlist, so the closed
+   world is still built in code, before any judgment happens.
 
    The six anti-deviation rules, and where each is enforced:
      1 ledger before proposal   -> match() refuses outright while the ledger has problems
-     2 three citations          -> validateProposal, and match() drops anything that fails it
-     3 match, never invent      -> only catalogue ids; no match becomes a gaps QUESTION
-     4 twice, or not a pattern  -> only ledger candidates are proposed
-     5 decision-readiness       -> a task with no hands_off is parked, never proposed
+     2 three citations          -> validateProposal, and proposalFrom refuses without them
+     3 match, never invent      -> shortlist() is the only source; no match becomes a gap QUESTION
+     4 twice, or not a pattern  -> only ledger candidates get a shortlist
+     5 decision-readiness       -> a task with no hands_off is parked, never shortlisted
      6 predicted vs actual      -> every proposal carries a predicted weekly saving */
-
-const chasing = {
-  task: 'Chasing invoices',
-  words: 'I lose half of Friday chasing people who owe me',
-  who: 'me',
-  times_per_week: 1,
-  minutes_each: 180,
-  confirmed: 'twice',
-  hands_off: 'I approve every chase before it sends'
-}
 
 const inbox = {
   task: 'Sorting the inbox',
@@ -54,8 +55,7 @@ const exotic = {
 
 /* These descriptions are copied VERBATIM from the shipped files. An earlier version of this test
    invented friendlier wording, and both positive-match tests passed on sentences that existed
-   nowhere in the repo — a green suite proving nothing about the product. If a description here
-   drifts from the file it names, the real-catalogue test at the bottom is what catches it. */
+   nowhere in the repo — a green suite proving nothing about the product. */
 
 const catalogue = [
   {
@@ -63,6 +63,7 @@ const catalogue = [
     kind: 'agent',
     slug: 'email',
     name: 'email',
+    audience: 'owner',
     description:
       'Sweeps your inbox, archives the noise, tells you what actually needs you, and leaves replies sitting in your drafts folder.',
     path: '.claude/agents/email.md'
@@ -72,6 +73,7 @@ const catalogue = [
     kind: 'agent',
     slug: 'content',
     name: 'content',
+    audience: 'owner',
     description:
       'Writes posts, captions, and newsletters that sound like you, and leaves them as drafts for you to read before anything goes out.',
     path: '.claude/agents/content.md'
@@ -81,14 +83,15 @@ const catalogue = [
     kind: 'agent',
     slug: 'sales',
     name: 'sales',
+    audience: 'owner',
     description:
       'Researches a prospect, writes the first message you would actually send them, and keeps a running list of who you have approached.',
     path: '.claude/agents/sales.md'
   }
 ]
 
-/* The tasks above are written the way an owner writes — gerunds, their own words. The items are
-   written in the third person. Matching has to survive that gap, so the fixtures keep it. */
+/* Owners write gerunds, in their own words. Items describe themselves in the third person.
+   Matching has to survive that gap, so the fixtures keep it. */
 
 const newsletter = {
   task: 'Writing the newsletter',
@@ -106,6 +109,8 @@ const ledgerOf = (tasks, extra = {}) => ({
   tasks,
   ...extra
 })
+
+const entryFor = (result, task) => result.shortlists.find((entry) => entry.task === task)
 
 /* ---------- citations -------------------------------------------------------------------- */
 
@@ -156,6 +161,18 @@ test('a proposal whose item citation disagrees with the item it names is refused
   assert.match(problems[0], /agent:sales/)
 })
 
+test('a prediction that is not a real number is refused — NaN hours is not a citation', () => {
+  const problems = validateProposal({ ...soundProposal, predicted: { hoursPerWeek: NaN, costPerWeek: null } })
+  assert.ok(problems.length > 0)
+  assert.match(problems[0], /predicted saving/)
+})
+
+test('an infinite predicted cost is refused too', () => {
+  const problems = validateProposal({ ...soundProposal, predicted: { hoursPerWeek: 3, costPerWeek: Infinity } })
+  assert.ok(problems.length > 0)
+  assert.match(problems[0], /not a real number/)
+})
+
 /* ---------- scoring ---------------------------------------------------------------------- */
 
 test('scoring is about shared meaning, not shared filler words', () => {
@@ -167,7 +184,7 @@ test('scoring is about shared meaning, not shared filler words', () => {
 test('an owner writes gerunds and an item writes third person - they must still meet', () => {
   const pairs = [['invoices', 'invoice'], ['writes', 'write'], ['writing', 'write'], ['chasing', 'chases'], ['sorted', 'sorts']]
   for (const [a, b] of pairs) {
-    assert.equal(stem(a), stem(b), a + ' and ' + b + ' are the same word to an owner reading their own ledger')
+    assert.equal(stem(a), stem(b), `${a} and ${b} are the same word to an owner reading their own ledger`)
   }
 })
 
@@ -181,13 +198,60 @@ test('a task about something nobody built scores zero against everything', () =>
   }
 })
 
-/* ---------- matching --------------------------------------------------------------------- */
+/* ---------- the shortlist ---------------------------------------------------------------- */
 
-test('a candidate with a real catalogue match becomes a proposal carrying all three citations', () => {
+test('the shortlist ranks candidates and never exceeds its limit', () => {
+  const index = buildIndex(catalogue)
+  const candidates = shortlist(newsletter, catalogue, index)
+  assert.ok(candidates.length > 0)
+  assert.ok(candidates.length <= SHORTLIST_LIMIT)
+  assert.equal(candidates[0].id, 'agent:content')
+  for (let i = 1; i < candidates.length; i += 1) {
+    assert.ok(candidates[i - 1].score >= candidates[i].score, 'candidates come back ranked')
+  }
+})
+
+test('one shared word never reaches the shortlist, however rare that word is', () => {
+  const index = buildIndex(catalogue)
+  const candidates = shortlist(exotic, catalogue, index)
+  assert.equal(candidates.length, 0)
+  for (const candidate of shortlist(newsletter, catalogue, index)) {
+    assert.ok(candidate.shared >= MIN_SHARED_WORDS)
+  }
+})
+
+test('team-maintenance tooling never reaches the shortlist', () => {
+  const withTeamItem = [
+    ...catalogue,
+    {
+      id: 'skill:token-saver',
+      kind: 'skill',
+      slug: 'token-saver',
+      name: 'token-saver',
+      audience: 'team',
+      description: 'Use when the user asks about token usage — what is eating my context, should I clear or compact',
+      path: '.claude/skills/token-saver/SKILL.md'
+    }
+  ]
+  const clearing = { task: 'Clearing my inbox', words: 'My inbox eats the first hour of every day' }
+  const ids = shortlist(clearing, withTeamItem, buildIndex(withTeamItem)).map((candidate) => candidate.id)
+  assert.ok(!ids.includes('skill:token-saver'), "the team's own token advisor is not an answer to an inbox problem")
+})
+
+test('the shortlist is stable — the same inputs give the same order every time', () => {
+  const index = buildIndex(catalogue)
+  assert.deepEqual(shortlist(newsletter, catalogue, index), shortlist(newsletter, catalogue, index))
+})
+
+/* ---------- choosing --------------------------------------------------------------------- */
+
+test('choosing from the shortlist produces a proposal carrying all three citations', () => {
   const result = match(ledgerOf([newsletter]), catalogue)
+  const entry = entryFor(result, 'Writing the newsletter')
+  assert.ok(entry, 'the task should get a shortlist')
 
-  assert.equal(result.proposals.length, 1)
-  const [proposal] = result.proposals
+  const { proposal, problems } = proposalFrom(entry, 'agent:content')
+  assert.deepEqual(problems, [])
   assert.equal(proposal.item, 'agent:content')
   assert.equal(proposal.citations.words, newsletter.words, 'the quote is verbatim, not a summary')
   assert.match(proposal.citations.number, /3/)
@@ -195,91 +259,84 @@ test('a candidate with a real catalogue match becomes a proposal carrying all th
   assert.deepEqual(validateProposal(proposal), [])
 })
 
-test('one shared word is not a match, however rare that word is', () => {
-  const result = match(ledgerOf([exotic]), catalogue)
-  assert.equal(result.proposals.length, 0, 'two texts agreeing on one word is luck, not evidence')
-  assert.equal(result.gaps.length, 1)
+/* This is the whole reason a model is allowed to choose at all. It may read sentences; it may not
+   make things up. The closed world is still built in code, before any judgment happens. */
+
+test('choosing something that is not on the shortlist is refused — the skill may pick, never invent', () => {
+  const result = match(ledgerOf([newsletter]), catalogue)
+  const entry = entryFor(result, 'Writing the newsletter')
+
+  const { proposal, problems } = proposalFrom(entry, 'agent:invented-by-the-model')
+  assert.equal(proposal, null)
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /not on the shortlist/)
 })
 
-test('every proposal the matcher emits passes its own citation check', () => {
-  const result = match(ledgerOf([newsletter, inbox]), catalogue)
-  assert.ok(result.proposals.length > 0)
-  for (const proposal of result.proposals) {
-    assert.deepEqual(validateProposal(proposal), [], `${proposal.item} was emitted without full citations`)
-  }
-})
-
-test('a task with no catalogue match becomes a gap phrased as a question, never a match', () => {
-  const result = match(ledgerOf([exotic]), catalogue)
-
-  assert.equal(result.proposals.length, 0, 'nothing in the catalogue does this, so nothing is proposed')
-  assert.equal(result.gaps.length, 1)
-  assert.match(result.gaps[0].question, /\?$/, 'a gap is a question, because we do not know the answer')
-  assert.equal(result.gaps[0].words, exotic.words, 'the gap still quotes them')
-})
-
-test('named once is a note, and a note is never proposed', () => {
-  const once = { ...chasing, confirmed: 'once' }
-  const result = match(ledgerOf([once]), catalogue)
-  assert.equal(result.proposals.length, 0)
-  assert.equal(result.notes.length, 1)
-  assert.equal(result.gaps.length, 0, 'a note is not a gap — we simply have not heard it twice')
-})
-
-test('a task nobody can act on is parked, not proposed, even with a perfect match', () => {
-  const noHandsOff = { ...chasing, hands_off: '' }
-  const result = match(ledgerOf([noHandsOff]), catalogue)
-  assert.equal(result.proposals.length, 0)
-  assert.equal(result.parked.length, 1)
-  assert.match(result.parked[0].reason, /who/i, 'the reason says what is missing')
+test('choosing a real catalogue item that simply did not make this shortlist is also refused', () => {
+  const result = match(ledgerOf([newsletter]), catalogue)
+  const entry = entryFor(result, 'Writing the newsletter')
+  const { proposal } = proposalFrom(entry, 'agent:sales')
+  assert.equal(proposal, null, 'agent:sales is real, but it is not an answer to this task')
 })
 
 test('every proposal carries a predicted weekly saving, so the tune-up has something to check', () => {
-  const [proposal] = match(ledgerOf([newsletter]), catalogue).proposals
+  const entry = entryFor(match(ledgerOf([newsletter]), catalogue), 'Writing the newsletter')
+  const { proposal } = proposalFrom(entry, 'agent:content')
   assert.equal(proposal.predicted.hoursPerWeek, 3)
   assert.equal(proposal.predicted.costPerWeek, 450)
 })
 
 test('with no hourly value the predicted cost is null, never zero', () => {
   const ledger = { owner_type: 'job', tasks: [newsletter] }
-  const [proposal] = match(ledger, catalogue).proposals
+  const entry = entryFor(match(ledger, catalogue), 'Writing the newsletter')
+  const { proposal } = proposalFrom(entry, 'agent:content')
   assert.equal(proposal.predicted.hoursPerWeek, 3)
   assert.equal(proposal.predicted.costPerWeek, null, 'zero would read as "this time is free", which is false')
 })
 
-test('nothing is proposed while the ledger still has problems — the numbers get corrected first', () => {
-  const broken = ledgerOf([{ ...chasing, words: '' }])
-  const result = match(broken, catalogue)
+/* ---------- matching --------------------------------------------------------------------- */
 
-  assert.equal(result.proposals.length, 0)
+test('a task with no catalogue match becomes a gap phrased as a question, never a match', () => {
+  const result = match(ledgerOf([exotic]), catalogue)
+  assert.equal(result.shortlists.length, 0, 'nothing in the catalogue does this, so nothing is offered')
+  assert.equal(result.gaps.length, 1)
+  assert.match(result.gaps[0].question, /\?$/, 'a gap is a question, because we do not know the answer')
+  assert.equal(result.gaps[0].words, exotic.words, 'the gap still quotes them')
+})
+
+test('named once is a note, and a note never gets a shortlist', () => {
+  const result = match(ledgerOf([{ ...newsletter, confirmed: 'once' }]), catalogue)
+  assert.equal(result.shortlists.length, 0)
+  assert.equal(result.notes.length, 1)
+  assert.equal(result.gaps.length, 0, 'a note is not a gap — we simply have not heard it twice')
+})
+
+test('a task nobody can act on is parked, not shortlisted, even with a perfect match', () => {
+  const result = match(ledgerOf([{ ...newsletter, hands_off: '' }]), catalogue)
+  assert.equal(result.shortlists.length, 0)
+  assert.equal(result.parked.length, 1)
+  assert.match(result.parked[0].reason, /who/i, 'the reason says what is missing')
+})
+
+test('nothing is offered while the ledger still has problems — the numbers get corrected first', () => {
+  const result = match(ledgerOf([{ ...newsletter, words: '' }]), catalogue)
+  assert.equal(result.shortlists.length, 0)
   assert.ok(result.problems.length > 0, 'it says why it refused')
-  assert.match(result.problems[0], /Chasing invoices/)
+  assert.match(result.problems[0], /Writing the newsletter/)
 })
 
 test('a catalogue containing something uncitable is refused outright, like a bad ledger', () => {
   const undescribed = [{ id: 'agent:ghost', kind: 'agent', slug: 'ghost', name: 'ghost', description: '', path: 'x' }]
   const result = match(ledgerOf([newsletter]), undescribed)
-  assert.equal(result.proposals.length, 0)
-  assert.ok(result.problems.length > 0, 'it says why, rather than quietly proposing nothing')
+  assert.equal(result.shortlists.length, 0)
+  assert.ok(result.problems.length > 0, 'it says why, rather than quietly offering nothing')
   assert.match(result.problems[0], /agent:ghost/)
 })
 
 test('a catalogue that is not a list is refused rather than throwing', () => {
   const result = match(ledgerOf([newsletter]), 42)
-  assert.equal(result.proposals.length, 0)
+  assert.equal(result.shortlists.length, 0)
   assert.ok(result.problems.length > 0)
-})
-
-test('a prediction that is not a real number is refused - NaN hours is not a citation', () => {
-  const problems = validateProposal({ ...soundProposal, predicted: { hoursPerWeek: NaN, costPerWeek: null } })
-  assert.ok(problems.length > 0)
-  assert.match(problems[0], /predicted saving/)
-})
-
-test('an infinite predicted cost is refused too', () => {
-  const problems = validateProposal({ ...soundProposal, predicted: { hoursPerWeek: 3, costPerWeek: Infinity } })
-  assert.ok(problems.length > 0)
-  assert.match(problems[0], /not a real number/)
 })
 
 test('results are stable — matching twice gives the same answer in the same order', () => {
@@ -288,17 +345,10 @@ test('results are stable — matching twice gives the same answer in the same or
   assert.deepEqual(once, twice)
 })
 
-/* ---------- the adversarial test ---------------------------------------------------------- */
+/* ---------- the adversarial tests ---------------------------------------------------------- */
 
-/* Rule 2 is only real if breaking it breaks the build. This is the test the plan asks for by
-   name: strip a citation and the suite must go red. It is written against the matcher's own
-   output so it cannot be satisfied by a fixture nobody uses. */
-
-/* The test above proves validateProposal works. It does NOT prove match() actually calls it —
-   in normal operation every proposal is complete, so deleting the gate changes nothing anyone
-   can see. That is precisely how a rule rots into a comment. This test forces the gate to be
-   load-bearing: a catalogue item with no id cannot produce an item citation, so match() must
-   refuse it. Delete the gate in match.mjs and this test goes red. */
+/* Rule 2 is only real if breaking it breaks the build. Delete the validateProposal call in
+   proposalFrom and this goes red: an un-citable item reaches the caller as a finished proposal. */
 
 test('ADVERSARIAL: the citation gate is load-bearing — remove it and this fails', () => {
   const idless = [
@@ -307,34 +357,32 @@ test('ADVERSARIAL: the citation gate is load-bearing — remove it and this fail
       kind: 'agent',
       slug: 'content',
       name: 'content',
+      audience: 'owner',
       description:
         'Writes posts, captions, and newsletters that sound like you, and leaves them as drafts for you to read before anything goes out.',
       path: '.claude/agents/content.md'
     }
   ]
-
   const result = match(ledgerOf([newsletter]), idless)
+  const entry = entryFor(result, 'Writing the newsletter')
+  assert.ok(entry, 'baseline: the item still shortlists, so the citation gate is what has to stop it')
 
-  assert.equal(
-    result.proposals.length,
-    0,
-    'an item with no id cannot be cited, so nothing may be proposed from it'
-  )
-  assert.equal(result.refused.length, 1, 'and the refusal is recorded rather than swallowed')
-  assert.match(result.refused[0].reasons[0], /item citation/)
+  const { proposal, problems } = proposalFrom(entry, '')
+  assert.equal(proposal, null, 'an item with no id cannot be cited, so nothing may be proposed from it')
+  assert.ok(problems.length > 0)
+  assert.match(problems[0], /item citation/)
 })
 
 test('ADVERSARIAL: a proposal with a citation stripped out is caught, not shipped', () => {
-  const [proposal] = match(ledgerOf([newsletter]), catalogue).proposals
+  const entry = entryFor(match(ledgerOf([newsletter]), catalogue), 'Writing the newsletter')
+  const { proposal } = proposalFrom(entry, 'agent:content')
   assert.deepEqual(validateProposal(proposal), [], 'baseline: the real proposal is sound')
 
   for (const citation of REQUIRED_CITATIONS) {
     const tampered = { ...proposal, citations: { ...proposal.citations } }
     delete tampered.citations[citation]
-
-    const problems = validateProposal(tampered)
     assert.ok(
-      problems.length > 0,
+      validateProposal(tampered).length > 0,
       `stripping the ${citation} citation produced no complaint — rule 2 is not being enforced`
     )
   }
@@ -342,14 +390,9 @@ test('ADVERSARIAL: a proposal with a citation stripped out is caught, not shippe
 
 /* ---------- the real repo ----------------------------------------------------------------- */
 
-/* The test that was missing, and whose absence hid everything else. Every test above runs against
-   hand-written fixtures, so the suite could be green while the shipped matcher proposed the
-   team's own retro tooling as the answer to running payroll — which it did.
-
-   These are the tasks a small-business owner and an employee actually write. They are checked
-   against the catalogue this repo really ships. Two rules:
-     - a named match must be defensible to a human reading it
-     - an absurd match is worse than no match, so absurd matches are asserted AGAINST by name */
+/* Every test above runs against hand-written fixtures, so the suite could be green while the
+   shipped matcher offered the team's own retro tooling as the answer to running payroll — which
+   it did, twice, before these existed. */
 
 const realTask = (task, words) => ({
   task,
@@ -368,42 +411,53 @@ async function matchAgainstTheRealRepo(tasks) {
   return result
 }
 
-test('the inbox task finds the inbox tooling in the real catalogue', async () => {
+const idsOf = (entry) => entry.candidates.map((candidate) => candidate.id)
+
+test('the inbox task shortlists the inbox tooling in the real catalogue', async () => {
   const result = await matchAgainstTheRealRepo([
     realTask('Sorting the inbox', 'The inbox eats my morning before I get to anything real')
   ])
-  assert.equal(result.proposals.length, 1)
-  assert.match(result.proposals[0].item, /inbox|email/, 'sorting the inbox should land on the inbox tooling')
+  assert.equal(result.shortlists.length, 1)
+  const ids = idsOf(result.shortlists[0])
+  assert.ok(ids.some((id) => /inbox|email/.test(id)), `sorting the inbox should shortlist the inbox tooling, got ${ids}`)
 })
 
-test('writing the newsletter finds the agent whose description ends "and newsletters"', async () => {
+test('writing the newsletter shortlists the agent whose description ends "and newsletters"', async () => {
   const result = await matchAgainstTheRealRepo([
     realTask('Writing the newsletter', 'I write the newsletter myself and it eats most of an afternoon')
   ])
-  assert.equal(result.proposals.length, 1)
-  assert.equal(result.proposals[0].item, 'agent:content')
+  assert.ok(idsOf(result.shortlists[0]).includes('agent:content'))
 })
 
-/* This one is the regression guard. Payroll is not something this team does. It once matched
-   skill:work-the-tasks on {run, three} - "three per run" in the task sweep against "my three
-   staff" in the owner's sentence - and was proposed with full citations and total confidence. */
+/* The case the shortlist exists for. Word-counting ranks the sales-pipeline reviewer top for
+   "replying to Google reviews" — a pun on "review" — and no threshold fixes that without killing
+   every good match. What the engine must do is put the right answer in front of the skill. */
 
-test('payroll is a gap, not the team\'s own card-router', async () => {
+test('a homograph does not hide the right answer — it is shortlisted for the skill to pick', async () => {
+  const result = await matchAgainstTheRealRepo([
+    realTask('Replying to Google reviews', 'I never get round to answering the reviews people leave us')
+  ])
+  const ids = idsOf(result.shortlists[0])
+  assert.ok(
+    ids.includes('agent:email') || ids.includes('skill:draft-replies'),
+    `the reply tooling must be offered even when a pun outranks it, got ${ids}`
+  )
+})
+
+test("payroll is a gap, not the team's own card-router", async () => {
   const result = await matchAgainstTheRealRepo([
     realTask('Doing the payroll', 'I work out the hours and run the payroll for my three staff')
   ])
-  assert.equal(result.proposals.length, 0, 'nothing in this catalogue does payroll')
+  assert.equal(result.shortlists.length, 0, 'nothing in this catalogue does payroll')
   assert.equal(result.gaps.length, 1)
   assert.match(result.gaps[0].question, /\?$/)
 })
 
 /* The guard that used to live here named four items. That is a blacklist, and a blacklist only
-   ever covers the instances somebody already found - the next sweep turned up five more, on
-   token-saver, install-stack, watch-updates and check-whats-changed. The rule is structural now:
-   NOTHING marked `audience: team` may be proposed for anybody's actual job, whatever it is
-   called. The named cases below are kept as history, not as the mechanism. */
+   covers the instances somebody already found — the next sweep turned up five more. The rule is
+   structural now: NOTHING marked `audience: team` reaches a shortlist, whatever it is called. */
 
-test('no team-maintenance tooling is ever proposed for a real job', async () => {
+test('no team-maintenance tooling is ever offered for a real job', async () => {
   const catalogue = await loadCatalogue()
   const teamIds = new Set(catalogue.filter((item) => item.audience === 'team').map((item) => item.id))
   assert.ok(teamIds.size > 0, 'if nothing is marked team, this test proves nothing')
@@ -414,20 +468,27 @@ test('no team-maintenance tooling is ever proposed for a real job', async () => 
     realTask('Handing over to the night shift', 'I write up what happened so the next shift knows'),
     realTask('Keeping the team handbook current', 'Our handbook goes stale and I have to check what changed'),
     realTask('Updating the website prices', 'Every time we change a price I edit the website by hand'),
+    realTask('Writing the monthly status report for my manager', 'Every month I write up a status report for my manager'),
+    realTask('Booking travel for the team', 'I book flights and hotels for the team'),
     realTask('Prepping for meetings', 'Before every call I dig through notes to remember where we left off'),
-    realTask('Reporting up to my manager', 'Every fortnight I pull together what I did for my manager'),
     realTask('Doing the payroll', 'I work out the hours and run the payroll for my three staff')
   ])
 
-  for (const proposal of result.proposals) {
+  for (const entry of result.shortlists) {
+    for (const candidate of entry.candidates) {
+      assert.ok(
+        !teamIds.has(candidate.id),
+        `"${entry.task}" was offered the team's own maintenance tooling (${candidate.id})`
+      )
+    }
+  }
+  for (const gap of result.gaps) {
     assert.ok(
-      !teamIds.has(proposal.item),
-      `"${proposal.task}" was answered with the team's own maintenance tooling (${proposal.item})`
+      !teamIds.has(gap.nearest),
+      `"${gap.task}" was pointed at team tooling (${gap.nearest}) as its closest match`
     )
   }
 })
-
-/* Each of these was a real proposal at some point in this build, cited and confident. */
 
 test('the five absurd matches found in review stay dead, by name', async () => {
   const cases = [
@@ -439,21 +500,17 @@ test('the five absurd matches found in review stay dead, by name', async () => {
   ]
   for (const [task, words, wrongAnswer] of cases) {
     const result = await matchAgainstTheRealRepo([realTask(task, words)])
-    for (const proposal of result.proposals) {
-      assert.notEqual(proposal.item, wrongAnswer, `"${task}" was answered with ${wrongAnswer} again`)
+    for (const entry of result.shortlists) {
+      assert.ok(!idsOf(entry).includes(wrongAnswer), `"${task}" was offered ${wrongAnswer} again`)
     }
   }
 })
-
-/* A gap with an obvious near-neighbour should say so. "Posting on LinkedIn" shares exactly one
-   word with the agent whose description opens "Writes posts" - not enough to propose on, easily
-   enough to ask about. Asking costs nothing; guessing is what this build exists to stop. */
 
 test('a gap with one strong near-neighbour asks about it instead of guessing', async () => {
   const result = await matchAgainstTheRealRepo([
     realTask('Posting on LinkedIn', 'I know I should post on LinkedIn but I never get round to it')
   ])
-  assert.equal(result.proposals.length, 0, 'one shared word is not enough to propose on')
+  assert.equal(result.shortlists.length, 0, 'one shared word is not enough to offer on')
   assert.equal(result.gaps.length, 1)
   assert.equal(result.gaps[0].nearest, 'agent:content')
   assert.match(result.gaps[0].question, /post/)
@@ -466,14 +523,6 @@ test('a gap with nothing near it does not invent a neighbour', async () => {
   ])
   assert.equal(result.gaps.length, 1)
   assert.equal(result.gaps[0].nearest, undefined)
-})
-
-test('a task nobody built anything for is a gap against the real catalogue', async () => {
-  const result = await matchAgainstTheRealRepo([
-    realTask('Calibrating the spectrometer', 'Every Tuesday I recalibrate the spectrometer by hand')
-  ])
-  assert.equal(result.proposals.length, 0)
-  assert.equal(result.gaps.length, 1)
 })
 
 test('the shipped workflow descriptions are descriptions, not engineering notes', async () => {

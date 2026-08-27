@@ -242,23 +242,41 @@ function numberCitation({ hoursPerWeek, costPerWeek }) {
 
 // Ties break on the catalogue's own order, which is alphabetical by kind then slug. Arbitrary,
 // but fixed — so the same week never produces two different teams on two different days.
-function bestMatch(task, catalogue, index) {
-  let best = null
-  let measured = { score: 0, shared: 0, words: [] }
+// Word-counting cannot tell a customer's REVIEW from the sales pipeline REVIEW, and no threshold
+// fixes that: raising the bar to three shared words kills every good match too. So this stops
+// choosing. It ranks, honestly and deterministically, and hands the choice to something that can
+// read a sentence — the /match skill.
+//
+// What it does NOT hand over is the ability to invent. The skill may only pick from this list,
+// and proposalFrom() refuses anything that is not on it. Rule 3 survives having a model in the
+// loop precisely because the closed world is built here, before any judgment happens.
+export const SHORTLIST_LIMIT = 3
+
+export function shortlist(task, catalogue, index, limit = SHORTLIST_LIMIT) {
+  const candidates = []
   for (const item of catalogue ?? []) {
     // Team-maintenance tooling is never an answer to where the owner's week goes.
     if (!proposable(item)) continue
-    const candidate = measureMatch(task, item, index)
-    if (candidate.shared < MIN_SHARED_WORDS) continue
-    if (candidate.score > measured.score) {
-      best = item
-      measured = candidate
-    }
+    const measured = measureMatch(task, item, index)
+    if (measured.shared < MIN_SHARED_WORDS) continue
+    // A positive score as well as the count: if every shared word is one that literally every
+    // item uses, the words agree on nothing that distinguishes anything.
+    if (measured.score <= 0) continue
+    candidates.push({
+      id: item.id,
+      name: item.name,
+      kind: item.kind,
+      path: item.path,
+      description: item.description,
+      score: measured.score,
+      shared: measured.shared,
+      words: measured.words
+    })
   }
-  // A positive score as well as the count: if every shared word is one that literally every item
-  // uses, the words agree on nothing that distinguishes anything.
-  if (!best || measured.score <= 0) return null
-  return { item: best, score: measured.score, shared: measured.shared, words: measured.words }
+  // Ties break on the catalogue's own order, which is alphabetical by kind then slug. Arbitrary,
+  // but fixed — so the same week never produces two different shortlists on two different days.
+  candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+  return candidates.slice(0, limit)
 }
 
 // A task can miss the two-word bar and still have one strong, obvious near-neighbour: "Posting
@@ -298,8 +316,45 @@ function gapFor(task, catalogue, index) {
   }
 }
 
+// Builds the cited proposal once something has chosen. The chooser may be the /match skill or a
+// person; either way this is the only door, and it refuses anything not on the shortlist.
+export function proposalFrom(entry, itemId) {
+  const candidate = (entry?.candidates ?? []).find((option) => option.id === itemId)
+  if (!candidate) {
+    return {
+      proposal: null,
+      problems: [
+        `${entry?.task ?? 'a task'} cannot be answered with ${itemId} — it is not on the shortlist, and only what the catalogue offered may be proposed`
+      ]
+    }
+  }
+
+  const proposal = {
+    task: entry.task,
+    item: candidate.id,
+    itemName: candidate.name,
+    itemKind: candidate.kind,
+    itemPath: candidate.path,
+    score: candidate.score,
+    sharedWords: candidate.words,
+    // Rule 6. The saving is written down as a prediction now so the weekly tune-up can check it
+    // against what actually ran, instead of the claim standing unexamined forever.
+    predicted: entry.predicted,
+    citations: {
+      words: textOf(entry.words),
+      number: numberCitation(entry.predicted),
+      item: candidate.id
+    }
+  }
+
+  // Rule 2, at the only place that matters: the exit. A proposal that cannot cite all three
+  // things never leaves this function, no matter who chose it or how good the match looked.
+  const problems = validateProposal(proposal)
+  return problems.length > 0 ? { proposal: null, problems } : { proposal, problems: [] }
+}
+
 export function match(ledger, catalogue) {
-  const result = { proposals: [], gaps: [], notes: [], parked: [], refused: [], problems: [] }
+  const result = { shortlists: [], gaps: [], notes: [], parked: [], problems: [] }
 
   // Rule 1. The ledger comes first. If the numbers are not yet sound there is nothing honest to
   // derive from them, and proposing anyway would hand someone a team built on a typo.
@@ -346,43 +401,21 @@ export function match(ledger, catalogue) {
       continue
     }
 
-    const found = bestMatch(task, catalogue, index)
+    const candidates = shortlist(task, catalogue, index)
 
     // Rule 3. Nothing in the catalogue does this. That is a question for the owner, not licence
     // to invent a capability and describe it confidently.
-    if (!found) {
+    if (candidates.length === 0) {
       result.gaps.push({ task: task.task, words: task.words, ...gapFor(task, catalogue, index) })
       continue
     }
 
-    const predicted = deriveTask(task, hourlyValue)
-    const proposal = {
+    result.shortlists.push({
       task: task.task,
-      item: found.item.id,
-      itemName: found.item.name,
-      itemKind: found.item.kind,
-      itemPath: found.item.path,
-      score: found.score,
-      sharedWords: found.words,
-      // Rule 6. The saving is written down as a prediction now so the weekly tune-up can check it
-      // against what actually ran, instead of the claim standing unexamined forever.
-      predicted,
-      citations: {
-        words: textOf(task.words),
-        number: numberCitation(predicted),
-        item: found.item.id
-      }
-    }
-
-    // Rule 2, at the only place that matters: the exit. A proposal that cannot cite all three
-    // things never leaves this function, no matter how good the match looked.
-    const refusals = validateProposal(proposal)
-    if (refusals.length > 0) {
-      result.refused.push({ task: task.task, reasons: refusals })
-      continue
-    }
-
-    result.proposals.push(proposal)
+      words: task.words,
+      predicted: deriveTask(task, hourlyValue),
+      candidates
+    })
   }
 
   return result
