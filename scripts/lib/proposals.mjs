@@ -129,19 +129,40 @@ export function validateProposals(written, ledger, catalogue) {
 
     for (const problem of validateProposal({ ...proposal, citations: cited })) problems.push(problem)
 
-    // Rule 5 again, at the level of the written row: the skill has to say why this one and not
-    // the other two it was offered. A shortlist of three answered without a reason is a coin flip
-    // wearing a citation.
-    if (entry.candidates.length > 1 && !textOf(row.why)) {
-      at(`was chosen from ${entry.candidates.length} candidates with no reason given — say why this one and not the others`)
+    // Every choice needs its reason, including a choice between one candidate and nothing.
+    //
+    // This used to be required only when there were two or more candidates, which sounded right
+    // and was measurably wrong: on a sweep of real tasks, most shortlists had exactly one entry,
+    // so the reason was almost never demanded and the judgment step was inert on the majority of
+    // the file. A sole candidate still has to be read and still has to be right; "it was the only
+    // one" is a fact about the engine, not a reason to hand somebody a worker.
+    if (!textOf(row.why)) {
+      at(
+        entry.candidates.length > 1
+          ? `was chosen from ${entry.candidates.length} candidates with no reason given — say why this one and not the others`
+          : 'was the only candidate, which is not a reason — say why it actually does this job'
+      )
     }
   }
 
-  // Nothing may be quietly dropped. A candidate the owner named twice, that the engine found
-  // something for, has to appear either as a proposal or as a stated gap.
+  // DECLINING. The engine shortlists anything sharing a word, so most shortlists contain things
+  // that do not do the job. Refusing all of them is the correct answer often enough that it has to
+  // be first class — and for a while it was not: the skill and the lesson both told the reader to
+  // move a shortlisted task to gaps, and doing so produced an error with no way out.
+  //
+  // A declined task needs a reason, for the same purpose the gaps list serves: it is the record of
+  // what the team could not do, and it is what decides what gets built next.
   for (const entry of derived.shortlists) {
-    if (!answered.has(entry.task)) {
-      problems.push(`${entry.task}: the engine shortlisted ${entry.candidates.length} option(s) for this and proposals.yml says nothing about it`)
+    if (answered.has(entry.task)) continue
+    const declined = (written?.gaps ?? []).find((gap) => textOf(gap?.task) === entry.task)
+    if (!declined) {
+      problems.push(
+        `${entry.task}: proposals.yml says nothing about it — either propose one of the ${entry.candidates.length} candidate(s), or decline them all by carrying it as a gap`
+      )
+      continue
+    }
+    if (!textOf(declined.question)) {
+      problems.push(`${entry.task}: declined without saying why none of the candidates fit`)
     }
   }
 
@@ -171,9 +192,12 @@ export function summarizeProposals(written, ledger, catalogue) {
   }
 
   const priced = typeof hourlyValue === 'number' && Number.isFinite(hourlyValue) && hourlyValue > 0
+  // Counted from what was WRITTEN, not from what the engine derived. Most gaps now arrive as a
+  // decline - the engine offered candidates and the skill refused all of them - so counting
+  // derived gaps alone reported zero while the file plainly carried two.
   return {
     proposed: rows.length,
-    gaps: derived.gaps.length,
+    gaps: (written?.gaps ?? []).length,
     notes: derived.notes.length,
     parked: derived.parked.length,
     hoursPerWeek,

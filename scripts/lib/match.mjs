@@ -16,18 +16,21 @@ import { describable, proposable, validateCatalogue } from './catalogue.mjs'
 
 export const REQUIRED_CITATIONS = ['words', 'number', 'item']
 
-// The gate is the COUNT; the weight only decides which of the candidates wins.
+// One shared word is enough to be SHOWN. It is nowhere near enough to be chosen.
 //
-// One shared word is an accident of English however rare it is — "Calibrating the spectrometer"
-// and a skill that installs a stack share exactly one uncommon word and nothing else, and a
-// weight-only gate happily scored that 3.74 and proposed it. Two independent agreements between
-// two texts written months apart by different people is the smallest thing that is not luck.
+// That distinction is the whole architecture. When the engine did the choosing, the bar had to be
+// two words, because one shared word is an accident of English and an accident got proposed. Now
+// the engine only ranks, and a model that can read the sentence decides — so the honest thing is
+// to show it everything that shares any word and let it throw most of them away.
 //
-// The gate is deliberately NOT a weighted threshold. Weights are log(items / items using the
-// word), so they scale with the size of the catalogue: any absolute bar that behaved sensibly on
-// this repo's 42 items would silently refuse everything in a student's smaller repo, which is the
-// opposite of the failure it was meant to prevent. A count travels; a magic number does not.
-export const MIN_SHARED_WORDS = 2
+// Raising the bar to two was measurably costing real answers: "Clearing out my inbox" came back a
+// gap while the email agent, the triage skill and the inbox workflow all sat in the catalogue
+// unshown. A model cannot choose what it was never offered, and a shortlist that hides the right
+// answer is worse than one that includes two wrong ones beside it.
+//
+// The cap is what keeps this honest in the other direction: three candidates, ranked by how rare
+// the shared words are, so the reading stays short enough to actually happen.
+export const MIN_SHARED_WORDS = 1
 
 // When something happens is not what it is. The ledger already records the when, as numbers the
 // owner corrected — times_per_week and minutes_each. Leaving day names and cadence words in the
@@ -234,7 +237,10 @@ export function validateProposal(proposal) {
   return problems
 }
 
-function numberCitation({ hoursPerWeek, costPerWeek }) {
+// Exported because the /match skill has to write this exact string into proposals.yml and the
+// check compares it character for character. Telling a skill to "use the predicted saving" and
+// then enforcing a specific rendering of it is how you get a file nobody can write by hand.
+export function numberCitation({ hoursPerWeek, costPerWeek }) {
   const hours = Math.round(hoursPerWeek * 10) / 10
   const time = `${hours} hours a week`
   return costPerWeek === null ? time : `${time}, ${Math.round(costPerWeek)} a week`
@@ -279,54 +285,18 @@ export function shortlist(task, catalogue, index, limit = SHORTLIST_LIMIT) {
   return candidates.slice(0, limit)
 }
 
-// A task can miss the two-word bar and still have one strong, obvious near-neighbour: "Posting
-// on LinkedIn" shares only `post` with the agent whose description opens "Writes posts". One word
-// is not enough to PROPOSE on - the same shape gave "approving holiday requests" to the security
-// agent on `approv`, at maximum rarity - but it is worth asking about.
+// With a one-word floor, anything sharing any word with the task is already on the shortlist for
+// the skill to read and reject. So a gap now means exactly one thing — nothing in the catalogue
+// shares a single meaningful word with what they said — and it needs no hedging.
 //
-// So the near miss goes into the question, not into a proposal. The owner is the one who can say
-// in a second whether that is what they meant, and asking them costs nothing. Guessing does not.
-export const NEAR_MISS_RATIO = 0.55
-
-export function nearMiss(task, catalogue, index) {
-  if (!index?.items) return null
-  const ceiling = Math.log(index.items + 1)
-  let best = null
-  for (const item of catalogue ?? []) {
-    if (!proposable(item)) continue
-    const measured = measureMatch(task, item, index)
-    if (measured.shared !== 1) continue
-    if (measured.score / ceiling < NEAR_MISS_RATIO) continue
-    if (!best || measured.score > best.score) best = { item, ...measured }
-  }
-  return best
-}
-
-// The matcher works in stems; an owner never said "chas". Showing them their own word back is the
-// difference between a question they can answer and one that reads like a machine talking to
-// itself, so the stem is mapped back to whichever word in their sentence produced it.
-export function spokenForm(root, text) {
-  for (const word of String(text ?? '').split(/[^A-Za-z0-9]+/)) {
-    if (word && stem(word.toLowerCase()) === root) return word.toLowerCase()
-  }
-  return root
-}
-
-function gapFor(task, catalogue, index) {
-  const near = nearMiss(task, catalogue, index)
-  if (!near) {
-    return {
-      question: `Nothing on the team does this yet — what would have to exist to take "${task.task}" off your week?`
-    }
-  }
-  const spoken = spokenForm(near.words[0], `${task?.task ?? ''} ${task?.words ?? ''}`)
-  // Deliberately not "the closest is X". That is a declarative superlative, and it asserts a
-  // ranking that is false in any useful sense — the winner of a one-word stemming collision is
-  // not the closest thing to anything. An owner skimming reads the claim and skips the hedge.
+// This replaces an earlier near-miss mechanism that named "the closest thing" for gaps under the
+// two-word bar. It was wrong twice over: the superlative was false whenever more than one item
+// shared a word, and the item it named was chosen for having the RAREST shared word, which in a
+// small catalogue is where the homographs live. It told an owner the closest thing to clearing
+// their inbox was the research agent, on the word "click".
+function gapFor(task) {
   return {
-    nearest: near.item.id,
-    sharedWord: spoken,
-    question: `The only thing on the team sharing any word with this is ${near.item.id}, on the single word "${spoken}" — which is usually a coincidence. Is that the same job, or is "${task.task}" something the team cannot do yet?`
+    question: `Nothing on the team shares a single word with this — what would have to exist to take "${task.task}" off your week?`
   }
 }
 
@@ -338,7 +308,7 @@ export function proposalFrom(entry, itemId) {
     return {
       proposal: null,
       problems: [
-        `${entry?.task ?? 'a task'} cannot be answered with ${itemId} — it is not on the shortlist, and only what the catalogue offered may be proposed`
+        `${entry?.task ?? 'a task'} cannot be answered with ${itemId} \u2014 it is not on the shortlist, and only what the catalogue offered may be proposed`
       ]
     }
   }
@@ -420,7 +390,7 @@ export function match(ledger, catalogue) {
     // Rule 3. Nothing in the catalogue does this. That is a question for the owner, not licence
     // to invent a capability and describe it confidently.
     if (candidates.length === 0) {
-      result.gaps.push({ task: task.task, words: task.words, ...gapFor(task, catalogue, index) })
+      result.gaps.push({ task: task.task, words: task.words, ...gapFor(task) })
       continue
     }
 

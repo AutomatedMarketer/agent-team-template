@@ -216,3 +216,8 @@ test('a whitespace-only task name is refused too', () => {
   const problems = validateLedger(ledgerOf([{ ...chasing, task: '   ' }]))
   assert.ok(problems.some((problem) => /needs a name/.test(problem)))
 })
+
+test('two tasks with the same name are refused - the numbers get crossed otherwise', () => {
+  const problems = validateLedger(ledgerOf([chasing, { ...chasing, minutes_each: 600 }]))
+  assert.ok(problems.some((problem) => /named 2 times/.test(problem)))
+})

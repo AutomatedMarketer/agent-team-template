@@ -273,10 +273,13 @@ test('choosing something that is not on the shortlist is refused — the skill m
 })
 
 test('choosing a real catalogue item that simply did not make this shortlist is also refused', () => {
-  const result = match(ledgerOf([newsletter]), catalogue)
-  const entry = entryFor(result, 'Writing the newsletter')
-  const { proposal } = proposalFrom(entry, 'agent:sales')
-  assert.equal(proposal, null, 'agent:sales is real, but it is not an answer to this task')
+  const result = match(ledgerOf([inbox]), catalogue)
+  const entry = entryFor(result, 'Sorting the inbox')
+  assert.ok(entry, 'the inbox task should shortlist something')
+  assert.ok(!entry.candidates.some((candidate) => candidate.id === 'agent:content'), 'baseline: content is not a candidate here')
+
+  const { proposal } = proposalFrom(entry, 'agent:content')
+  assert.equal(proposal, null, 'agent:content is real, but it is not an answer to this task')
 })
 
 test('every proposal carries a predicted weekly saving, so the tune-up has something to check', () => {
@@ -444,13 +447,24 @@ test('a homograph does not hide the right answer — it is shortlisted for the s
   )
 })
 
-test("payroll is a gap, not the team's own card-router", async () => {
+/* Payroll is the case that shows what the one-word floor buys and what it costs. Something in the
+   catalogue shares a word with it, so it gets shown — and everything shown is wrong. The engine is
+   not supposed to catch this; the skill is, by declining. What the engine MUST do is never let the
+   team's own tooling be among the wrong things offered. */
+
+test('payroll is offered nothing that could plausibly do it, and never team tooling', async () => {
+  const catalogue = await loadCatalogue()
+  const teamIds = new Set(catalogue.filter((item) => item.audience === 'team').map((item) => item.id))
   const result = await matchAgainstTheRealRepo([
     realTask('Doing the payroll', 'I work out the hours and run the payroll for my three staff')
   ])
-  assert.equal(result.shortlists.length, 0, 'nothing in this catalogue does payroll')
-  assert.equal(result.gaps.length, 1)
-  assert.match(result.gaps[0].question, /\?$/)
+
+  for (const entry of result.shortlists) {
+    for (const candidate of entry.candidates) {
+      assert.ok(!teamIds.has(candidate.id), `payroll was offered the team's own tooling (${candidate.id})`)
+      assert.equal(candidate.shared, 1, 'nothing here agrees with payroll on more than a single coincidental word')
+    }
+  }
 })
 
 /* The guard that used to live here named four items. That is a blacklist, and a blacklist only
@@ -506,15 +520,38 @@ test('the five absurd matches found in review stay dead, by name', async () => {
   }
 })
 
-test('a gap with one strong near-neighbour asks about it instead of guessing', async () => {
+/* This used to be a gap with a "nearest thing" bolted onto the question, because one shared word
+   could not clear the old two-word bar. That mechanism named the item with the RAREST shared word,
+   which in a small catalogue is exactly where the homographs live — it once told an owner the
+   closest thing to clearing their inbox was the research agent, on the word "click". Now the
+   candidate is simply shown and the skill decides. */
+
+test('one strong shared word puts the right answer in front of the skill', async () => {
   const result = await matchAgainstTheRealRepo([
     realTask('Posting on LinkedIn', 'I know I should post on LinkedIn but I never get round to it')
   ])
-  assert.equal(result.shortlists.length, 0, 'one shared word is not enough to offer on')
-  assert.equal(result.gaps.length, 1)
-  assert.equal(result.gaps[0].nearest, 'agent:content')
-  assert.match(result.gaps[0].question, /post/)
-  assert.match(result.gaps[0].question, /\?$/, 'it is still a question, not a claim')
+  assert.equal(result.shortlists.length, 1)
+  assert.ok(
+    idsOf(result.shortlists[0]).includes('agent:content'),
+    `the agent whose description opens "Writes posts" must be offered, got ${idsOf(result.shortlists[0])}`
+  )
+})
+
+test('the tasks the product is built around all reach the skill with the right answer shown', async () => {
+  const cases = [
+    ['Clearing out my inbox', 'My inbox is a nightmare, it eats the first hour of every day', /email|inbox/],
+    ['Answering support tickets', 'Tickets pile up and I answer the same things over and over', /customer-service/],
+    ['Answering our Google reviews', 'I never get round to answering the reviews people leave us', /customer-service|email|repl/]
+  ]
+  for (const [task, words, expected] of cases) {
+    const result = await matchAgainstTheRealRepo([realTask(task, words)])
+    assert.equal(result.shortlists.length, 1, `"${task}" should reach the skill, not gap out`)
+    const ids = idsOf(result.shortlists[0])
+    assert.ok(
+      ids.some((id) => expected.test(id)),
+      `"${task}" must have a defensible answer ON the shortlist - a model cannot choose what it was not shown. Got ${ids}`
+    )
+  }
 })
 
 test('a gap with nothing near it does not invent a neighbour', async () => {

@@ -65,7 +65,10 @@ for (const row of written.proposals ?? []) {
 
 if (summary.gaps) {
   console.log(`${summary.gaps} thing${summary.gaps === 1 ? '' : 's'} nothing on the team does yet:`)
-  for (const gap of written.gaps ?? []) console.log(`  - ${gap.task}`)
+  for (const gap of written.gaps ?? []) {
+    console.log(`  - ${gap.task}`)
+    if (gap.question) console.log(`      ${gap.question}`)
+  }
   console.log('')
 }
 if (summary.parked) console.log(`${summary.parked} parked - nobody named who acts on the output yet`)

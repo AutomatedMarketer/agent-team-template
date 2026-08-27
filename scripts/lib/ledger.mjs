@@ -146,6 +146,22 @@ export function validateLedger(ledger) {
     }
   }
 
+  // Everything downstream keys on the task name: the shortlist map, the answered set, the quote
+  // lookup. Two rows with the same name means one silently wins the map, another silently wins
+  // the .find(), and a proposal ends up quoting one row while costing the other. A ten-hour task
+  // disappeared this way with nothing reporting it.
+  const names = new Map()
+  for (const task of tasks) {
+    const name = typeof task?.task === 'string' ? task.task.trim() : ''
+    if (!name) continue
+    names.set(name, (names.get(name) ?? 0) + 1)
+  }
+  for (const [name, count] of names) {
+    if (count > 1) {
+      problems.push(`${name}: named ${count} times - every task needs its own name, or the numbers get crossed`)
+    }
+  }
+
   const total = tasks.reduce((sum, task) => {
     const hours = hoursFor(task)
     return Number.isFinite(hours) ? sum + hours : sum

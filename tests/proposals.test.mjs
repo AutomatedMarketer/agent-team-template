@@ -256,8 +256,15 @@ test('a file with no proposals list at all is a problem, not an empty pass', () 
 
 /* ---------- the summary --------------------------------------------------------------------- */
 
-test('the summary adds up only what was actually proposed', () => {
-  const summary = summarizeProposals(soundFile, ledgerOf([newsletter, exotic]), catalogue)
+test('the summary adds up only what was actually proposed, and counts what was written', () => {
+  // Gaps are counted from the FILE, not from what the engine derived. Most gaps now arrive as a
+  // decline - the engine offered candidates and the skill refused them all - so counting derived
+  // gaps reported zero while the file plainly carried two.
+  const withGap = {
+    proposals: soundFile.proposals,
+    gaps: [{ task: 'Calibrating the spectrometer', question: 'Nothing here does this - should it?' }]
+  }
+  const summary = summarizeProposals(withGap, ledgerOf([newsletter, exotic]), catalogue)
   assert.equal(summary.proposed, 1)
   assert.equal(summary.hoursPerWeek, 3)
   assert.equal(summary.costPerWeek, 450)
@@ -269,4 +276,47 @@ test('with no rate the summary reports hours and leaves money blank', () => {
   assert.equal(summary.hoursPerWeek, 3)
   assert.equal(summary.costPerWeek, null)
   assert.equal(summary.unpriced, true)
+})
+
+/* ---------- declining ----------------------------------------------------------------------- */
+
+/* The engine shortlists anything sharing a word, so most shortlists contain things that do not do
+   the job. Refusing all of them is the correct answer often enough that it has to be first class.
+
+   For a while it was not. The skill said "decline it and move it to gaps" in three places and the
+   lesson said it in three more, and doing exactly that produced an error with no way out. Once
+   the engine shortlisted anything, a proposal was mandatory - which is how a product built to
+   stop confident wrong answers came to require one. */
+
+test('a shortlisted task can be declined by carrying it as a gap', () => {
+  const declined = {
+    proposals: [],
+    gaps: [{ task: 'Writing the newsletter', question: 'Offered the content agent, but it writes marketing posts and this is an internal update. Nothing here does that - should it?' }]
+  }
+  assert.deepEqual(validateProposals(declined, ledgerOf([newsletter]), catalogue), [])
+})
+
+test('declining without saying why none of them fit is refused', () => {
+  const declined = {
+    proposals: [],
+    gaps: [{ task: 'Writing the newsletter', question: '' }]
+  }
+  const problems = validateProposals(declined, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /declined without saying why/.test(problem)))
+})
+
+test('silence is still refused - a task is proposed on or declined, never ignored', () => {
+  const silent = { proposals: [], gaps: [] }
+  const problems = validateProposals(silent, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /says nothing about it/.test(problem)))
+  assert.ok(problems.some((problem) => /decline them all/.test(problem)), 'the error has to name the way out')
+})
+
+test('a sole candidate still needs a reason - being the only one is not one', () => {
+  const soleCandidate = {
+    proposals: [{ task: 'Writing the newsletter', item: 'agent:content', words: newsletter.words, number: '3 hours a week, 450 a week' }],
+    gaps: []
+  }
+  const problems = validateProposals(soleCandidate, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /not a reason/.test(problem)))
 })
