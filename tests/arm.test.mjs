@@ -133,7 +133,9 @@ test('the three lists come back separated, and declared is countable', () => {
   assert.deepEqual(result.armed.map((w) => w.slug), ['morning-intel'])
   assert.deepEqual(result.declared.map((w) => w.slug), ['inbox-triage'])
   assert.deepEqual(result.off.map((w) => w.slug), ['gone-cold'])
-  assert.deepEqual(result.problems, [])
+  // A wish is a problem now: inbox-triage says run it and nothing rings.
+  assert.equal(result.problems.length, 1)
+  assert.match(result.problems[0], /nothing rings/)
 })
 
 test('an armed job carries the routine id; nothing else does', () => {
@@ -273,7 +275,7 @@ test('an old snapshot is stale and says how old', () => {
   const now = Date.parse('2026-08-27T12:00:00Z')
   const old = readSnapshot('{"takenAt":"1999-01-01T00:00:00Z","routines":[]}', now)
   assert.equal(old.stale, true)
-  assert.match(old.reason, /hours old/)
+  assert.match(old.reason, /years ago|months ago/, 'a person cannot read 242426 hours')
 })
 
 test('a fresh snapshot is not stale and carries no complaint', () => {
@@ -286,4 +288,83 @@ test('a fresh snapshot is not stale and carries no complaint', () => {
 
 test('a takenAt that is not a date is treated as no stamp at all', () => {
   assert.equal(readSnapshot('{"takenAt":"soon","routines":[]}').unstamped, true)
+})
+
+/* ---------- the snapshot cannot be trusted into a claim ---------------------------------------- */
+
+/* An unusable snapshot produced an empty routine list, so every armed job came back `declared` and
+   the tool reported nine wishes it had no evidence for — while printing a banner saying it could
+   only read the files. It asserted the exact class of thing it exists to catch. */
+
+test('with the routines unknown, nothing is called armed or declared', () => {
+  const workflows = [
+    workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, 'Morning Intel'),
+    workflow('gone-cold', { schedule: 'daily 09:00', armed: false, reason: 'no run cap yet' }, 'Gone Cold')
+  ]
+  const result = reconcile(workflows, [], { routinesKnown: false })
+
+  assert.deepEqual(result.armed, [])
+  assert.deepEqual(result.declared, [], 'nothing rings is a CLAIM, and there is no evidence for it')
+  assert.deepEqual(result.unapproved, [])
+  assert.deepEqual(result.unknown.map((w) => w.slug), ['morning-intel'])
+  assert.deepEqual(result.off.map((w) => w.slug), ['gone-cold'], 'the file still decides this one')
+})
+
+test('with the routines unknown, no orphan is asserted either', () => {
+  const result = reconcile([], [routine('Something')], { routinesKnown: false })
+  assert.deepEqual(result.orphans, [])
+})
+
+test('a declared job is a problem, so the check cannot pass with wishes in it', () => {
+  const wish = workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, 'Morning Intel')
+  const result = reconcile([wish], [])
+  assert.equal(result.declared.length, 1)
+  assert.ok(result.problems.some((problem) => /nothing rings/.test(problem)))
+})
+
+/* ---------- an impossible stamp -------------------------------------------------------------- */
+
+/* Left alone this produced the worst possible answer: ageHours goes negative, the staleness test
+   passes, and a file stamped 2099 reads as the most current snapshot imaginable. */
+
+test('a snapshot stamped in the future is refused, not treated as the freshest possible', () => {
+  const now = Date.parse('2026-08-27T12:00:00Z')
+  const snap = readSnapshot('{"takenAt":"2099-01-01T00:00:00Z","routines":[]}', now)
+  assert.equal(snap.impossible, true)
+  assert.equal(snap.missing, true, 'it must not be usable as evidence')
+  assert.notEqual(snap.stale, false, 'and it must never read as fresh')
+  assert.match(snap.reason, /future/)
+})
+
+test('an age is rendered in something a person reads', () => {
+  const now = Date.parse('2026-08-27T12:00:00Z')
+  const ancient = readSnapshot('{"takenAt":"1999-01-01T00:00:00Z","routines":[]}', now)
+  assert.doesNotMatch(ancient.reason, /\d{5,} hours/, '242426 hours is noise, not a number')
+  assert.match(ancient.reason, /years|months/)
+})
+
+/* ---------- mutants that survived, now pinned -------------------------------------------------- */
+
+test('armed must be exactly true - a truthy string does not arm a job', () => {
+  assert.equal(isArmed(workflow('x', { schedule: 'daily 06:30', armed: 'yes' })), false)
+  assert.equal(isArmed(workflow('x', { schedule: 'daily 06:30', armed: 1 })), false)
+  assert.equal(isArmed(workflow('x', { schedule: 'daily 06:30', armed: true })), true)
+})
+
+test('a workflow with no name falls back to its slug when matching a routine', () => {
+  const unnamed = { slug: 'morning-intel', path: 'workflows/morning-intel.yml', data: { trigger: { armed: true, schedule: 'daily 06:30' } } }
+  assert.ok(routineFor(unnamed, [routine('morning-intel')]), 'the slug is the only name it has')
+})
+
+test('names match through surrounding whitespace', () => {
+  const morning = workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, '  Morning Intel  ')
+  assert.ok(routineFor(morning, [routine('Morning Intel')]))
+})
+
+test('names match through unicode composition - Cafe and Café are the same name', () => {
+  const composed = workflow('cafe', { schedule: 'daily 06:30', armed: true }, 'Café Report')
+  assert.ok(
+    routineFor(composed, [routine('Café Report')]),
+    'a decomposed name would report declared AND leave an orphan for one correctly armed job'
+  )
 })

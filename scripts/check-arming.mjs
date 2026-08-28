@@ -30,15 +30,24 @@ if (snapshot.missing) {
   console.log(`Routines as of ${new Date(snapshot.takenAt).toLocaleString()}.\n`)
 }
 
-const result = reconcile(workflows, snapshot.routines)
+// When the snapshot cannot be trusted, the routines are NOT known - so nothing is called armed,
+// declared or unapproved, because none of those can be told apart without evidence. Saying "I
+// cannot tell" is the whole job here.
+const routinesKnown = !snapshot.missing && !snapshot.stale
+const result = reconcile(workflows, snapshot.routines, { routinesKnown })
 const plural = (list, word) => `${list.length} ${word}${list.length === 1 ? '' : 's'}`
 
-console.log(`  ${plural(result.armed, 'job')} armed - the file says run it and a routine exists`)
-console.log(`  ${plural(result.declared, 'job')} declared - the file says run it and nothing rings`)
-console.log(`  ${plural(result.unapproved, 'job')} unapproved - something rings that the file never approved`)
+if (routinesKnown) {
+  console.log(`  ${plural(result.armed, 'job')} armed - the file says run it and a routine exists`)
+  console.log(`  ${plural(result.declared, 'job')} declared - the file says run it and nothing rings`)
+  console.log(`  ${plural(result.unapproved, 'job')} unapproved - something rings that the file never approved`)
+} else {
+  console.log(`  ${plural(result.unknown, 'job')} the file says should run - whether anything rings is UNKNOWN`)
+}
 console.log(`  ${plural(result.off, 'job')} off, with a written reason`)
 
 for (const [heading, rows] of [
+  ['The file says these should run - nothing here can tell you whether they do', result.unknown],
   ['Armed', result.armed],
   ['DECLARED - these are wishes, not jobs', result.declared],
   ['UNAPPROVED - these are spending runs nobody agreed to', result.unapproved],

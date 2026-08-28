@@ -30,7 +30,7 @@ import path from 'node:path'
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const SNAPSHOT = '.agent-team/routines.json'
 
-export const ARM_STATES = ['armed', 'declared', 'unapproved', 'off']
+export const ARM_STATES = ['armed', 'declared', 'unapproved', 'off', 'unknown']
 
 function textOf(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -39,7 +39,10 @@ function textOf(value) {
 // Names are compared case- and spacing-insensitively because one side is typed into a yaml file by
 // a person and the other is typed into a web form by the same person on a different day.
 function nameKey(value) {
-  return textOf(value).toLowerCase().replace(/\s+/g, ' ')
+  // Normalised because one side is typed into a yaml file and the other into a web form, possibly
+  // on different machines. "Cafe\u0301" and "Caf\u00e9" look identical and are different strings;
+  // an armed job would have reported declared AND left an orphan beside it.
+  return textOf(value).normalize('NFC').toLowerCase().replace(/\s+/g, ' ')
 }
 
 export function isArmed(workflow) {
@@ -59,6 +62,19 @@ export function reasonFor(workflow) {
 // How stale is too stale to be worth trusting. A day: routines fire on schedules measured in
 // hours, so a snapshot older than this has almost certainly missed something.
 export const SNAPSHOT_STALE_AFTER_HOURS = 24
+
+// "242426 hours old" is not a number anybody reads. Days past a couple of days, weeks past a
+// fortnight - the point of the sentence is that somebody notices it, and a six-digit number of
+// hours is noticed as noise.
+export function describeAge(hours) {
+  if (hours < 48) return `${Math.round(hours)} hours`
+  const days = Math.round(hours / 24)
+  if (days < 14) return `${days} days`
+  const weeks = Math.round(days / 7)
+  if (weeks < 9) return `${weeks} weeks`
+  const months = Math.round(days / 30)
+  return months < 24 ? `${months} months` : `${Math.round(days / 365)} years`
+}
 
 export function readSnapshot(source, now = Date.now()) {
   if (source === null || source === undefined) {
@@ -89,14 +105,29 @@ export function readSnapshot(source, now = Date.now()) {
   }
 
   const ageHours = (now - takenMs) / 3600_000
+
+  // A stamp in the future is not fresh, it is wrong - a clock skew, a hand-edited file, a bad
+  // timezone. Left alone it produced the worst possible answer: ageHours goes negative, so the
+  // staleness test passes and a file stamped 2099 reads as the most current snapshot imaginable.
+  // "A stale snapshot must read as stale, never as live" has to survive its own edge case.
+  if (ageHours < 0) {
+    return {
+      takenAt,
+      routines,
+      ageHours,
+      impossible: true,
+      missing: true,
+      reason: 'the snapshot is stamped in the future, so its age cannot be trusted'
+    }
+  }
+
+  const stale = ageHours > SNAPSHOT_STALE_AFTER_HOURS
   return {
     takenAt,
     routines,
     ageHours,
-    stale: ageHours > SNAPSHOT_STALE_AFTER_HOURS,
-    reason: ageHours > SNAPSHOT_STALE_AFTER_HOURS
-      ? `the snapshot is ${Math.round(ageHours)} hours old`
-      : null
+    stale,
+    reason: stale ? `the snapshot was taken ${describeAge(ageHours)} ago` : null
   }
 }
 
@@ -151,8 +182,13 @@ export function validateArming(workflow) {
   return problems
 }
 
-export function reconcile(workflows, routines) {
-  const buckets = { armed: [], declared: [], unapproved: [], off: [], orphans: [], problems: [] }
+// `routinesKnown` is the difference between "nothing rings" and "I have no idea what rings".
+//
+// Without it, an unusable snapshot produced an empty routine list, every armed job came back
+// `declared`, and the tool reported nine wishes it had no evidence for - while printing a banner
+// saying it could only read the files. It asserted the exact class of thing it exists to catch.
+export function reconcile(workflows, routines, { routinesKnown = true } = {}) {
+  const buckets = { armed: [], declared: [], unapproved: [], off: [], unknown: [], orphans: [], problems: [] }
   const list = Array.isArray(workflows) ? workflows.filter(Boolean) : []
   const alarms = Array.isArray(routines) ? routines.filter(Boolean) : []
   const claimed = new Set()
@@ -191,18 +227,29 @@ export function reconcile(workflows, routines) {
     const routine = routineFor(workflow, alarms)
     if (routine) claimed.add(nameKey(routine.name))
 
-    const state = armState(workflow, alarms)
+    // With no trustworthy snapshot the only honest states are the ones the FILE decides.
+    const state = routinesKnown ? armState(workflow, alarms) : (isArmed(workflow) ? 'unknown' : 'off')
     const row = {
       slug: workflow?.slug ?? null,
       name: textOf(workflow?.data?.name) || workflow?.slug || '(unnamed)',
       path: workflow?.path ?? null,
       schedule: textOf(workflow?.data?.trigger?.schedule) || null,
       reason: reasonFor(workflow) || null,
-      // Carried on `armed` because that is the routine the file approved, and on `unapproved`
-      // because naming the thing that is spending money is the entire point of that state.
-      routineId: state === 'armed' || state === 'unapproved' ? (routine?.id ?? null) : null
+      // Set exactly when something rings. The state test that used to guard this was dead code:
+      // `armed` and `unapproved` are the two states where a routine matched, so the guard could
+      // never change the answer. A mutation survived it because there was nothing to survive.
+      routineId: routine?.id ?? null
     }
     buckets[state].push(row)
+
+    // A wish is a problem. It was not one for a while, which left both checklists pairing
+    // "declared is empty" with "the check exits without complaining" - and nine wishes exited 0,
+    // so a student could tick both boxes with nothing running.
+    if (state === 'declared') {
+      buckets.problems.push(
+        `${row.name}: the file says run it and nothing rings. Arm it, or set armed: false with a reason`
+      )
+    }
 
     if (state === 'unapproved') {
       buckets.problems.push(
@@ -215,6 +262,7 @@ export function reconcile(workflows, routines) {
   // armed something that has since been renamed or removed, and quietly claiming it belongs to a
   // file it does not match would be inventing a connection.
   for (const routine of alarms) {
+    if (!routinesKnown) break
     if (claimed.has(nameKey(routine?.name))) continue
     buckets.orphans.push({ id: routine?.id ?? null, name: textOf(routine?.name) || '(unnamed)' })
   }
