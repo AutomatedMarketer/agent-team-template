@@ -47,9 +47,19 @@ if (routinesKnown) {
 // Split, because the line used to say "10 jobs off, with a written reason" while one of those ten
 // was named four lines below as having none. A total that credits what it cannot evidence is the
 // exact fault this command exists to find, and it was printing it.
-const offWithReason = result.off.filter((row) => row.reason)
-const offWithNone = result.off.filter((row) => !row.reason)
+// A webhook job has no clock, so it was never asked for a reason and must not be counted among
+// the ones that owe one. The exemption went into arm.mjs and this reporter was not touched, so a
+// single run printed both "1 job off with no reason written down" and "Every job is either armed,
+// or off with a reason somebody wrote down" - two contradictory sentences about the same job, in
+// the command whose whole purpose is catching a claim its own detail contradicts.
+const isWebhookRow = (row) => row.webhook === true && !row.schedule
+const offWebhook = result.off.filter(isWebhookRow)
+const offWithReason = result.off.filter((row) => !isWebhookRow(row) && row.reason)
+const offWithNone = result.off.filter((row) => !isWebhookRow(row) && !row.reason)
 console.log(`  ${plural(offWithReason, 'job')} off, with a written reason`)
+if (offWebhook.length) {
+  console.log(`  ${plural(offWebhook, 'job')} fired by webhook - no clock, so nothing to be off from`)
+}
 if (offWithNone.length) {
   console.log(`  ${plural(offWithNone, 'job')} off with no reason written down - counted here, credited nowhere`)
 }
@@ -81,4 +91,6 @@ if (result.problems.length) {
   process.exit(1)
 }
 
-console.log('\nEvery job is either armed, or off with a reason somebody wrote down.')
+console.log(offWebhook.length
+  ? '\nEvery job is either armed, fired by webhook, or off with a reason somebody wrote down.'
+  : '\nEvery job is either armed, or off with a reason somebody wrote down.')

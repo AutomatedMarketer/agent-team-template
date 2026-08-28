@@ -112,3 +112,37 @@ test('a webhook routine is recognised, not reported as an orphan somebody should
   assert.deepEqual(result.orphans, [],
     'the webhook routine the course tells them to build was reported as something to report and not adopt')
 })
+
+/* The webhook exemption was added to `arm.mjs` and the REPORTER was not touched. So one run
+   printed both "1 job off with no reason written down - counted here, credited nowhere" and
+   "Every job is either armed, or off with a reason somebody wrote down." Two contradictory
+   sentences about the same job, in the same output, from the command whose whole purpose is
+   catching a claim its own detail contradicts. Twice now. */
+
+const WEBHOOK = [
+  'name: Answer a question',
+  'owner: customer-service',
+  'steps: [answer-question]',
+  'trigger:',
+  '  webhook: true',
+  'output: inbox/answers.md',
+  ''
+].join('\n')
+
+test('a webhook job is not shamed for a reason it was never asked for', async () => {
+  const run = await armingOutput(WEBHOOK)
+  await rm(run.scratch, { recursive: true, force: true })
+  assert.ok(!/no reason written down/.test(run.stdout),
+    'the exempt webhook job was counted among the ones missing a reason')
+})
+
+test('the closing sentence stays true when a webhook job is present', async () => {
+  const run = await armingOutput(WEBHOOK)
+  await rm(run.scratch, { recursive: true, force: true })
+  if (/Every job is either armed, or off with a reason/.test(run.stdout)) {
+    assert.ok(!/no reason written down/.test(run.stdout),
+      'it claims every job has a reason in the same breath as counting one that does not')
+  }
+  assert.match(run.stdout, /webhook/i,
+    'a webhook job is reported as nothing at all - it is neither armed, nor off, nor named')
+})

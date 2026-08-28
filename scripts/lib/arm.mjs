@@ -242,6 +242,8 @@ export function reconcile(workflows, routines, { routinesKnown = true } = {}) {
       name: textOf(workflow?.data?.name) || workflow?.slug || '(unnamed)',
       path: workflow?.path ?? null,
       schedule: textOf(workflow?.data?.trigger?.schedule) || null,
+      // Carried so the reporter can tell a clockless webhook from a job that owes a reason.
+      webhook: workflow?.data?.trigger?.webhook === true,
       reason: reasonFor(workflow) || null,
       // Set exactly when something rings. The state test that used to guard this was dead code:
       // `armed` and `unapproved` are the two states where a routine matched, so the guard could
