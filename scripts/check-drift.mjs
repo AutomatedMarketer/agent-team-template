@@ -60,7 +60,7 @@ try {
   if (ahead > 0) parts.push(`${ahead} commit${ahead === 1 ? '' : 's'} ahead`)
 
   if (parts.length) {
-    console.log(`This clone is ${parts.join(' and ')} ${upstream}.`)
+    console.log(`This clone is ${parts.join(' and ')} of ${upstream}.`)
     // Named rather than done. Whoever is here decides when to pull.
     console.log('Nothing has been changed. Ask for /sync when you want to catch up.')
   }
