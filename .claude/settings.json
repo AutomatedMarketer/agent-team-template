@@ -11,5 +11,17 @@
       "Edit(**/.env)",
       "Edit(**/.env.*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/check-drift.mjs"
+          }
+        ]
+      }
+    ]
   }
 }

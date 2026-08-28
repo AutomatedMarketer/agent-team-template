@@ -15,6 +15,7 @@
     "sync:blocks": "node scripts/sync-prompt-blocks.mjs",
     "check:ledger": "node scripts/check-ledger.mjs",
     "check:proposals": "node scripts/check-proposals.mjs",
-    "check:arming": "node scripts/check-arming.mjs"
+    "check:arming": "node scripts/check-arming.mjs",
+    "check:drift": "node scripts/check-drift.mjs"
   }
 }
