@@ -18,8 +18,19 @@ import { fileURLToPath } from 'node:url'
 const run = promisify(execFile)
 const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 
+// Failing silent is only a virtue if it fails PROMPTLY. Pointed at an unroutable address,
+// `git fetch` was measured sitting for 21.3 seconds before giving up - 21 seconds of silence at
+// the start of every session behind a captive portal or a dropped VPN. And a private repo with no
+// cached credential can wait forever on a password prompt nobody is looking at. So: a hard
+// deadline, and git is told up front that there is no human here to ask.
+const FETCH_DEADLINE_MS = 8000
+
 async function git(...args) {
-  const { stdout } = await run('git', args, { cwd: repoRoot })
+  const { stdout } = await run('git', args, {
+    cwd: repoRoot,
+    timeout: FETCH_DEADLINE_MS,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', GCM_INTERACTIVE: 'never' }
+  })
   return stdout.trim()
 }
 

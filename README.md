@@ -68,6 +68,10 @@ team: syncing, grading, watching upstream for changes, writing run logs.
 | **Claude Code**, installed and signed in | It is what reads this repo |
 | **A GitHub account**, connected to claude.ai | Your team runs in the cloud from GitHub, not from your laptop |
 | **Node.js 20 or newer** | Only for the check commands below. Run `node --version` to see yours |
+| **Git**, installed | Every command in the next section is a git command. Run `git --version` |
+
+Everything with a `$`-style block below is typed into a terminal — **Terminal** on a Mac,
+**PowerShell** on Windows. The `/slash` commands are typed into Claude Code instead.
 
 You do **not** need to install any packages. There are no dependencies — `npm test` works on a
 fresh clone with nothing downloaded.
@@ -76,35 +80,78 @@ fresh clone with nothing downloaded.
 
 ## Install
 
-**1. Make your own copy.** Use GitHub's *Use this template* button, or:
+**1. Install the plugin first.** `/onboard`, `/ledger`, `/match` and `/arm` are not files in this
+repo — they come from a separate plugin, and without it step 4 has nothing to run. In Claude Code:
+
+```
+/plugin marketplace add automatedmarketer/agent-team-os
+/plugin install agent-team-os
+```
+
+**2. Make your own copy.** The simplest way is GitHub's **Use this template** button: it makes you
+your own repo, with your own history, in one click. Then clone the repo it made you and skip
+straight to step 3.
+
+```bash
+git clone https://github.com/YOUR-USERNAME/my-agent-team.git
+cd my-agent-team
+```
+
+If you would rather clone this repo directly, you have to cut it loose from ours first. Skip that
+and your first push is rejected, and the drift check reports you permanently behind *our* repo.
+
+On a Mac:
 
 ```bash
 git clone https://github.com/AutomatedMarketer/agent-team-template.git my-agent-team
 cd my-agent-team
-```
-
-If you cloned rather than using the template button, disconnect it and start your own history:
-
-```bash
 rm -rf .git
-git init
+git init -b main
 git add -A
 git commit -m "My team"
 ```
 
-Then create an empty **private** repo on GitHub and push to it.
+On Windows, in PowerShell — `rm -rf` is not a PowerShell command and it will fail:
 
-**2. Check it works.**
+```powershell
+git clone https://github.com/AutomatedMarketer/agent-team-template.git my-agent-team
+cd my-agent-team
+Remove-Item -Recurse -Force .git
+git init -b main
+git add -A
+git commit -m "My team"
+```
+
+Then make an empty **private** repo on GitHub — no README, no `.gitignore`, nothing ticked — and
+push to it:
+
+```bash
+git remote add origin https://github.com/YOUR-USERNAME/my-agent-team.git
+git push -u origin main
+```
+
+The branch has to be **`main`**. `git init` on its own still makes `master` on many installs, the
+dashboard looks for `main`, and the mismatch shows up later as an empty board rather than an error.
+`git init -b main` above is what settles it; if you already have a `master`, `git branch -M main`
+renames it.
+
+**3. Check it works.**
 
 ```bash
 node --version
 npm test
 ```
 
-`node --version` must say 20 or higher. `npm test` should say **332 passing, 0 failing**. Nothing
-is downloaded and nothing is installed.
+`node --version` must say 20 or higher. `npm test` ends with these two lines:
 
-**3. Open it in Claude Code and let it introduce itself.**
+```
+ℹ pass 348
+ℹ fail 0
+```
+
+Nothing is downloaded and nothing is installed.
+
+**4. Open it in Claude Code and let it introduce itself.**
 
 ```
 /onboard
@@ -120,7 +167,7 @@ that decides whether everything else is any good.
 Four commands, in this order. Each tells you something different.
 
 ```bash
-npm test                 # 332 tests. If this fails, the clone is broken
+npm test                 # ends with "pass 348 / fail 0". If this fails, the clone is broken
 npm run check:ledger     # your week, measured
 npm run check:proposals  # what your numbers say your team should be
 npm run check:arming     # which jobs actually ring
@@ -128,6 +175,10 @@ npm run check:arming     # which jobs actually ring
 
 On a fresh clone the last three **tell you what is missing** rather than failing mysteriously.
 `No ledger.yml yet. Ask for one: /ledger` is the correct answer before you have run `/ledger`.
+
+Two of them also **exit non-zero** while they are saying it, which is right for anything automated
+and looks alarming in a terminal. A red mark before you have run `/ledger` is the tool agreeing
+with you, not a fault.
 
 ---
 
@@ -149,7 +200,9 @@ routines, one at a time, each confirmed afterwards.
 ### Which jobs actually run
 
 A file saying `schedule: "daily 06:30"` makes **nothing** happen at 06:30. A *routine* is the alarm
-clock. This repo ships nine files declaring a schedule and no routines at all, on purpose.
+clock. This repo ships nine files that name a schedule and no routines at all, on purpose — every
+one of them arrives **off**, with a written reason, which is what `check:arming` reports. *Declared*
+in the table below is the state you reach later, by claiming a schedule and not arming it.
 
 ```bash
 npm run check:arming

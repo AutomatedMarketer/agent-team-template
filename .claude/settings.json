@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/check-drift.mjs"
+            "command": "node -e \"const f='scripts/check-drift.mjs';require('fs').existsSync(f)&&require('child_process').spawnSync(process.execPath,[f],{stdio:'inherit'})\""
           }
         ]
       }
