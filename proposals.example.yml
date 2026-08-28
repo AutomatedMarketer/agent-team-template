@@ -39,7 +39,7 @@ proposals:
 
   - task: Writing the newsletter
     item: agent:content
-    why: "Its own description ends: posts, captions, and newsletters. The other two only shared the word write."
+    why: "Its own description ends: posts, captions, and newsletters. Rejected agent:sales and draft-chase-messages, which only shared the word write."
     words: "I write the newsletter myself and it eats most of an afternoon"
     number: "3 hours a week, 450 a week"
 

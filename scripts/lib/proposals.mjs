@@ -33,6 +33,9 @@ function textOf(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+// Short enough to write honestly, long enough that a tautology does not fit.
+export const MIN_REASON_LENGTH = 25
+
 // A written row carries its citations as three flat fields. The item is its own citation, which
 // is why there are three names here and only two extra keys in the file.
 export function citationsOf(row) {
@@ -65,6 +68,17 @@ export function validateProposals(written, ledger, catalogue) {
   const rows = Array.isArray(written?.proposals) ? written.proposals : null
   if (!rows) {
     problems.push('proposals.yml needs a `proposals:` list, even if it is empty')
+    return problems
+  }
+
+  // `gaps:` with nothing under it is the natural way to write "I declined nothing", and it parses
+  // to an empty string rather than a list. Guarded like `proposals:` because a Node stack trace is
+  // not a validation message, and the person who sees it wrote a reasonable file.
+  const gapRows = written?.gaps === undefined || written?.gaps === '' || written?.gaps === null
+    ? []
+    : (Array.isArray(written.gaps) ? written.gaps : null)
+  if (!gapRows) {
+    problems.push('`gaps:` must be a list, or left out entirely')
     return problems
   }
 
@@ -136,12 +150,31 @@ export function validateProposals(written, ledger, catalogue) {
     // so the reason was almost never demanded and the judgment step was inert on the majority of
     // the file. A sole candidate still has to be read and still has to be right; "it was the only
     // one" is a fact about the engine, not a reason to hand somebody a worker.
-    if (!textOf(row.why)) {
+    const why = textOf(row.why)
+    if (!why) {
       at(
         entry.candidates.length > 1
           ? `was chosen from ${entry.candidates.length} candidates with no reason given — say why this one and not the others`
           : 'was the only candidate, which is not a reason — say why it actually does this job'
       )
+    } else if (why.length < MIN_REASON_LENGTH) {
+      // "It chases." and "It handles email." both cleared a presence check. Under twenty
+      // shortlists a model will write thin reasons and nothing catches it, which makes the whole
+      // judgment step a rubber stamp with a citation attached.
+      at(`gives "${why}" as the reason, which is a restatement rather than a reason — say what it does that answers this task`)
+    } else if (entry.candidates.length > 1) {
+      // Where something was rejected, name it. A reason that never mentions the alternative is a
+      // reason that did not consider it.
+      const rejected = entry.candidates.filter((candidate) => candidate.id !== textOf(row.item))
+      const mentionsOne = rejected.some((candidate) => {
+        const haystack = why.toLowerCase()
+        return haystack.includes(candidate.id.toLowerCase()) ||
+          haystack.includes(candidate.slug?.toLowerCase() ?? '\u0000') ||
+          haystack.includes(candidate.name.toLowerCase())
+      })
+      if (!mentionsOne) {
+        at(`was chosen over ${rejected.length} other candidate(s) without naming any of them — say which you rejected and why`)
+      }
     }
   }
 
@@ -150,25 +183,62 @@ export function validateProposals(written, ledger, catalogue) {
   // be first class — and for a while it was not: the skill and the lesson both told the reader to
   // move a shortlisted task to gaps, and doing so produced an error with no way out.
   //
-  // A declined task needs a reason, for the same purpose the gaps list serves: it is the record of
-  // what the team could not do, and it is what decides what gets built next.
-  for (const entry of derived.shortlists) {
-    if (answered.has(entry.task)) continue
-    const declined = (written?.gaps ?? []).find((gap) => textOf(gap?.task) === entry.task)
-    if (!declined) {
-      problems.push(
-        `${entry.task}: proposals.yml says nothing about it — either propose one of the ${entry.candidates.length} candidate(s), or decline them all by carrying it as a gap`
-      )
+  // It was then checked in exactly ONE direction: you could not silently skip a shortlist. Every
+  // other way of writing a wrong gap sailed through, and the results contradicted themselves in
+  // the same printout — one run proposed "Chasing invoices" and, four lines lower, listed it under
+  // "things nothing on the team does yet". The gaps list is the specification for what gets built
+  // next, so it gets the same scrutiny the proposals do.
+  const declinedTasks = new Set()
+
+  for (const [index, gap] of gapRows.entries()) {
+    const name = textOf(gap?.task) || `gap ${index + 1}`
+    const at = (problem) => problems.push(`${name}: ${problem}`)
+
+    if (!textOf(gap?.question)) {
+      at('is carried as a gap with no reason — say what was offered and why none of it fits')
+    }
+
+    if (declinedTasks.has(textOf(gap?.task))) {
+      at('is carried as a gap twice — one task, one entry')
       continue
     }
-    if (!textOf(declined.question)) {
-      problems.push(`${entry.task}: declined without saying why none of the candidates fit`)
+    declinedTasks.add(textOf(gap?.task))
+
+    // The same task cannot be both switched on and declared impossible. Its hours were counted in
+    // the total AND it was printed as something nothing does.
+    if (answered.has(textOf(gap?.task))) {
+      at('is both proposed and declined — it cannot be switched on and reported as impossible in the same file')
+      continue
+    }
+
+    const task = (ledger.tasks ?? []).find((entry) => textOf(entry.task) === textOf(gap?.task))
+    if (!task) {
+      at('is not in the ledger — a gap is a thing the owner said they do, not a thing somebody thought of')
+      continue
+    }
+
+    // Rules 4 and 5 apply here too. A note was named once and a parked task has nobody to act on
+    // it; putting either in the gaps list promotes it into the build specification on the quiet.
+    const kind = classify(task)
+    if (kind !== 'candidate') {
+      at(
+        kind === 'note'
+          ? 'was only mentioned once, so it is a note — carrying it as a gap puts it in the build list without it ever being a pattern'
+          : 'has nobody named to act on its output, so it is parked — carrying it as a gap skips the decision-readiness check'
+      )
     }
   }
 
-  const writtenGaps = new Set((written?.gaps ?? []).map((gap) => textOf(gap?.task)))
+  // Nothing may be quietly dropped: every shortlisted task is either proposed on or declined.
+  for (const entry of derived.shortlists) {
+    if (answered.has(entry.task) || declinedTasks.has(entry.task)) continue
+    problems.push(
+      `${entry.task}: proposals.yml says nothing about it — either propose one of the ${entry.candidates.length} candidate(s), or decline them all by carrying it as a gap`
+    )
+  }
+
   for (const gap of derived.gaps) {
-    if (!writtenGaps.has(gap.task)) {
+    if (!declinedTasks.has(gap.task)) {
       problems.push(`${gap.task}: nothing in the catalogue does this, and proposals.yml does not carry it as a gap`)
     }
   }

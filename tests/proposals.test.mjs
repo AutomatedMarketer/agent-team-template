@@ -302,7 +302,7 @@ test('declining without saying why none of them fit is refused', () => {
     gaps: [{ task: 'Writing the newsletter', question: '' }]
   }
   const problems = validateProposals(declined, ledgerOf([newsletter]), catalogue)
-  assert.ok(problems.some((problem) => /declined without saying why/.test(problem)))
+  assert.ok(problems.some((problem) => /no reason/.test(problem)))
 })
 
 test('silence is still refused - a task is proposed on or declined, never ignored', () => {
@@ -319,4 +319,134 @@ test('a sole candidate still needs a reason - being the only one is not one', ()
   }
   const problems = validateProposals(soleCandidate, ledgerOf([newsletter]), catalogue)
   assert.ok(problems.some((problem) => /not a reason/.test(problem)))
+})
+
+/* ---------- the decline path, checked in both directions ------------------------------------ */
+
+/* Declining was checked in exactly ONE direction: you could not silently skip a shortlist. Every
+   other way of writing a wrong gap sailed through, and the results contradicted themselves in the
+   same printout - one run proposed "Chasing invoices" and four lines lower listed it under
+   "things nothing on the team does yet", exit 0. The gaps list is the specification for what gets
+   built next, so it earns the same scrutiny the proposals get. */
+
+const declineOf = (task, question) => ({ proposals: [], gaps: [{ task, question }] })
+
+test('a task cannot be both proposed and declined', () => {
+  const both = {
+    proposals: soundFile.proposals,
+    gaps: [{ task: 'Writing the newsletter', question: 'Also declared impossible, in the same file.' }]
+  }
+  const problems = validateProposals(both, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /both proposed and declined/.test(problem)))
+})
+
+test('a gap for something the owner never said is refused', () => {
+  const invented = {
+    proposals: soundFile.proposals,
+    gaps: [{ task: 'Feeding my goldfish', question: 'Nothing here feeds a goldfish - should it?' }]
+  }
+  const problems = validateProposals(invented, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /not in the ledger/.test(problem)))
+})
+
+test('the same task carried as a gap twice is refused', () => {
+  const twice = {
+    proposals: [],
+    gaps: [
+      { task: 'Writing the newsletter', question: 'Declined once, with a reason long enough.' },
+      { task: 'Writing the newsletter', question: 'And declined again, which should be refused.' }
+    ]
+  }
+  const problems = validateProposals(twice, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /as a gap twice/.test(problem)))
+})
+
+test('a note cannot be promoted into the build list by declining it', () => {
+  const once = { ...newsletter, confirmed: 'once' }
+  const problems = validateProposals(
+    declineOf('Writing the newsletter', 'Declining something that was only ever mentioned once.'),
+    ledgerOf([once]),
+    catalogue
+  )
+  assert.ok(problems.some((problem) => /mentioned once/.test(problem)))
+})
+
+test('a parked task cannot be promoted into the build list by declining it', () => {
+  const parked = { ...newsletter, hands_off: '' }
+  const problems = validateProposals(
+    declineOf('Writing the newsletter', 'Declining something nobody has agreed to act on.'),
+    ledgerOf([parked]),
+    catalogue
+  )
+  assert.ok(problems.some((problem) => /parked/.test(problem)))
+})
+
+test('a bare gaps: key is a validation message, not a stack trace', () => {
+  for (const value of ['', null, 'none', 42]) {
+    const problems = validateProposals({ proposals: [], gaps: value }, ledgerOf([newsletter]), catalogue)
+    assert.ok(Array.isArray(problems), `gaps: ${JSON.stringify(value)} should not throw`)
+    assert.ok(problems.length > 0)
+  }
+})
+
+test('gaps left out entirely is fine when there is nothing to decline', () => {
+  const problems = validateProposals({ proposals: soundFile.proposals }, ledgerOf([newsletter]), catalogue)
+  assert.deepEqual(problems, [])
+})
+
+/* ---------- a reason has to be a reason ------------------------------------------------------ */
+
+/* "It chases." and "It handles email." both cleared a presence check. Under twenty shortlists a
+   model writes thin reasons and nothing catches it, which makes the judgment step a rubber stamp
+   with a citation attached. */
+
+test('a tautology is not a reason', () => {
+  const thin = {
+    proposals: [{ ...soundFile.proposals[0], why: 'It writes.' }],
+    gaps: []
+  }
+  const problems = validateProposals(thin, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /restatement rather than a reason/.test(problem)))
+})
+
+test('a choice from several candidates must name what it rejected', () => {
+  const twoWays = {
+    task: 'Replying to messages',
+    words: 'I write replies and leave them sitting in drafts',
+    who: 'me',
+    times_per_week: 5,
+    minutes_each: 30,
+    confirmed: 'twice',
+    hands_off: 'They sit in drafts and I send them'
+  }
+  const wider = [
+    ...catalogue,
+    {
+      id: 'skill:draft-replies',
+      kind: 'skill',
+      slug: 'draft-replies',
+      name: 'draft-replies',
+      audience: 'owner',
+      description: 'Write a reply for every message triage marked draftable and leave each one in the drafts folder.',
+      path: '.claude/skills/draft-replies/SKILL.md'
+    }
+  ]
+  const unnamed = {
+    proposals: [{
+      task: 'Replying to messages',
+      item: 'skill:draft-replies',
+      why: 'This one fits the job better than the alternatives offered here.',
+      words: twoWays.words,
+      number: '2.5 hours a week, 375 a week'
+    }],
+    gaps: []
+  }
+  const problems = validateProposals(unnamed, ledgerOf([twoWays]), wider)
+  assert.ok(problems.some((problem) => /without naming any of them/.test(problem)))
+
+  const named = {
+    proposals: [{ ...unnamed.proposals[0], why: 'Rejected agent:email, which sweeps a whole inbox rather than drafting one reply.' }],
+    gaps: []
+  }
+  assert.deepEqual(validateProposals(named, ledgerOf([twoWays]), wider), [])
 })

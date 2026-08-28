@@ -54,9 +54,9 @@ tasks:
     minutes_each: 180
     confirmed: twice
     hands_off: "I read each chase and send it myself. Nothing goes out unread."
-    # ^ This one comes back as a GAP. The team can chase a prospect who went quiet; chasing
-    #   money you are owed is a different job and nothing here does it. That is said plainly
-    #   rather than answered with the nearest thing that shares a word.
+    # ^ This one comes back with two candidates and both are wrong - the team can chase a prospect
+    #   who went quiet; chasing money you are owed is a different job. So it gets DECLINED, with
+    #   the reason written down, rather than answered with the nearest thing that shares a word.
 
   - task: Follow-up emails after a call
     words: "Every follow-up takes the best part of an hour and I still send them late"
