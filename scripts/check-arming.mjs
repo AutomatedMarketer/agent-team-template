@@ -91,6 +91,16 @@ if (result.problems.length) {
   process.exit(1)
 }
 
-console.log(offWebhook.length
-  ? '\nEvery job is either armed, fired by webhook, or off with a reason somebody wrote down.'
-  : '\nEvery job is either armed, or off with a reason somebody wrote down.')
+// Unconditional once, which meant it asserted every job was armed or off four lines after the
+// command had said it could not tell which. Same output, same job, opposite claims - and it let
+// "check:arming exits clean for everyone" pass vacuously on a repo where nothing is known to
+// ring. With no snapshot there is nothing to be clean about, and saying so is the only ending
+// this command has earned.
+if (routinesKnown) {
+  console.log(offWebhook.length
+    ? '\nEvery job is either armed, fired by webhook, or off with a reason somebody wrote down.'
+    : '\nEvery job is either armed, or off with a reason somebody wrote down.')
+} else {
+  console.log('\nEverything above is what your FILES claim. Run /routines and commit the result\n' +
+    'before you believe any of it.')
+}

@@ -20,9 +20,10 @@ const root = fileURLToPath(new URL('../', import.meta.url))
    summary line asserting something its own detail contradicts is the exact defect this script
    exists to find, printed by the script itself. The count has to exclude what it cannot credit. */
 
-async function armingOutput(extraWorkflow) {
+async function armingOutput(extraWorkflow, options = {}) {
   const scratch = await mkdtemp(join(tmpdir(), 'arming-summary-'))
   for (const dir of ['scripts', 'workflows', '.agent-team']) {
+    if (options.dropSnapshot && dir === '.agent-team') continue
     await cp(join(root, dir), join(scratch, dir), { recursive: true }).catch(() => {})
   }
   if (extraWorkflow) {
@@ -145,4 +146,33 @@ test('the closing sentence stays true when a webhook job is present', async () =
   }
   assert.match(run.stdout, /webhook/i,
     'a webhook job is reported as nothing at all - it is neither armed, nor off, nor named')
+})
+
+/* With no usable snapshot, the command says "whether anything rings is UNKNOWN" - and then, four
+   lines later, "Every job is either armed, or off with a reason somebody wrote down." It asserts
+   the job IS armed immediately after saying it cannot know. Same output, same job, opposite
+   claims. Third time this file has contradicted itself; the closing line is unconditional and
+   the branch above it is not.
+
+   It also let the D3.1 exit test - "check:arming exits clean for everyone" - pass vacuously on a
+   repo where nothing is known to ring. */
+
+test('with no snapshot, the closing line does not claim to know what it just said it cannot', async () => {
+  const armed = [
+    'name: Wishful',
+    'owner: research',
+    'steps: [scan-market]',
+    'trigger:',
+    '  schedule: "daily 06:30"',
+    '  armed: true',
+    'output: inbox/x.md',
+    ''
+  ].join(String.fromCharCode(10))
+
+  const run = await armingOutput(armed, { dropSnapshot: true })
+  await rm(run.scratch, { recursive: true, force: true })
+
+  assert.match(run.stdout, /UNKNOWN/, 'the fixture should have produced an unknown state')
+  assert.ok(!/Every job is either armed, or off with a reason/.test(run.stdout),
+    'it claimed every job is armed or off, in the same output as saying it cannot tell which')
 })
