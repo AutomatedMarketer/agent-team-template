@@ -74,3 +74,41 @@ test('a job with no reason still fails the check', async () => {
   await rm(dirty.scratch, { recursive: true, force: true })
   assert.notEqual(dirty.code, 0, 'a reasonless job must not exit clean')
 })
+
+/* Lesson 10 builds a webhook: a routine with NO schedule, fired by an inbound request. `/arm`
+   cannot create it - `arm/SKILL.md` passes `schedule:` on every create, and `validateArming`
+   rejects `armed: true` with no schedule outright. So the one routine in the whole course a
+   student genuinely has to make by hand is also the one the arming model has no room for.
+
+   The result: their webhook workflow is demanded a `reason:` for being "off" when it is not off
+   at all, it is live and waiting - and Lesson 17 teaches them that an unmatched routine means
+   "somebody armed something that has since been renamed or removed. Report it, do not adopt it."
+   The course manufactures the exact artifact it teaches them to treat as a fault. */
+
+test('a webhook job is not demanded a reason for being off - it is not off', async () => {
+  const { validateArming } = await import('../scripts/lib/arm.mjs')
+  const webhook = {
+    slug: 'answer-a-question',
+    data: { name: 'Answer a question', trigger: { webhook: true } }
+  }
+  assert.deepEqual(validateArming(webhook), [],
+    'a webhook job has no schedule to be off from, and being asked for a reason is nonsense')
+})
+
+test('a scheduled job with no reason is still refused - the exemption is webhooks only', async () => {
+  const { validateArming } = await import('../scripts/lib/arm.mjs')
+  const scheduled = { slug: 'x', data: { name: 'X', trigger: { schedule: 'daily 06:00' } } }
+  assert.equal(validateArming(scheduled).length, 1,
+    'the webhook exemption must not let ordinary scheduled jobs through without a reason')
+})
+
+test('a webhook routine is recognised, not reported as an orphan somebody should delete', async () => {
+  const { reconcile } = await import('../scripts/lib/arm.mjs')
+  const result = reconcile(
+    [{ slug: 'answer-a-question', data: { name: 'Answer a question', trigger: { webhook: true } } }],
+    [{ id: 'r1', name: 'Answer a question' }],
+    { routinesKnown: true }
+  )
+  assert.deepEqual(result.orphans, [],
+    'the webhook routine the course tells them to build was reported as something to report and not adopt')
+})

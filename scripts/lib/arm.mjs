@@ -164,10 +164,17 @@ export function validateArming(workflow) {
     problems.push(`${name}: trigger.armed must be true or false`)
   }
 
+  // A webhook job has no clock. It is fired by an inbound request, it is live the moment its
+  // routine exists, and there is no schedule for it to be on or off. Demanding a reason for it
+  // being "off" is asking somebody to justify a state it was never in - and it is the one
+  // routine in the whole course a student genuinely has to create by hand, because /arm passes a
+  // schedule on every create and there is no schedule to pass.
+  const isWebhook = trigger?.webhook === true && textOf(trigger?.schedule) === ''
+
   // Nothing is deleted here, ever. A job that is off keeps its file and gains a reason, so that
   // six weeks later the silence is a decision somebody made rather than something that looks
   // exactly like a mistake.
-  if (armed !== true && !reasonFor(workflow)) {
+  if (armed !== true && !isWebhook && !reasonFor(workflow)) {
     problems.push(
       `${name}: is not armed and carries no reason - say what would have to change for it to be worth a run`
     )
@@ -175,7 +182,8 @@ export function validateArming(workflow) {
 
   // You cannot arm what has no time attached. An armed job with no schedule is a routine nobody
   // could have created, which means the flag is describing something that does not exist.
-  if (armed === true && textOf(trigger?.schedule) === '') {
+  // A webhook is the exception, and the only one: its routine is real and fires on request.
+  if (armed === true && !isWebhook && textOf(trigger?.schedule) === '') {
     problems.push(`${name}: is armed but declares no schedule - there is nothing for a routine to fire on`)
   }
 
