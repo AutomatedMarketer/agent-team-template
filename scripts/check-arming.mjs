@@ -44,7 +44,15 @@ if (routinesKnown) {
 } else {
   console.log(`  ${plural(result.unknown, 'job')} the file says should run - whether anything rings is UNKNOWN`)
 }
-console.log(`  ${plural(result.off, 'job')} off, with a written reason`)
+// Split, because the line used to say "10 jobs off, with a written reason" while one of those ten
+// was named four lines below as having none. A total that credits what it cannot evidence is the
+// exact fault this command exists to find, and it was printing it.
+const offWithReason = result.off.filter((row) => row.reason)
+const offWithNone = result.off.filter((row) => !row.reason)
+console.log(`  ${plural(offWithReason, 'job')} off, with a written reason`)
+if (offWithNone.length) {
+  console.log(`  ${plural(offWithNone, 'job')} off with no reason written down - counted here, credited nowhere`)
+}
 
 for (const [heading, rows] of [
   ['The file says these should run - nothing here can tell you whether they do', result.unknown],

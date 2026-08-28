@@ -163,7 +163,7 @@ test('every shipped workflow parses and validates against real agents and skills
 
 // The pre-loaded roster: every agent owns a working workflow on day one. An empty board
 // is the blank page this template exists to prevent.
-test('the six pre-loaded workflows ship, one per worker', async () => {
+test('the nine pre-loaded workflows ship, four for the owner and five for the team', async () => {
   const workflows = await loadWorkflows()
   const slugs = workflows.map((workflow) => workflow.slug)
   for (const slug of [
