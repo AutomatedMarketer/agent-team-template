@@ -9,6 +9,8 @@ audience: team
 owner: customer-service
 steps: [collect-run-logs, review-pipeline, write-weekly-review]
 trigger:
+  armed: false
+  reason: "Off until there is a week of runs to review."
   schedule: "weekly fri 16:00"
   fire: true
 output: inbox/{date}/weekly-review.md

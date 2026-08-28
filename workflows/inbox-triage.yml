@@ -4,6 +4,8 @@ name: Inbox Triage
 owner: email
 steps: [triage-inbox, draft-replies]
 trigger:
+  armed: false
+  reason: "Off until an inbox is connected - it has nothing to read yet."
   schedule: "weekdays 08:00"
   fire: true
 output: inbox/{date}/inbox-triage.md

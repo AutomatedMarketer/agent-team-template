@@ -7,6 +7,8 @@ audience: team
 owner: orchestrator
 steps: [check-whats-changed, learn-from-the-week, write-tune-up]
 trigger:
+  armed: false
+  reason: "Off until there is a week of failures to learn from."
   schedule: "weekly sun 16:00"
   fire: true
 output: inbox/{date}/tune-up.md

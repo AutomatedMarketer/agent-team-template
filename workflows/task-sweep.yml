@@ -10,6 +10,8 @@ audience: team
 owner: orchestrator
 steps: [work-the-tasks]
 trigger:
+  armed: false
+  reason: "Off until there are task cards in tasks/ to sweep."
   schedule: "daily 09:00"
   fire: true
 output: inbox/{date}/task-sweep.md

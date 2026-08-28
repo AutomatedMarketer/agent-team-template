@@ -5,6 +5,8 @@ name: Draft Queue
 owner: content
 steps: [collect-voice-notes, draft-content-queue, review-draft]
 trigger:
+  armed: false
+  reason: "Off until there are voice notes in the folder - it drafts from nothing otherwise."
   schedule: "weekdays 07:00"
   fire: true
 output: inbox/{date}/draft-queue.md

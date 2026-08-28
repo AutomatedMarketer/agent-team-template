@@ -3,6 +3,8 @@ name: Morning Intel
 owner: research
 steps: [scan-market, write-intel-brief]
 trigger:
+  armed: false
+  reason: "Off until you know your run cap. This is usually the first one worth arming."
   schedule: "daily 06:30"
   fire: true
 output: inbox/{date}/morning-intel.md

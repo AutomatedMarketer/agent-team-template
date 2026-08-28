@@ -5,6 +5,8 @@ audience: team
 owner: editor
 steps: [write-quality-review]
 trigger:
+  armed: false
+  reason: "Off until the team has produced a week of work worth grading."
   schedule: "weekly fri 17:00"
   fire: true
 output: inbox/{date}/quality-review.md

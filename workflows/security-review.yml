@@ -4,6 +4,8 @@ audience: team
 owner: security
 steps: [scan-repo-security, watch-updates]
 trigger:
+  armed: false
+  reason: "Off until the repo holds something worth scanning."
   schedule: "weekly mon 07:00"
   fire: true
 output: inbox/{date}/security-review.md
