@@ -5,15 +5,24 @@ import path from 'node:path'
 // Two lists that have never met: what workflows/*.yml declares, and what the routines API says
 // actually exists. Comparing them is the whole point of this file.
 //
-// This repo once carried ten workflow files declaring a schedule and one real routine. Every board
-// reading those files reported ten jobs running, each with a next-run time, because a file that
+// This repo carries NINE workflow files declaring a schedule, against one real routine. Every board
+// reading those files reported nine jobs running, each with a next-run time, because a file that
 // says `schedule:` looks exactly like a job that runs. Nobody lied; nothing checked.
 //
-// So a job is in exactly one of three states, and the middle one is the bug:
+// (It was written as "ten" here for a while, which is its own small version of the same disease.
+// A file that says a number nobody counted is the thing this module exists to catch.)
 //
-//   armed     the file says run it, and a routine exists
-//   declared  the file says run it, and NOTHING rings
-//   off       deliberately not armed, and carrying a written reason
+// A job is in one of FOUR states, and the two middle ones are the bugs:
+//
+//   armed       the file says run it, and a routine exists
+//   declared    the file says run it, and NOTHING rings          - a wish
+//   unapproved  a routine RINGS, and the file says it is off     - spend nobody approved
+//   off         deliberately not armed, and nothing rings
+//
+// `unapproved` was missing for a while, and its absence was the same bug pointing the other way:
+// a routine firing every morning, matched to a file saying `armed: false`, appeared in no list at
+// all. The read-back said "0 jobs armed, spending 0 runs a week" while runs were being spent
+// daily. A board that can only see over-claiming is half a check.
 //
 // `armed:` defaults to false. A workflow that has never been through /arm is off, not running,
 // which is the safe direction and means nothing arms itself by existing.
@@ -21,7 +30,7 @@ import path from 'node:path'
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const SNAPSHOT = '.agent-team/routines.json'
 
-export const ARM_STATES = ['armed', 'declared', 'off']
+export const ARM_STATES = ['armed', 'declared', 'unapproved', 'off']
 
 function textOf(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -47,19 +56,58 @@ export function reasonFor(workflow) {
 //
 // It carries the moment it was taken, and every reader is expected to say so. A stale snapshot
 // must read as stale. A snapshot presented as live is the same class of lie as a declared job.
-export async function loadRoutineSnapshot(root = repoRoot) {
-  try {
-    const parsed = JSON.parse(await readFile(path.join(root, SNAPSHOT), 'utf8'))
-    return {
-      takenAt: textOf(parsed?.takenAt) || null,
-      routines: Array.isArray(parsed?.routines) ? parsed.routines : []
-    }
-  } catch {
-    // No snapshot is not an error: it means /routines has never run here. The caller reports that
-    // as unknown, never as "nothing is scheduled" — which would be a claim about the account that
-    // an absent file cannot support.
-    return { takenAt: null, routines: [], missing: true }
+// How stale is too stale to be worth trusting. A day: routines fire on schedules measured in
+// hours, so a snapshot older than this has almost certainly missed something.
+export const SNAPSHOT_STALE_AFTER_HOURS = 24
+
+export function readSnapshot(source, now = Date.now()) {
+  if (source === null || source === undefined) {
+    return { takenAt: null, routines: [], missing: true, reason: 'no snapshot has been taken yet' }
   }
+
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    // Corrupt is NOT the same as absent. Returning an empty routine list for an unreadable file
+    // asserts "nothing is scheduled", which is a claim about somebody's account that a broken
+    // file cannot support - the exact class of lie this module exists to catch.
+    return { takenAt: null, routines: [], missing: true, unreadable: true, reason: 'the snapshot file could not be read' }
+  }
+
+  const routines = Array.isArray(parsed?.routines) ? parsed.routines : null
+  if (!routines) {
+    return { takenAt: null, routines: [], missing: true, unreadable: true, reason: 'the snapshot has no routines list' }
+  }
+
+  const takenAt = textOf(parsed?.takenAt) || null
+  const takenMs = takenAt ? Date.parse(takenAt) : NaN
+  if (!takenAt || Number.isNaN(takenMs)) {
+    // Written without a stamp. It may be perfectly accurate, and there is no way to know - so it
+    // is served, and it is served as unusable-as-evidence rather than as current.
+    return { takenAt: null, routines, missing: true, unstamped: true, reason: 'the snapshot does not say when it was taken' }
+  }
+
+  const ageHours = (now - takenMs) / 3600_000
+  return {
+    takenAt,
+    routines,
+    ageHours,
+    stale: ageHours > SNAPSHOT_STALE_AFTER_HOURS,
+    reason: ageHours > SNAPSHOT_STALE_AFTER_HOURS
+      ? `the snapshot is ${Math.round(ageHours)} hours old`
+      : null
+  }
+}
+
+export async function loadRoutineSnapshot(root = repoRoot, now = Date.now()) {
+  let source = null
+  try {
+    source = await readFile(path.join(root, SNAPSHOT), 'utf8')
+  } catch {
+    source = null
+  }
+  return readSnapshot(source, now)
 }
 
 export function routineFor(workflow, routines) {
@@ -69,8 +117,9 @@ export function routineFor(workflow, routines) {
 }
 
 export function armState(workflow, routines) {
-  if (!isArmed(workflow)) return 'off'
-  return routineFor(workflow, routines) ? 'armed' : 'declared'
+  const ringing = Boolean(routineFor(workflow, routines))
+  if (!isArmed(workflow)) return ringing ? 'unapproved' : 'off'
+  return ringing ? 'armed' : 'declared'
 }
 
 // Returns human-readable problems, the same contract as validateWorkflow and validateLedger.
@@ -103,30 +152,69 @@ export function validateArming(workflow) {
 }
 
 export function reconcile(workflows, routines) {
-  const buckets = { armed: [], declared: [], off: [], orphans: [], problems: [] }
+  const buckets = { armed: [], declared: [], unapproved: [], off: [], orphans: [], problems: [] }
+  const list = Array.isArray(workflows) ? workflows.filter(Boolean) : []
+  const alarms = Array.isArray(routines) ? routines.filter(Boolean) : []
   const claimed = new Set()
 
-  for (const workflow of workflows ?? []) {
+  // Two workflow files with one name both matched the same routine and both reported `armed` -
+  // one alarm clock, two jobs claiming it. Caught here rather than downstream, where it looks
+  // like twice as much running as there is.
+  const seenNames = new Map()
+  for (const workflow of list) {
+    const key = nameKey(workflow?.data?.name) || nameKey(workflow?.slug)
+    if (key) seenNames.set(key, (seenNames.get(key) ?? 0) + 1)
+  }
+  for (const [key, count] of seenNames) {
+    if (count > 1) {
+      buckets.problems.push(`${key}: ${count} workflow files share this name, so a routine cannot be matched to one of them`)
+    }
+  }
+
+  // And two routines with one name: the second silently vanished - not armed, not an orphan,
+  // nowhere. Two alarm clocks for one job is a double fire and a double spend, and it is exactly
+  // what /arm's own "confirm before you arm again" rule exists to prevent.
+  const seenRoutines = new Map()
+  for (const routine of alarms) {
+    const key = nameKey(routine?.name)
+    if (key) seenRoutines.set(key, (seenRoutines.get(key) ?? 0) + 1)
+  }
+  for (const [key, count] of seenRoutines) {
+    if (count > 1) {
+      buckets.problems.push(`${key}: ${count} routines share this name - they will all fire, and the spend is multiplied`)
+    }
+  }
+
+  for (const workflow of list) {
     for (const problem of validateArming(workflow)) buckets.problems.push(problem)
 
-    const routine = routineFor(workflow, routines)
+    const routine = routineFor(workflow, alarms)
     if (routine) claimed.add(nameKey(routine.name))
 
-    const state = armState(workflow, routines)
-    buckets[state].push({
-      slug: workflow.slug,
-      name: textOf(workflow?.data?.name) || workflow.slug,
-      path: workflow.path,
+    const state = armState(workflow, alarms)
+    const row = {
+      slug: workflow?.slug ?? null,
+      name: textOf(workflow?.data?.name) || workflow?.slug || '(unnamed)',
+      path: workflow?.path ?? null,
       schedule: textOf(workflow?.data?.trigger?.schedule) || null,
       reason: reasonFor(workflow) || null,
-      routineId: state === 'armed' ? (routine?.id ?? null) : null
-    })
+      // Carried on `armed` because that is the routine the file approved, and on `unapproved`
+      // because naming the thing that is spending money is the entire point of that state.
+      routineId: state === 'armed' || state === 'unapproved' ? (routine?.id ?? null) : null
+    }
+    buckets[state].push(row)
+
+    if (state === 'unapproved') {
+      buckets.problems.push(
+        `${row.name}: a routine is firing for this and the file says armed: false - it is spending runs nobody approved. Either arm it in the file or remove the routine at claude.ai/code/routines`
+      )
+    }
   }
 
   // A routine pointing at this repo with no workflow behind it. Reported, never adopted: somebody
   // armed something that has since been renamed or removed, and quietly claiming it belongs to a
   // file it does not match would be inventing a connection.
-  for (const routine of routines ?? []) {
+  for (const routine of alarms) {
     if (claimed.has(nameKey(routine?.name))) continue
     buckets.orphans.push({ id: routine?.id ?? null, name: textOf(routine?.name) || '(unnamed)' })
   }

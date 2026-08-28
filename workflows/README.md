@@ -17,9 +17,30 @@ follow.
 
 ---
 
+## Arming: `armed:` and `reason:`
+
+Every workflow carries these two inside its `trigger:` block, and `npm run check:arming` refuses a
+file without them.
+
+```yaml
+trigger:
+  schedule: "daily 06:30"
+  armed: false
+  reason: "Off until you know your run cap. This is usually the first one worth arming."
+```
+
+| Field | Meaning |
+|---|---|
+| `armed: true` | A real routine exists for this job. Set by `/arm` **after** confirming the routine is there — never by hand, and never optimistically. |
+| `armed: false` | Deliberately not running. The default: a workflow that has never been through `/arm` is off, so nothing arms itself by existing. |
+| `reason:` | **Required whenever `armed` is not true.** What would have to CHANGE for it to be worth a run. "Not needed" is not a reason — six weeks later it is indistinguishable from having forgotten. |
+
+A `schedule:` without a routine behind it makes nothing happen. That gap has a name — `declared` —
+and `npm run check:arming` counts it.
+
 ## You arrive staffed
 
-Seven workflows ship pre-loaded — one per worker, plus the orchestrator's task sweep —
+Nine workflows ship pre-loaded — one per worker, plus the orchestrator's task sweep —
 so every agent owns a working job on day one. Onboarding tailors them to your business;
 you edit them by asking.
 

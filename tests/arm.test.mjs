@@ -5,16 +5,22 @@ import {
   armState,
   routineFor,
   validateArming,
-  reconcile
+  reconcile,
+  readSnapshot,
+  SNAPSHOT_STALE_AFTER_HOURS
 } from '../scripts/lib/arm.mjs'
 import { loadWorkflows } from '../scripts/lib/workflows.mjs'
 
-/* This file exists because of a specific number. The repo once carried ten workflow files
-   declaring a schedule and one real routine, and every board reading those files reported ten jobs
-   running, each with a next-run time. Nobody lied. Nothing checked.
+/* This file exists because of a specific number, and the number is NINE. The repo carries nine
+   workflow files declaring a schedule against one real routine, and every board reading those
+   files reported nine jobs running, each with a next-run time. Nobody lied. Nothing checked.
 
-   So the tests below are almost all about the middle state - declared - which is the one that
-   looks like progress and costs nothing to create. */
+   It said "ten" here for a while, which is the same disease in miniature: a number written down
+   that nobody counted. Counted now - `ls workflows/*.yml | wc -l` is 9, and has never been more.
+
+   So the tests below are mostly about the two states that cost something - `declared`, which
+   looks like progress and costs nothing to create, and `unapproved`, which costs real money
+   quietly. */
 
 const workflow = (slug, trigger, name = slug) => ({
   slug,
@@ -47,13 +53,31 @@ test('a workflow that has never been through /arm is off, not running', () => {
   assert.equal(armState(untouched, []), 'off', 'nothing arms itself by existing')
 })
 
-test('an existing routine does not arm a job the file has not approved', () => {
+/* The file is the record of what was approved, so a routine somebody made elsewhere does not arm
+   the job. But it does not leave it quiet either - it is spending runs nobody agreed to, and for
+   a while it was reported as `off` with no problem raised and no mention of the live routine
+   anywhere. The read-back said "0 jobs armed, spending 0 runs a week" while an alarm rang daily.
+   A check that can only see over-claiming is half a check. */
+
+test('a routine that rings against a file saying off is UNAPPROVED, not quiet', () => {
   const untouched = workflow('morning-intel', { schedule: 'daily 06:30' }, 'Morning Intel')
-  assert.equal(
-    armState(untouched, [routine('Morning Intel')]),
-    'off',
-    'the file is the record of what was approved - a routine somebody made elsewhere does not change that'
-  )
+  assert.equal(armState(untouched, [routine('Morning Intel')]), 'unapproved')
+})
+
+test('unapproved spend is reported as a problem and names the routine doing it', () => {
+  const untouched = workflow('morning-intel', { schedule: 'daily 06:30', armed: false, reason: 'no run cap yet' }, 'Morning Intel')
+  const result = reconcile([untouched], [routine('Morning Intel', 'trig_live')])
+
+  assert.equal(result.off.length, 0, 'it is not quiet - something is firing')
+  assert.equal(result.unapproved.length, 1)
+  assert.equal(result.unapproved[0].routineId, 'trig_live', 'name the alarm clock that is spending the money')
+  assert.ok(result.problems.some((problem) => /nobody approved/.test(problem)))
+})
+
+test('the live routine is not also reported as an orphan - it matched a file', () => {
+  const untouched = workflow('morning-intel', { schedule: 'daily 06:30', armed: false, reason: 'no run cap yet' }, 'Morning Intel')
+  const result = reconcile([untouched], [routine('Morning Intel')])
+  assert.deepEqual(result.orphans, [])
 })
 
 /* ---------- matching ------------------------------------------------------------------------- */
@@ -173,4 +197,93 @@ test('nothing ships armed - a fresh clone rings no alarm clocks', async () => {
     [],
     `a template that arrives armed spends a student's runs before they have agreed to anything, got ${armed}`
   )
+})
+
+/* ---------- duplicates ----------------------------------------------------------------------- */
+
+test('two routines sharing a name are reported - they all fire, and the spend multiplies', () => {
+  const morning = workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, 'Morning Intel')
+  const result = reconcile([morning], [routine('Morning Intel', 'trig_a'), routine('Morning Intel', 'trig_b')])
+  assert.ok(result.problems.some((problem) => /2 routines share this name/.test(problem)))
+})
+
+test('two workflow files sharing a name are reported - one alarm cannot belong to both', () => {
+  const a = workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, 'Morning Intel')
+  const b = workflow('morning-intel-copy', { schedule: 'daily 07:30', armed: true }, 'Morning Intel')
+  const result = reconcile([a, b], [routine('Morning Intel')])
+  assert.ok(result.problems.some((problem) => /share this name/.test(problem)))
+})
+
+/* ---------- surviving mutants ----------------------------------------------------------------- */
+
+/* Both of these were mutation-tested and survived: nothing asserted that a matched routine is
+   absent from orphans, and nothing asserted routineId is null on a row with no routine. */
+
+test('a matched routine is claimed, so it never appears as an orphan', () => {
+  const morning = workflow('morning-intel', { schedule: 'daily 06:30', armed: true }, 'Morning Intel')
+  const result = reconcile([morning], [routine('Morning Intel')])
+  assert.equal(result.armed.length, 1)
+  assert.deepEqual(result.orphans, [], 'a routine cannot be both matched and unclaimed')
+})
+
+test('an off row with no routine behind it carries no routine id', () => {
+  const quiet = workflow('gone-cold', { schedule: 'daily 09:00', armed: false, reason: 'nobody reads it' })
+  const result = reconcile([quiet], [])
+  assert.equal(result.off[0].routineId, null)
+})
+
+/* ---------- reconcile survives hostile input --------------------------------------------------- */
+
+test('a null workflow, a null routine and a non-list do not throw', () => {
+  assert.doesNotThrow(() => reconcile([null, undefined], [null]))
+  assert.doesNotThrow(() => reconcile(null, null))
+  assert.doesNotThrow(() => reconcile('not a list', 42))
+})
+
+/* ---------- the snapshot ------------------------------------------------------------------------ */
+
+/* A snapshot presented as live is the same class of lie as a job claiming a schedule nothing
+   fires. These are the cases where that lie was previously available. */
+
+test('an absent snapshot says nothing is KNOWN, never that nothing is scheduled', () => {
+  const snap = readSnapshot(null)
+  assert.equal(snap.missing, true)
+  assert.deepEqual(snap.routines, [])
+  assert.match(snap.reason, /no snapshot/)
+})
+
+test('a corrupt snapshot is not the same as an absent one', () => {
+  const snap = readSnapshot('{ not json at all')
+  assert.equal(snap.unreadable, true)
+  assert.equal(snap.missing, true, 'and it must never be read as "nothing is scheduled"')
+})
+
+test('a snapshot with no routines list is unreadable, not empty', () => {
+  assert.equal(readSnapshot('{"takenAt":"2026-08-27T10:00:00Z"}').unreadable, true)
+})
+
+test('a snapshot with no takenAt is served, but never as current', () => {
+  const snap = readSnapshot('{"routines":[{"id":"a","name":"A"}]}')
+  assert.equal(snap.routines.length, 1, 'the data is still the best available')
+  assert.equal(snap.unstamped, true)
+  assert.match(snap.reason, /when it was taken/)
+})
+
+test('an old snapshot is stale and says how old', () => {
+  const now = Date.parse('2026-08-27T12:00:00Z')
+  const old = readSnapshot('{"takenAt":"1999-01-01T00:00:00Z","routines":[]}', now)
+  assert.equal(old.stale, true)
+  assert.match(old.reason, /hours old/)
+})
+
+test('a fresh snapshot is not stale and carries no complaint', () => {
+  const now = Date.parse('2026-08-27T12:00:00Z')
+  const fresh = readSnapshot(`{"takenAt":"2026-08-27T11:00:00Z","routines":[]}`, now)
+  assert.equal(fresh.stale, false)
+  assert.equal(fresh.reason, null)
+  assert.ok(fresh.ageHours < SNAPSHOT_STALE_AFTER_HOURS)
+})
+
+test('a takenAt that is not a date is treated as no stamp at all', () => {
+  assert.equal(readSnapshot('{"takenAt":"soon","routines":[]}').unstamped, true)
 })
