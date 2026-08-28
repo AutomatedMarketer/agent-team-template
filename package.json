@@ -16,6 +16,8 @@
     "check:ledger": "node scripts/check-ledger.mjs",
     "check:proposals": "node scripts/check-proposals.mjs",
     "check:arming": "node scripts/check-arming.mjs",
-    "check:drift": "node scripts/check-drift.mjs"
+    "check:drift": "node scripts/check-drift.mjs",
+    "check:sops": "node scripts/check-sops.mjs",
+    "check:course": "node scripts/check-course-numbers.mjs"
   }
 }
