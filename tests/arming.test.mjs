@@ -130,6 +130,35 @@ const WEBHOOK = [
   ''
 ].join('\n')
 
+/* Lesson 10 tells the student to write `webhook: true` + `armed: true`, then quotes what
+   check:arming will say about it. It quoted the "fired by webhook - no clock" line, which is
+   emitted only for webhook rows in the OFF bucket - and a webhook whose routine exists with
+   `armed: true` is in the ARMED bucket, so that line never printed for the configuration the
+   lesson prescribes. These two pin the states apart so the lesson's quote stays checkable. */
+
+test('an armed webhook with a live routine lands in armed, not off', async () => {
+  const { reconcile } = await import('../scripts/lib/arm.mjs')
+  const result = reconcile(
+    [{ slug: 'answer-a-question', data: { name: 'Answer a question', trigger: { webhook: true, armed: true } } }],
+    [{ id: 'r1', name: 'Answer a question' }],
+    { routinesKnown: true }
+  )
+  assert.equal(result.armed.length, 1, 'the working webhook configuration is not reported as armed')
+  assert.equal(result.off.length, 0, 'a live webhook was filed as off, where the no-clock line lives')
+  assert.deepEqual(result.problems, [], 'the configuration the lesson prescribes was flagged as a problem')
+})
+
+test('an unarmed webhook with no routine is the one that is off', async () => {
+  const { reconcile } = await import('../scripts/lib/arm.mjs')
+  const result = reconcile(
+    [{ slug: 'answer-a-question', data: { name: 'Answer a question', trigger: { webhook: true, armed: false } } }],
+    [],
+    { routinesKnown: true }
+  )
+  assert.equal(result.off.length, 1, 'the off-webhook state the no-clock line describes is gone')
+  assert.equal(result.armed.length, 0)
+})
+
 test('a webhook job is not shamed for a reason it was never asked for', async () => {
   const run = await armingOutput(WEBHOOK)
   await rm(run.scratch, { recursive: true, force: true })
