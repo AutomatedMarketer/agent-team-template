@@ -111,7 +111,7 @@ connections:
   - name: Gmail - business
     slug: gmail-business
     kind: connector          # connector | mcp | cli | script | browser
-    account: nuno@example.com
+    account: you@example.com
     scopes: [read, draft]
     verified: 2026-08-20
     proof: "Read the subject lines of the three most recent messages"
