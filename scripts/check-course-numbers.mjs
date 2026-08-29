@@ -284,33 +284,46 @@ if (!deniesSend) {
 }
 
 // ---------------------------------------------------------------- the verdict
-
-for (const note of notes) console.log(`ok   ${note}`)
 // ---------------------------------------------------------------------------------------------
-// A lesson that teaches FIRE_TRIGGERS has to name the slug that is not a workflow.
+// Any course file that mentions FIRE_TRIGGERS must name `task-intake` or defer to the lesson that
+// does.
 //
 // Four buttons on the cockpit - Add task, New workflow, Arm, Approve - dispatch to one dedicated
-// routine, `task-intake`, not to the job beside them. The lesson used to describe FIRE_TRIGGERS as
-// "each workflow's slug", so a reader wired all nine workflows and got 404 from all four buttons.
-// Reproduced against the real endpoint before this check was written.
+// routine, `task-intake`, not to the job beside them. Lesson 12 described FIRE_TRIGGERS as "each
+// workflow's slug", so a reader wired all nine workflows and got 404 from all four. Reproduced
+// against the real endpoint before this check was written.
 //
-// This is a documentation-vs-behaviour pairing that no test in either repo could see, because the
-// behaviour lives in agent-cockpit and the instructions live here.
-for (const file of all) {
-  const body = await read(file)
-  // Only the lesson that TELLS you what to put in the variable - a row defining it in the
-  // settings table. Lesson 13 mentions FIRE_TRIGGERS in passing about Run buttons, where "each
-  // workflow's slug" is correct, and defers to Lesson 12. Flagging that was the guard being
-  // wider than the defect on its first run.
-  if (!/^\|\s*`FIRE_TRIGGERS`\s*\|/m.test(body)) continue
-  if (!body.includes('task-intake')) {
-    fail(`${file}: explains FIRE_TRIGGERS but never names "task-intake" — the one required slug ` +
-      'that is not a workflow. Add task, New workflow, Arm and Approve all 404 without it, and a ' +
-      'reader wiring "each workflow\'s slug" never supplies it.')
-  } else {
+// The first version of this check keyed on the settings-table row and scanned only NN_*.md. Both
+// limits were wrong: RUN_OF_SHOW.md instructs the same wiring and gives the same misleading
+// diagnosis, and it is not an NN_ file, so nothing could see it. Deferral is what makes the rule
+// safe to apply widely - 13_TEAM_DAY mentions the variable in passing about Run buttons, where
+// "each workflow's slug" is correct, and points at Lesson 12.
+const FIRE_DOCS = [...all, 'RUN_OF_SHOW.md', 'PRESENTATION.md', '00-INDEX.md']
+for (const file of FIRE_DOCS) {
+  const body = await read(file).catch(() => null)
+  if (body === null || !body.includes('FIRE_TRIGGERS')) continue
+  // Naming the slug ANYWHERE in the file covers that file - a reader who is told is told.
+  // A file that never names it has to defer in the passage itself. File-level deferral was
+  // the first attempt and it was wrong: RUN_OF_SHOW.md lists 12_COCKPIT.md as a SOP, so it
+  // "mentions Lesson 12" three hundred lines from the wiring it instructs, and sailed past.
+  if (body.includes('task-intake')) {
     ok(`${file}: names task-intake alongside FIRE_TRIGGERS`)
+    continue
+  }
+  const paragraphs = body.split(/\r?\n\s*\r?\n/)
+  for (const para of paragraphs) {
+    if (!para.includes('FIRE_TRIGGERS')) continue
+    if (/Lesson 12|12_COCKPIT/.test(para)) continue
+    fail(`${file}: a passage explains FIRE_TRIGGERS without naming "task-intake" or pointing ` +
+      'at Lesson 12. Add task, New workflow, Arm and Approve all 404 without that entry, and ' +
+      'it is not a workflow slug, so wiring every workflow does not supply it. Passage: ' +
+      `"${para.trim().slice(0, 80)}…"`)
   }
 }
+
+
+for (const note of notes) console.log(`ok   ${note}`)
+
 
 if (problems.length) {
   console.log('')
