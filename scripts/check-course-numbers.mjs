@@ -321,44 +321,64 @@ for (const file of FIRE_DOCS) {
   }
 }
 // ---------------------------------------------------------------------------------------------
-// A workflow example printed in a lesson must name skills that exist.
+// A workflow example printed anywhere a reader follows must name skills that exist.
 //
 // Lesson 14 showed `steps: [pull-calendar, scan-inbox, write-brief]` under a table row saying
-// "each one already exists in your repo". None of the three did - they were lifted from
-// tests/fixtures/workflows/valid.yml, a PARSER fixture, where arbitrary names are correct because
-// it is testing parsing rather than resolution. The repo's own suite rejects exactly this shape:
-// `step "pull-calendar" is not a skill in this repo`, three times. So the lesson taught a file
-// that the validator it teaches would refuse.
+// "each one already exists in your repo". None of the three did, and the repo's own suite rejects
+// exactly that file: `step "pull-calendar" is not a skill in this repo`, three times, plus 14
+// failures across four test files. The lesson taught a file the validator it teaches would refuse.
 //
-// The pairing had nothing on it: workflows/*.yml is validated, and the same YAML inside a fenced
-// block in a lesson was not.
-// This script lives in the template, so its own repo root is where the real skills are -
-// `root` is the LEVEL_2 folder passed on argv, which is a different repo entirely.
+// The first version of this check scanned only NN_*.md and only the inline `steps: [a, b]` form.
+// Both limits were wrong, and the second one had already been learned twenty lines above: the
+// FIRE_TRIGGERS check was widened off NN_*.md for the same reason. This one now covers the same
+// file set, and all three step forms the repo's own fixtures show - inline, dashed list, and the
+// `- skill:` map form that tests/fixtures/workflows/skill-map-steps.yml calls "the exact step form
+// the design spec shows".
+//
+// This script lives in the template, so its own repo root is where the real skills are - `root` is
+// the LEVEL_2 folder passed on argv, which is a different repo entirely.
 const templateRoot = path.dirname(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')))
-const skillsDir = path.join(templateRoot, '.claude', 'skills')
 const realSkills = new Set(
-  (await readdir(skillsDir, { withFileTypes: true }).catch(() => []))
+  (await readdir(path.join(templateRoot, '.claude', 'skills'), { withFileTypes: true }).catch(() => []))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
 )
-if (realSkills.size === 0) {
-  fail('could not read .claude/skills, so lesson workflow examples cannot be checked')
-} else {
-  for (const file of all) {
-    const body = await read(file)
-    for (const match of body.matchAll(/^\s*steps:\s*\[([^\]]+)\]/gm)) {
-      const steps = match[1].split(',').map((step) => step.trim()).filter(Boolean)
-      const missing = steps.filter((step) => !realSkills.has(step))
-      if (missing.length) {
-        fail(`${file}: a workflow example lists ${missing.map((s) => `"${s}"`).join(', ')}, ` +
-          'which is not a skill in this repo. The lesson tells a reader every step already ' +
-          'exists, and the repo\'s own validator rejects a workflow whose steps do not.')
-      } else if (steps.length) {
-        ok(`${file}: workflow example names ${steps.length} real skills`)
+
+// Every step name a fenced example asks for, in any of the three forms.
+const stepsIn = (body) => {
+  const found = []
+  for (const match of body.matchAll(/^[ \t]*steps:[ \t]*(?:\[([^\]]*)\]|((?:\r?\n[ \t]*-[^\n]*)+))/gm)) {
+    if (match[1] !== undefined) {
+      found.push(...match[1].split(',').map((step) => step.trim()).filter(Boolean))
+    } else if (match[2] !== undefined) {
+      for (const row of match[2].split(/\r?\n/)) {
+        const item = /^[ \t]*-[ \t]*(?:skill:[ \t]*)?([A-Za-z0-9][\w-]*)/.exec(row)
+        if (item) found.push(item[1])
       }
     }
   }
+  return found
 }
+
+if (realSkills.size === 0) {
+  fail('could not read .claude/skills, so workflow examples cannot be checked')
+} else {
+  for (const file of FIRE_DOCS) {
+    const body = await read(file).catch(() => null)
+    if (body === null) continue
+    const steps = stepsIn(body)
+    if (!steps.length) continue
+    const missing = [...new Set(steps.filter((step) => !realSkills.has(step)))]
+    if (missing.length) {
+      fail(`${file}: a workflow example lists ${missing.map((s) => `"${s}"`).join(', ')}, ` +
+        'which is not a skill in this repo. The lesson tells a reader every step already exists, ' +
+        'and the repo\'s own validator rejects a workflow whose steps do not.')
+    } else {
+      ok(`${file}: workflow example names ${steps.length} real skills`)
+    }
+  }
+}
+
 
 
 
