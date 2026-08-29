@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const run = promisify(execFile)
 import { read } from './helpers/repo.mjs'
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
+import { loadAgents, AGENT_SPECS, COMMON_BLOCKS } from '../scripts/lib/agents.mjs'
 import { auditText, auditRepo, AUDITED_GLOBS } from '../scripts/prompt-audit.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -107,40 +108,48 @@ test('both files pass the prompt audit', async () => {
   }
 })
 
-/* The prompt audit is a rejection linter: seven banned phrasings, and no presence check for
-   anything. Deleting the opus-subagent-cap block from CLAUDE.md leaves it reporting "prompt
-   audit clean" and exiting 0 - which a course lesson relied on as the way to check that block
-   was still there. The presence check is the first test in this file. This pins the difference
-   so the two commands are not confused for each other again. */
+/* Lessons 11 and 13 tell a student the prompt audit cannot detect a missing block. Guarding
+   that took four attempts, and the first three were the same mistake at different addresses.
 
-test('the prompt audit does not detect a missing block - only the suite does', async () => {
-  const source = await read('CLAUDE.md')
-  const withoutBlock = source.replace(
-    /<!-- prompt-block: opus-subagent-cap -->[\s\S]*?<!-- \/prompt-block -->/,
-    ''
-  )
-  assert.notEqual(withoutBlock, source, 'the block this test removes is no longer in CLAUDE.md')
-  assert.ok(
-    !extractBlocks(withoutBlock).has('opus-subagent-cap'),
-    'the block was not actually removed, so this proves nothing'
-  )
-  assert.deepEqual(
-    auditText(withoutBlock),
-    [],
-    'the audit now flags a missing block; if that is deliberate, the lessons pointing at npm test should be revisited'
-  )
+   Attempt 1 pinned auditText. Attempt 2 added auditRepo, because the CLI calls that. Attempt 3
+   ran the CLI binary itself, because a rule in its main block bypassed both. Each time the rule
+   was moved one layer out and the guard was rewritten to chase it.
+
+   That was the wrong generalisation. A rule placed back in auditText - the layer supposedly
+   closed first - beat all three, because every one of them used the same fixture: remove
+   `opus-subagent-cap` from CLAUDE.md. Lesson 13's claim is about `unattended-run` in an agent
+   card, and nothing tested that at all.
+
+   So the guard below is keyed on the class, not an address and not a fixture: for EVERY file
+   the audit reads and EVERY block that file is required to carry, removing that block must
+   leave the audit silent. */
+
+test('the prompt audit stays silent for every required block in every audited file', async () => {
+  const targets = [{ file: 'CLAUDE.md', blocks: REQUIRED_BLOCKS }]
+  for (const agent of await loadAgents()) {
+    targets.push({ file: agent.path, blocks: AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS })
+  }
+
+  let checked = 0
+  for (const { file, blocks } of targets) {
+    const source = await read(file)
+    for (const block of blocks) {
+      const stripped = source.replace(
+        new RegExp(`<!-- prompt-block: ${block} -->[\\s\\S]*?<!-- /prompt-block -->`),
+        ''
+      )
+      if (stripped === source) continue
+      assert.ok(!extractBlocks(stripped).has(block), `${file}: ${block} was not actually removed`)
+      assert.deepEqual(
+        auditText(stripped),
+        [],
+        `${file}: the audit flags a missing ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it cannot.`
+      )
+      checked += 1
+    }
+  }
+  assert.ok(checked >= 30, `only ${checked} block removals were exercised; the sweep has gone hollow`)
 })
-
-/* Two library-level guards and one that runs the actual binary.
-
-   The first pins auditText, the analysis function. That was not enough: the command the lessons
-   name is the CLI, which calls auditRepo, so a presence rule added there left it green. The
-   second closes that - auditRepo must be auditText applied per file and nothing more.
-
-   That was still not enough. A presence rule in the CLI's own main block bypasses both, because
-   until now no test in this repo ever executed a script - every guard imported functions. The
-   third runs `node scripts/prompt-audit.mjs` against a repo whose block has been removed, which
-   is the only form of this check that tests what the lesson actually tells someone to type. */
 
 test('auditRepo adds no rules of its own beyond auditText', async () => {
   const fromRepo = await auditRepo()
