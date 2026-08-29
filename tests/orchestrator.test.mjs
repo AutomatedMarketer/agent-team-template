@@ -221,14 +221,21 @@ const cliStates = [
   { name: "Lesson 11: opus-subagent-cap gone from CLAUDE.md", strip: [['CLAUDE.md', ['opus-subagent-cap']]] },
   // Lesson 13's scenario, verbatim: unattended-run gone from an agent card.
   { name: 'Lesson 13: unattended-run gone from an agent card', strip: [['.claude/agents/research.md', ['unattended-run']]] },
-  { name: 'every required block stripped everywhere', strip: 'all' }
+  { name: 'every required block stripped everywhere', strip: 'all' },
+  // Lesson 13 says "missing OR REWORDED". Every guard before this one tested only removal, so
+  // "present but altered" was a state no fixture ever produced - the other half of the symptom
+  // named in the same sentence.
+  { name: 'Lesson 13: unattended-run reworded, not removed', reword: ['.claude/agents/research.md', 'unattended-run'] }
 ]
 
 for (const state of cliStates) {
   test(`the prompt-audit CLI reports clean - ${state.name}`, async () => {
     const scratch = await mkdtemp(join(tmpdir(), 'audit-cli-'))
     try {
-      for (const dir of ['scripts', '.claude']) {
+      // shared/ carries the canonical block texts loadAllBlocks() reads. Without it a rule that
+      // compares against the Standard cannot run at all in the scratch repo, so a rewording
+      // placement would look "caught" when it had simply crashed.
+      for (const dir of ['scripts', '.claude', 'shared']) {
         await cp(join(root, dir), join(scratch, dir), { recursive: true })
       }
       await writeFile(join(scratch, 'CLAUDE.md'), await read('CLAUDE.md'))
@@ -245,7 +252,21 @@ for (const state of cliStates) {
       }
 
       let removed = 0
-      if (state.strip === 'all') {
+      if (state.reword) {
+        const [file, block] = state.reword
+        const before = await read(file)
+        // Any byte change inside the block counts as a rewording; appending a word is the one
+        // edit that works whatever the block says.
+        const after = before.replace(
+          new RegExp(`(<!-- prompt-block: ${block} -->
+)([^
+]+)`),
+          (_, open, first) => `${open}${first} Also, be brief.`
+        )
+        assert.notEqual(after, before, `${file}: ${block} could not be reworded`)
+        assert.ok(after.includes(`prompt-block: ${block} `), `${file}: ${block} was removed, not reworded`)
+        await writeFile(join(scratch, file), after)
+      } else if (state.strip === 'all') {
         const top = await read('CLAUDE.md')
         removed += REQUIRED_BLOCKS.filter((b) => top.includes(`prompt-block: ${b} `)).length
         await writeFile(join(scratch, 'CLAUDE.md'), drop(top, REQUIRED_BLOCKS))
