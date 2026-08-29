@@ -84,6 +84,8 @@ Write the workflow's `output` path:
 <With zero verdicts, use the uncomputable line above instead of this one.>
 
 Last week: <n>%. <Direction in one sentence, or "no prior week to compare.">
+<Omit this line entirely when the rate is uncomputable - there is no direction of travel
+between two things that were never measured.>
 
 ## By workflow
 

@@ -582,16 +582,17 @@ if (armLesson) {
 
 
 // ---------------------------------------------------------------------------------------------
-// A distinction a lesson tells the reader to make has to exist in the tool that reports it.
+// A distinction a lesson tells the reader to make has to exist in the tool that reports it - and
+// existing means the tool prints something, not that the word appears somewhere in the file.
 //
-// Lesson 18 named "uncomputable" twice - a troubleshooting row telling the reader to check
-// whether the rate is 0% or uncomputable, and a checklist item about an empty quality/ folder
-// making it uncomputable. The word appeared NOWHERE in the repo. write-quality-review's template
-// was `Acceptance rate: <n>%` with no branch for zero verdicts, so `shipped / 0` would have been
-// rendered as a number - and every student on Day 3 has an empty quality/ folder, which is what
-// the lesson itself says.
+// Lesson 18 named "uncomputable" twice while the word appeared NOWHERE in the repo, and
+// write-quality-review's template had no branch for zero verdicts, so `shipped / 0` had no defined
+// rendering. Every student meets that case: the lesson says verdicts accumulate the week after.
 //
-// 0% and uncomputable are opposite findings: one is a broken team, the other is an unclosed loop.
+// The first version of this guard tested for the WORD. A verifier deleted the whole fourteen-line
+// branch, left the word in the pointer that referred to it, and the guard printed ok - while the
+// skill pointed at a line that no longer existed. So it now requires the printable line itself.
+const OUTPUT_LINE = '**Acceptance rate: uncomputable'
 const skillFile = path.join(templateRoot, '.claude', 'skills', 'write-quality-review', 'SKILL.md')
 const reviewSkill = await readFile(skillFile, 'utf8').catch(() => null)
 const improveLesson = all.find((file) => /_IMPROVE\.md$/.test(file))
@@ -600,15 +601,17 @@ if (improveLesson) {
   const lessonSays = /uncomputable/i.test(body)
   if (reviewSkill === null) {
     fail(`${improveLesson}: write-quality-review/SKILL.md could not be read, so the acceptance-rate wording cannot be checked`)
-  } else if (lessonSays && !/uncomputable/i.test(reviewSkill)) {
-    fail(`${improveLesson}: tells the reader to distinguish 0% from "uncomputable", but ` +
-      'write-quality-review never uses the word — the tool cannot make the distinction the lesson teaches.')
   } else if (!lessonSays) {
     fail(`${improveLesson}: no longer explains "uncomputable", which is what an empty quality/ folder produces`)
+  } else if (!reviewSkill.includes(OUTPUT_LINE)) {
+    fail(`${improveLesson}: tells the reader to distinguish 0% from "uncomputable", but ` +
+      `write-quality-review does not prescribe the line to print ("${OUTPUT_LINE}…") — the word ` +
+      'appearing in the file is not the same as the tool having the branch.')
   } else {
-    ok(`${improveLesson}: the uncomputable case exists in both the lesson and write-quality-review`)
+    ok(`${improveLesson}: the uncomputable branch prescribes its output line, and the lesson teaches it`)
   }
 }
+
 
 for (const note of notes) console.log(`ok   ${note}`)
 
