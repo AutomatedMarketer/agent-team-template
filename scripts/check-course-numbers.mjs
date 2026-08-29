@@ -286,6 +286,32 @@ if (!deniesSend) {
 // ---------------------------------------------------------------- the verdict
 
 for (const note of notes) console.log(`ok   ${note}`)
+// ---------------------------------------------------------------------------------------------
+// A lesson that teaches FIRE_TRIGGERS has to name the slug that is not a workflow.
+//
+// Four buttons on the cockpit - Add task, New workflow, Arm, Approve - dispatch to one dedicated
+// routine, `task-intake`, not to the job beside them. The lesson used to describe FIRE_TRIGGERS as
+// "each workflow's slug", so a reader wired all nine workflows and got 404 from all four buttons.
+// Reproduced against the real endpoint before this check was written.
+//
+// This is a documentation-vs-behaviour pairing that no test in either repo could see, because the
+// behaviour lives in agent-cockpit and the instructions live here.
+for (const file of all) {
+  const body = await read(file)
+  // Only the lesson that TELLS you what to put in the variable - a row defining it in the
+  // settings table. Lesson 13 mentions FIRE_TRIGGERS in passing about Run buttons, where "each
+  // workflow's slug" is correct, and defers to Lesson 12. Flagging that was the guard being
+  // wider than the defect on its first run.
+  if (!/^\|\s*`FIRE_TRIGGERS`\s*\|/m.test(body)) continue
+  if (!body.includes('task-intake')) {
+    fail(`${file}: explains FIRE_TRIGGERS but never names "task-intake" — the one required slug ` +
+      'that is not a workflow. Add task, New workflow, Arm and Approve all 404 without it, and a ' +
+      'reader wiring "each workflow\'s slug" never supplies it.')
+  } else {
+    ok(`${file}: names task-intake alongside FIRE_TRIGGERS`)
+  }
+}
+
 if (problems.length) {
   console.log('')
   for (const p of problems) console.log(`FAIL ${p}`)
