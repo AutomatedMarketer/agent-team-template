@@ -225,7 +225,10 @@ const cliStates = [
   // Lesson 13 says "missing OR REWORDED". Every guard before this one tested only removal, so
   // "present but altered" was a state no fixture ever produced - the other half of the symptom
   // named in the same sentence.
-  { name: 'Lesson 13: unattended-run reworded, not removed', reword: ['.claude/agents/research.md', 'unattended-run'] }
+  { name: 'Lesson 13: unattended-run reworded, not removed', reword: ['.claude/agents/research.md', 'unattended-run'] },
+  // Placement 8 was reword x CLAUDE.md - the one cell of the 2x2 the previous four states left
+  // open, and CLAUDE.md is the file Lesson 11's whole row is about.
+  { name: 'Lesson 11: opus-subagent-cap reworded, not removed', reword: ['CLAUDE.md', 'opus-subagent-cap'] }
 ]
 
 for (const state of cliStates) {
