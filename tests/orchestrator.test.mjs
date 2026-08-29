@@ -134,6 +134,11 @@ test('the prompt audit stays silent for every required block in every audited fi
     targets.push({ file: agent.path, blocks: AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS })
   }
 
+  /* Both operations, over every pair. Removal used to be swept over all 57 (file x block)
+     pairs while rewording was exercised on exactly two, so a rule keyed on rewording
+     `boundaries` - carried by all eight agents and reworded by no fixture - walked past the
+     whole suite. The 2x2 of {removed, reworded} x {CLAUDE.md, agent card} was complete in its
+     axes and had one instantiation per cell, which is not the same thing. */
   let checked = 0
   for (const { file, blocks } of targets) {
     const source = await read(file)
@@ -147,8 +152,21 @@ test('the prompt audit stays silent for every required block in every audited fi
       assert.deepEqual(
         auditText(stripped),
         [],
-        `${file}: the audit flags a missing ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it cannot.`
+        `${file}: the audit flags a MISSING ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it reports clean.`
       )
+
+      const reworded = source.replace(
+        new RegExp(`(<!-- prompt-block: ${block} -->\\n)([^\\n]+)`),
+        (_, open, first) => `${open}${first} Also, be brief.`
+      )
+      assert.notEqual(reworded, source, `${file}: ${block} could not be reworded`)
+      assert.ok(extractBlocks(reworded).has(block), `${file}: ${block} was removed, not reworded`)
+      assert.deepEqual(
+        auditText(reworded),
+        [],
+        `${file}: the audit flags a REWORDED ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it reports clean.`
+      )
+
       checked += 1
     }
   }
@@ -228,7 +246,11 @@ const cliStates = [
   { name: 'Lesson 13: unattended-run reworded, not removed', reword: ['.claude/agents/research.md', 'unattended-run'] },
   // Placement 8 was reword x CLAUDE.md - the one cell of the 2x2 the previous four states left
   // open, and CLAUDE.md is the file Lesson 11's whole row is about.
-  { name: 'Lesson 11: opus-subagent-cap reworded, not removed', reword: ['CLAUDE.md', 'opus-subagent-cap'] }
+  { name: 'Lesson 11: opus-subagent-cap reworded, not removed', reword: ['CLAUDE.md', 'opus-subagent-cap'] },
+  // Placement 9 reworded `boundaries` - carried by all eight agents, named by no lesson, and
+  // reworded by no fixture. The named-block states cover the blocks the lessons talk about; this
+  // is the reword analogue of 'everything stripped', so a rule keyed on any other block fires too.
+  { name: 'every required block reworded everywhere', reword: 'all' }
 ]
 
 for (const state of cliStates) {
@@ -255,7 +277,33 @@ for (const state of cliStates) {
       }
 
       let removed = 0
-      if (state.reword) {
+      if (state.reword === 'all') {
+        const rewordAll = (source, blocks) => {
+          let out = source
+          let n = 0
+          for (const block of blocks) {
+            const next = out.replace(
+              new RegExp(`(<!-- prompt-block: ${block} -->
+)([^
+]+)`),
+              (_, open, first) => `${open}${first} Also, be brief.`
+            )
+            if (next !== out) n += 1
+            out = next
+          }
+          return { out, n }
+        }
+        const top = rewordAll(await read('CLAUDE.md'), REQUIRED_BLOCKS)
+        removed += top.n
+        await writeFile(join(scratch, 'CLAUDE.md'), top.out)
+        for (const agent of await loadAgents()) {
+          const spec = AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS
+          const card = rewordAll(await read(agent.path), spec)
+          removed += card.n
+          await writeFile(join(scratch, agent.path), card.out)
+        }
+        assert.equal(removed, expectedBlockCount(await loadAgents()), 'the all-reworded fixture no longer touches every required block')
+      } else if (state.reword) {
         const [file, block] = state.reword
         const before = await read(file)
         // Any byte change inside the block counts as a rewording; appending a word is the one
