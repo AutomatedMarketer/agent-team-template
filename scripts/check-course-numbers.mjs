@@ -387,6 +387,62 @@ if (realSkills.size === 0) {
 
 
 
+// ---------------------------------------------------------------------------------------------
+// The ledger lesson prints a sample run and tells the manual-way reader to copy
+// ledger.example.yml and "run the check below". Those drifted: the sample said 9.9 hours /
+// $1,488 / 2 ready while the example file produces 16.3 / $2,438 / 4 - a stale snapshot from when
+// that file had two tasks, and the same figures had been copied into the /ledger skill's read-back
+// script, so the assistant would have said them out loud.
+//
+// This lives here rather than in npm test because it needs the course folder, which is an argument
+// to this script and absent on a student's machine. The first version was a test that skipped when
+// the folder was missing - and a skipped test is not a passing one, so `npm test` reported
+// `pass 381 / fail 1` on every machine but the author's, against a README that names the count.
+const { summarize } = await import('../scripts/lib/ledger.mjs')
+const { parseSimpleYaml } = await import('../scripts/lib/yaml-lite.mjs')
+const exampleSource = await readFile(path.join(templateRoot, 'ledger.example.yml'), 'utf8').catch(() => null)
+const ledgerLesson = all.find((file) => /_YOUR_LEDGER\.md$/.test(file))
+if (exampleSource && ledgerLesson) {
+  const summary = summarize(parseSimpleYaml(exampleSource))
+  const line = `Your week: ${summary.hoursPerWeek.toFixed(1)} hours a week - $${Math.round(summary.costPerWeek).toLocaleString('en-US')} a week`
+  const body = await read(ledgerLesson)
+  if (!body.includes(line)) {
+    fail(`${ledgerLesson}: its sample run does not match ledger.example.yml, which prints "${line}". ` +
+      'The lesson tells a reader to copy that file and run the check, so the two have to agree.')
+  } else if (!body.includes(`${summary.candidates.length} ready to hand over`)) {
+    fail(`${ledgerLesson}: the example file has ${summary.candidates.length} ready; the sample says otherwise`)
+  } else {
+    ok(`${ledgerLesson}: sample run matches ledger.example.yml`)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A lesson that prints the check's output has to print what the check prints.
+//
+// The sample-run pairing above was added because a stale sample survived. One section lower on the
+// same page, the flag block was stale for the same reason and nothing caught it either: the code,
+// the log and the plugin skill were all updated together and the lesson was not, so the page went
+// on teaching a message the tool no longer emits - and a sentence the tool now contradicts.
+//
+// Any console line the reporter emits and a lesson quotes has to appear in both.
+const reporter = await readFile(path.join(templateRoot, 'scripts', 'check-ledger.mjs'), 'utf8').catch(() => '')
+// Leading escapes are part of the source, not of what a lesson would quote - stripping them
+// is why the header line is covered at all. Without it the guard silently checked only the
+// indented lines, and a mutation of the header produced no failure.
+const PAIRED_LINES = [...reporter.matchAll(/console\.log\('([^']{25,})'\)/g)].map((m) => m[1].replace(/^(?:\\n)+/, ''))
+if (ledgerLesson && PAIRED_LINES.length) {
+  const body = await read(ledgerLesson)
+  // Only the lines the lesson has chosen to quote - it does not have to show all of them.
+  const quotedish = PAIRED_LINES.filter((line) => body.includes(line.slice(0, 20)))
+  for (const line of quotedish) {
+    if (!body.includes(line)) {
+      fail(`${ledgerLesson}: quotes the check's output but not as the check prints it. ` +
+        `check-ledger.mjs emits "${line}" and the lesson has a near-miss of it.`)
+    }
+  }
+  if (quotedish.length) ok(`${ledgerLesson}: quotes ${quotedish.length} of the check's own output lines verbatim`)
+}
+
 for (const note of notes) console.log(`ok   ${note}`)
 
 

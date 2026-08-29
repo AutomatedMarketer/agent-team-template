@@ -1,7 +1,4 @@
 import test from 'node:test'
-import { readFile } from 'node:fs/promises'
-import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
-import { read } from './helpers/repo.mjs'
 import assert from 'node:assert/strict'
 import {
   deriveTask,
@@ -282,39 +279,4 @@ test('summarize surfaces ready rows whose answer begins with a negative', () => 
   const summary = summarize(ledger)
   assert.equal(summary.candidates.length, 2, 'both stay candidates - this flags, it does not reclassify')
   assert.deepEqual(summary.readyStartingWithNo.map((task) => task.task), ['Real work'])
-})
-
-/* The lesson prints a sample run and tells the manual-way reader to copy ledger.example.yml and
-   "run the check below". Those two drifted: the sample said 9.9 hours / $1,488 / 2 ready while the
-   example file produces 16.3 / $2,438 / 4 ready - a stale snapshot from when the file had two
-   tasks. The same figures had been copied into the /ledger skill's read-back script, so the
-   assistant would have said them out loud.
-
-   Nothing paired them, which is why it survived: the example file has tests, the lesson has a
-   guard, and the sentence "this is what that file prints" belonged to neither. This test owns it.
-   The lesson lives outside this repo, so it is skipped rather than failed when not reachable -
-   a skip says so, where a silent pass would not. */
-test('the ledger lesson quotes what ledger.example.yml actually prints', async (t) => {
-  const lesson = 'd:/dev/Claude Code - Second Brain/COURSE_SOPs_AND_PRESENTATION/LEVEL_2/15_YOUR_LEDGER.md'
-  const body = await readFile(lesson, 'utf8').catch(() => null)
-  if (body === null) {
-    t.skip('course folder not present beside this repo')
-    return
-  }
-
-  const example = parseSimpleYaml(await read('ledger.example.yml'))
-  const summary = summarize(example)
-  const hours = summary.hoursPerWeek.toFixed(1)
-  const money = Math.round(summary.costPerWeek).toLocaleString('en-US')
-
-  assert.ok(
-    body.includes(`Your week: ${hours} hours a week - $${money} a week`),
-    `the lesson's sample no longer matches ledger.example.yml, which now prints ` +
-    `"Your week: ${hours} hours a week - $${money} a week". The lesson tells a reader to copy ` +
-    'that file and run the check, so the two have to say the same thing.'
-  )
-  assert.ok(
-    body.includes(`${summary.candidates.length} ready to hand over`),
-    `the example file now has ${summary.candidates.length} ready; the lesson's sample says otherwise`
-  )
 })
