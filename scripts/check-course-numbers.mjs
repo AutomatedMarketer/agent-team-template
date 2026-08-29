@@ -581,6 +581,35 @@ if (armLesson) {
 }
 
 
+// ---------------------------------------------------------------------------------------------
+// A distinction a lesson tells the reader to make has to exist in the tool that reports it.
+//
+// Lesson 18 named "uncomputable" twice - a troubleshooting row telling the reader to check
+// whether the rate is 0% or uncomputable, and a checklist item about an empty quality/ folder
+// making it uncomputable. The word appeared NOWHERE in the repo. write-quality-review's template
+// was `Acceptance rate: <n>%` with no branch for zero verdicts, so `shipped / 0` would have been
+// rendered as a number - and every student on Day 3 has an empty quality/ folder, which is what
+// the lesson itself says.
+//
+// 0% and uncomputable are opposite findings: one is a broken team, the other is an unclosed loop.
+const skillFile = path.join(templateRoot, '.claude', 'skills', 'write-quality-review', 'SKILL.md')
+const reviewSkill = await readFile(skillFile, 'utf8').catch(() => null)
+const improveLesson = all.find((file) => /_IMPROVE\.md$/.test(file))
+if (improveLesson) {
+  const body = await read(improveLesson)
+  const lessonSays = /uncomputable/i.test(body)
+  if (reviewSkill === null) {
+    fail(`${improveLesson}: write-quality-review/SKILL.md could not be read, so the acceptance-rate wording cannot be checked`)
+  } else if (lessonSays && !/uncomputable/i.test(reviewSkill)) {
+    fail(`${improveLesson}: tells the reader to distinguish 0% from "uncomputable", but ` +
+      'write-quality-review never uses the word — the tool cannot make the distinction the lesson teaches.')
+  } else if (!lessonSays) {
+    fail(`${improveLesson}: no longer explains "uncomputable", which is what an empty quality/ folder produces`)
+  } else {
+    ok(`${improveLesson}: the uncomputable case exists in both the lesson and write-quality-review`)
+  }
+}
+
 for (const note of notes) console.log(`ok   ${note}`)
 
 

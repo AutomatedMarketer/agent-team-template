@@ -35,6 +35,20 @@ count next to the rate, because an acceptance rate calculated from three verdict
 twenty is noise, and presenting it as a clean percentage is the most misleading thing you
 could do this week.
 
+**With no verdicts at all, the rate is uncomputable, and that is what to say.** Not 0%. Zero
+per cent means the owner used none of the week's work; uncomputable means nobody has said yet.
+Those are opposite findings — one is a broken team, the other is an unclosed loop — and the
+arithmetic cannot tell them apart because `shipped / 0` is not a number. Write:
+
+```
+**Acceptance rate: uncomputable — no verdicts filed this week.**
+<n> outputs are waiting on one. Nothing here says the work was bad; nothing here says it was
+good either.
+```
+
+Then skip the comparison to last week entirely rather than printing a direction of travel
+between two things that were never measured.
+
 ## 3. Find the disagreements
 
 The two rows worth the owner's attention:
@@ -67,6 +81,7 @@ Write the workflow's `output` path:
 
 **Acceptance rate: <n>% — <shipped> of <verdicted> outputs used unedited.**
 <n> graded outputs had no verdict yet.
+<With zero verdicts, use the uncomputable line above instead of this one.>
 
 Last week: <n>%. <Direction in one sentence, or "no prior week to compare.">
 
