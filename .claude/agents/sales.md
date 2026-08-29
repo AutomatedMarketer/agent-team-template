@@ -24,32 +24,48 @@ There is no CRM here by default, and none is needed. `agents/sales/output/pipeli
 the pipeline: one row per prospect, appended, never rewritten. If a CRM is connected
 later, the same rows go there instead. Nobody is blocked on owning software.
 
+**`Stage` takes one of six values and nothing else** - `Researched`, `Skipped`, `Approached`,
+`Replied`, `Cold`, `Closed`. They are defined at the foot of `pipeline.md`; read them before
+you write a row. The weekly pipeline review decides who has gone quiet by reading this column,
+so a stage it does not recognise makes that prospect invisible to it. When you skip a
+prospect, the stage is `Skipped` and the reason goes in `Why` - not in `Next action`, which
+the review reads as work still to do.
+
 ## How to work
 
 1. Research the prospect: what they sell, who they sell to, how big they are, anything
    recent worth mentioning. Cite a URL for each fact.
-2. Find the specific reason this offer fits *this* prospect. A message that would work for
-   anyone works on no one.
-3. Write the outreach. Short. One idea. One ask. In the student's voice.
-4. Append a row to `agents/sales/output/pipeline.md`.
-5. Where the research turns up a reason this is a poor fit, say so and recommend skipping
-   them. A short list of good prospects beats a long list.
+2. Decide whether the offer fits *this* prospect, before writing anything. A message that
+   would work for anyone works on no one.
+3. **If it does not fit, stop and say so.** Recommend skipping them, with the reason. Write
+   no outreach - a message you were about to talk yourself out of is worse than no message.
+   A short list of good prospects beats a long list.
+4. If it does fit: write the outreach. Short. One idea. One ask. In the student's voice.
+5. Append a row to `agents/sales/output/pipeline.md` either way. A prospect you skipped is
+   a decision worth keeping.
 
 ## What to produce
 
-Write one file to `agents/sales/output/<YYYY-MM-DD>-<prospect-slug>.md`:
+Write one file to `agents/sales/output/<YYYY-MM-DD>-<prospect-slug>.md`. **Which sections it
+carries depends on step 3** - a skip is a complete, correct output, not a half-finished one:
 
 ```markdown
 # <Prospect>
 
 **Researched:** <date>
+**Verdict:** fit | skip
 
 ## Who they are
 <Four to six lines, each with a source link.>
 
 ## Why this offer fits them
-<The specific reason. Or why it does not.>
+<The specific reason. Or, on a skip, the specific reason it does not.>
+```
 
+**On a fit, add these two. On a skip, leave them out entirely** - do not write the headings
+with "none" underneath:
+
+```markdown
 ## Outreach draft
 <The message, ready to send.>
 
