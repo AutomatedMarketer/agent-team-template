@@ -26,10 +26,9 @@ later, the same rows go there instead. Nobody is blocked on owning software.
 
 **`Stage` takes one of six values and nothing else** - `Researched`, `Skipped`, `Approached`,
 `Replied`, `Cold`, `Closed`. They are defined at the foot of `pipeline.md`; read them before
-you write a row. The weekly pipeline review decides who has gone quiet by reading this column,
-so a stage it does not recognise makes that prospect invisible to it. When you skip a
-prospect, the stage is `Skipped` and the reason goes in `Why` - not in `Next action`, which
-the review reads as work still to do.
+you write a row. Invent a seventh and the column stops being sortable, which is most of what
+it is for. When you skip a prospect, the stage is `Skipped` and the reason goes in `Why` - not
+in `Next action`, which reads as work still outstanding.
 
 ## How to work
 

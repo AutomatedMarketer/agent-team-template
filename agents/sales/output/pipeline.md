@@ -20,17 +20,19 @@ The sales agent appends one row per prospect. This is your CRM until you have on
 
 ## Stage — the only permitted values
 
-The weekly pipeline review reads these to work out who has gone quiet, so a stage it does not
-recognise makes that prospect invisible. Use exactly these:
+Without a fixed list, every run invents its own word and the column stops being sortable,
+filterable or countable — which is most of why it exists. These six are the states the weekly
+pipeline review already reasons about, so putting them in one column means it can read them
+from there instead of inferring them from prose.
 
-| Stage | Means | The review treats it as |
+| Stage | Means | What it means for chasing |
 |---|---|---|
-| `Researched` | Looked at, fits, no message written or sent yet | Active — needs a first message |
-| `Skipped` | Researched and deliberately not pursued. Reason goes in `Why` | Closed. It stays skipped and is never chased |
-| `Approached` | A message has gone out, no reply yet | Active — the clock for "gone quiet" starts here |
-| `Replied` | They answered | Warm, whatever the date says. Never counted as cold |
+| `Researched` | Looked at, fits, no message written or sent yet | Needs a first message |
+| `Skipped` | Researched and deliberately not pursued. Reason goes in `Why` | Stays skipped. Never chased |
+| `Approached` | A message has gone out, no reply yet | The clock for "gone quiet" starts here |
+| `Replied` | They answered | Warm, whatever the date says |
 | `Cold` | Approached, no reply, follow-up window passed | Chase candidate |
-| `Closed` | Finished either way — won, lost, or no longer relevant. Put which in `Why` | Closed |
+| `Closed` | Finished either way — won, lost, or no longer relevant. Put which in `Why` | Done |
 
 **`Skipped` is not a failure state.** A prospect you correctly declined to chase is the
 cheapest row in this file.
