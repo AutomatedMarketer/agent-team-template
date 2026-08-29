@@ -1,8 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readdir } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { read } from './helpers/repo.mjs'
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
-import { auditText } from '../scripts/prompt-audit.mjs'
+import { auditText, auditRepo, AUDITED_GLOBS } from '../scripts/prompt-audit.mjs'
+
+const root = fileURLToPath(new URL('../', import.meta.url))
 
 const REQUIRED_BLOCKS = [
   'opus-conciseness',
@@ -50,14 +55,27 @@ test('the count CLAUDE.md states matches the table it states it above', async ()
   const rows = (table[0].match(/^\| `[a-z-]+` \|/gm) ?? []).length
   assert.equal(rows, SLUGS.length, `the team table lists ${rows} specialists, SLUGS has ${SLUGS.length}`)
 
+  // Two different true numbers live in this file and they must not be swapped: "specialists"
+  // is who you delegate to (the table), "workers" is what runs (the agent files, which include
+  // the front door's own card). The original defect was "six workers" - wrong on both counts.
+  const files = (await readdir(join(root, '.claude/agents'))).filter((f) => f.endsWith('.md'))
   const WORDS = { five: 5, six: 6, seven: 7, eight: 8, nine: 9 }
+
   for (const [word, n] of Object.entries(WORDS)) {
-    if (n === rows) continue
-    assert.doesNotMatch(
-      source,
-      new RegExp(`\\b${word} (?:workers|specialists)\\b`, 'i'),
-      `CLAUDE.md says "${word} workers/specialists" but its table lists ${rows}`
-    )
+    if (n !== rows) {
+      assert.doesNotMatch(
+        source,
+        new RegExp(`\\b${word} specialists\\b`, 'i'),
+        `CLAUDE.md says "${word} specialists" but its team table lists ${rows}`
+      )
+    }
+    if (n !== files.length) {
+      assert.doesNotMatch(
+        source,
+        new RegExp(`\\b${word} workers\\b`, 'i'),
+        `CLAUDE.md says "${word} workers" but .claude/agents/ holds ${files.length}`
+      )
+    }
   }
 })
 
@@ -105,5 +123,30 @@ test('the prompt audit does not detect a missing block - only the suite does', a
     auditText(withoutBlock),
     [],
     'the audit now flags a missing block; if that is deliberate, the lessons pointing at npm test should be revisited'
+  )
+})
+
+/* The above pins auditText, the analysis function. The command the lessons name is the CLI,
+   which runs auditRepo - so a presence rule added THERE would leave the test above green while
+   the conflation happened anyway. This closes that: auditRepo must be exactly auditText applied
+   per file, contributing no findings of its own. */
+
+test('auditRepo adds no rules of its own beyond auditText', async () => {
+  const fromRepo = await auditRepo()
+  const expected = []
+  for (const target of AUDITED_GLOBS) {
+    const files = target.endsWith('.md')
+      ? [target]
+      : (await readdir(join(root, target), { recursive: true }))
+          .filter((f) => f.endsWith('.md'))
+          .map((f) => `${target}/${f.replaceAll(sep, '/')}`)
+    for (const file of files) {
+      for (const finding of auditText(await read(file))) expected.push({ file, ...finding })
+    }
+  }
+  assert.equal(
+    fromRepo.length,
+    expected.length,
+    `auditRepo reported ${fromRepo.length} findings, auditText over the same files reports ${expected.length} - auditRepo has gained a rule of its own`
   )
 })

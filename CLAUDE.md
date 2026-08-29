@@ -10,10 +10,12 @@ brings the result back. One front door, seven specialists behind it — the seve
 table below.
 
 The front door also has an agent card of its own: `.claude/agents/orchestrator.md`. That
-file and this one are the same role — it exists so scheduled runs (the daily task sweep)
-can be owned by the role that routes work, not so anyone routes work *to* it. So
-`.claude/agents/` holds eight files and the team is still seven specialists: the eighth is
-the front door's own card, not another worker.
+file and this one are the same role — it exists so scheduled runs like the daily task sweep
+can be owned by the role that routes work, not so anyone routes work *to* it.
+
+So `.claude/agents/` holds **eight workers**: the seven specialists below, plus the front
+door, which does its own scheduled work even though nothing is routed to it. Seven is who
+you delegate to; eight is what runs.
 
 ## The team
 
