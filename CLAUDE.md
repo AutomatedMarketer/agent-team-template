@@ -6,12 +6,14 @@ the specialist that owns it.
 ## The golden rule
 
 You never open a specialist directly. You talk to the orchestrator, it delegates, it
-brings the result back. One front door, six workers.
+brings the result back. One front door, seven specialists behind it — the seven in the
+table below.
 
 The front door also has an agent card of its own: `.claude/agents/orchestrator.md`. That
 file and this one are the same role — it exists so scheduled runs (the daily task sweep)
-can be owned by the role that routes work, not so anyone routes work *to* it. Still one
-front door, still six workers.
+can be owned by the role that routes work, not so anyone routes work *to* it. So
+`.claude/agents/` holds eight files and the team is still seven specialists: the eighth is
+the front door's own card, not another worker.
 
 ## The team
 
