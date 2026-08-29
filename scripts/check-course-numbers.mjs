@@ -440,7 +440,17 @@ if (ledgerLesson && PAIRED_LINES.length) {
         `check-ledger.mjs emits "${line}" and the lesson has a near-miss of it.`)
     }
   }
-  if (quotedish.length) ok(`${ledgerLesson}: quotes ${quotedish.length} of the check's own output lines verbatim`)
+  // Pinned, because "the lines the lesson quotes" is decided by a 20-character prefix: reword a
+  // line inside that prefix and it leaves coverage silently, with the only signal an ok line
+  // counting one lower. That is the same shape as the defect this whole section exists for, so
+  // the number is asserted rather than printed. If the reporter gains or loses a line the
+  // lesson shows, this fails and both get updated together - which is the point of a pairing.
+  const QUOTED_IN_LESSON = 3
+  if (quotedish.length !== QUOTED_IN_LESSON) {
+    fail(`${ledgerLesson}: quotes ${quotedish.length} of the check's output lines, expected ${QUOTED_IN_LESSON}. A line was reworded on one side only, or the block changed shape.`)
+  } else {
+    ok(`${ledgerLesson}: quotes all ${QUOTED_IN_LESSON} lines of the check's flag block verbatim`)
+  }
 }
 
 for (const note of notes) console.log(`ok   ${note}`)
