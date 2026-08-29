@@ -55,6 +55,12 @@ for (const [label, tasks] of [
   for (const task of tasks) {
     const { hoursPerWeek } = deriveTask(task, null)
     console.log(`  ${task.task} - ${hoursPerWeek.toFixed(1)}h`)
+    // A parked task is parked by an EMPTY hands_off, so the reason for parking it had nowhere
+    // to live - the example file resorted to a YAML comment, which nothing reads. Lesson 17
+    // makes the argument for the other file: "an unexplained silence is indistinguishable from
+    // a mistake, and you will re-litigate a decision you already made." Same problem, same fix.
+    const because = typeof task?.parked_because === 'string' ? task.parked_because.trim() : ''
+    if (because) console.log(`      ${because}`)
   }
 }
 

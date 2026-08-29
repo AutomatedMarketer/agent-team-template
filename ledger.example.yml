@@ -73,7 +73,8 @@ tasks:
     minutes_each: 90
     confirmed: twice
     hands_off: ""
-    # ^ Empty on purpose. This one is PARKED, not built. Until you can say who acts on it,
+    parked_because: "Nobody reads the numbers I send round on Monday. Until somebody does, automating them just moves the ignoring earlier in the week."
+    # ^ hands_off empty on purpose. This one is PARKED, not built. Until you can say who acts on it,
     #   automating it just moves the ignoring earlier in the week.
 
   - task: Reading industry newsletters

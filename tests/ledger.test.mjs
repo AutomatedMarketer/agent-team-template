@@ -280,3 +280,27 @@ test('summarize surfaces ready rows whose answer begins with a negative', () => 
   assert.equal(summary.candidates.length, 2, 'both stay candidates - this flags, it does not reclassify')
   assert.deepEqual(summary.readyStartingWithNo.map((task) => task.task), ['Real work'])
 })
+
+/* A task is parked by an EMPTY hands_off, so the reason for parking had nowhere to live - the
+   example file resorted to a YAML comment, which nothing reads. An employee persona hit this on
+   its first task: "nobody acts on the output" was the true answer, the flag correctly refused to
+   let it count as Ready, and the only way to act on the flag was to delete the answer.
+
+   Lesson 17 already makes the argument for the other file: an unexplained silence is
+   indistinguishable from a mistake, and you re-litigate a decision you already made. Optional -
+   a parked task without one still parks. */
+test('a parked task can say why, and saying why does not unpark it', () => {
+  const parked = {
+    task: 'Portal uploads',
+    words: 'four portals, four ways to fail',
+    times_per_week: 3,
+    minutes_each: 25,
+    confirmed: 'twice',
+    parked_because: 'There is no output to hand off - the upload IS the submission.'
+  }
+  const summary = summarize(ledgerOf([parked]))
+  assert.equal(summary.parked.length, 1, 'an absent hands_off still parks it')
+  assert.equal(summary.candidates.length, 0)
+  assert.equal(summary.parked[0].parked_because, parked.parked_because)
+  assert.deepEqual(validateLedger(ledgerOf([parked])), [], 'the field must not be rejected')
+})
