@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir, mkdtemp, cp, writeFile, rm, readFile } from 'node:fs/promises'
+import { readdir, mkdtemp, cp, writeFile, rm, readFile, stat } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
@@ -418,29 +418,51 @@ const buildScratch = async (emptyRules) => {
     await writeFile(join(scratch, 'scripts/prompt-audit.mjs'), emptied)
   }
 
-  /* The corpus goes into EVERY audited location, not one. The first version wrote it only to
-     .claude/rules/ and a CLI-layer rule that walked .claude/agents/ never met it - the fixture
-     reported clean and I would have called that a pass. A rule can be scoped to any audited path,
-     so the bait has to be in all of them. */
-  const corpusFile = `# fixture
+  /* Every bait file is a REAL audited file with the corpus appended, not a hand-written file that
+     resembles one. Three rounds were lost to the same shape: the bait went into one directory, so
+     a rule scoped to another never met it; then the bait was plain markdown, so a rule keyed on
+     `model:` frontmatter never met it; then the bait had frontmatter but no prompt blocks, so a
+     rule keyed on `model:` AND `<!-- prompt-block:` never met it - and all eight real cards carry
+     both. Each time I added the one property I had just been shown.
 
-${CLI_CORPUS}
-`
-  await writeFile(join(scratch, '.claude/rules/corpus-fixture.md'), corpusFile)
-  /* The agents copy carries real agent-card frontmatter. Suppression does not have to be
-     blanket - the attack that got through keyed on `model:` frontmatter, so it fired on plain
-     markdown and was silent on every agent card. Bait that does not look like the files being
-     audited cannot detect a rule conditioned on what those files look like. */
-  await writeFile(
-    join(scratch, '.claude/agents/corpus-fixture.md'),
-    ['---', 'name: corpus-fixture', 'description: bait', 'model: opus', '---', '', CLI_CORPUS, ''].join('\n')
+     Resembling the audited files is a moving target with no end. Deriving from them has an end:
+     the bait carries whatever the real file carries, including properties nobody has thought of,
+     because it IS the real file plus a suffix. */
+  const baitFiles = []
+  for (const glob of AUDITED_GLOBS) {
+    const full = join(root, glob)
+    const info = await stat(full).catch(() => null)
+    if (!info) continue
+
+    if (info.isFile()) {
+      await writeFile(join(scratch, glob), `${await read(glob)}\n\n${CLI_CORPUS}\n`)
+      baitFiles.push(glob)
+      continue
+    }
+
+    const donors = []
+    const walk = async (dir) => {
+      for (const entry of await readdir(join(root, dir), { withFileTypes: true })) {
+        const next = `${dir}/${entry.name}`
+        if (entry.isDirectory()) await walk(next)
+        else if (entry.name.endsWith('.md')) donors.push(next)
+      }
+    }
+    await walk(glob)
+    assert.ok(donors.length > 0, `${glob} has no markdown to derive bait from, so this fixture cannot cover it`)
+
+    const donor = donors.sort()[0]
+    const bait = `${glob}/corpus-fixture.md`
+    await writeFile(join(scratch, bait), `${await read(donor)}\n\n${CLI_CORPUS}\n`)
+    baitFiles.push(bait)
+  }
+
+  assert.equal(
+    baitFiles.length,
+    AUDITED_GLOBS.length,
+    `bait was planted in ${baitFiles.length} of ${AUDITED_GLOBS.length} audited locations`
   )
-  await writeFile(join(scratch, '.claude/skills/corpus-fixture.md'), corpusFile)
-  await writeFile(join(scratch, 'CLAUDE.md'), `${await read('CLAUDE.md')}
-
-${CLI_CORPUS}
-`)
-  return scratch
+  return { scratch, baitFiles }
 }
 
 const runCli = async (scratch) => {
@@ -469,7 +491,7 @@ test('the real command finds nothing once the table the lessons point at is empt
        on a corpus line and still passes - and it disagreed with the same limit as stated in the
        lesson log and in the comment below. Three statements of one limit, two shapes, one false.)
      That is a smaller residue than any previous round left, and it is not zero. */
-  const intact = await buildScratch(false)
+  const { scratch: intact, baitFiles } = await buildScratch(false)
   try {
     const result = await runCli(intact)
     assert.equal(result.code, 1, `the corpus no longer trips the shipped audit, so this fixture proves nothing. Output: ${result.stdout}`)
@@ -479,8 +501,7 @@ test('the real command finds nothing once the table the lessons point at is empt
        `model:` frontmatter, so the agent card goes quiet while the three plain copies still report
        all seven and the check passes. A rule conditioned on what a file looks like is only visible
        if the same bait is checked in each shape of file. */
-    for (const bait of ['CLAUDE.md', '.claude/agents/corpus-fixture.md',
-      '.claude/rules/corpus-fixture.md', '.claude/skills/corpus-fixture.md']) {
+    for (const bait of baitFiles) {
       const forFile = result.stdout
         .split('\n')
         .filter((line) => line.startsWith(`${bait}:`))
@@ -551,7 +572,7 @@ test('the real command finds nothing once the table the lessons point at is empt
     await rm(intact, { recursive: true, force: true })
   }
 
-  const emptied = await buildScratch(true)
+  const { scratch: emptied } = await buildScratch(true)
   try {
     const result = await runCli(emptied)
     assert.equal(
