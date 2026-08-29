@@ -55,3 +55,27 @@ test('both files pass the prompt audit', async () => {
     assert.deepEqual(findings, [], `${file}: ${JSON.stringify(findings)}`)
   }
 })
+
+/* The prompt audit is a rejection linter: seven banned phrasings, and no presence check for
+   anything. Deleting the opus-subagent-cap block from CLAUDE.md leaves it reporting "prompt
+   audit clean" and exiting 0 - which a course lesson relied on as the way to check that block
+   was still there. The presence check is the first test in this file. This pins the difference
+   so the two commands are not confused for each other again. */
+
+test('the prompt audit does not detect a missing block - only the suite does', async () => {
+  const source = await read('CLAUDE.md')
+  const withoutBlock = source.replace(
+    /<!-- prompt-block: opus-subagent-cap -->[\s\S]*?<!-- \/prompt-block -->/,
+    ''
+  )
+  assert.notEqual(withoutBlock, source, 'the block this test removes is no longer in CLAUDE.md')
+  assert.ok(
+    !extractBlocks(withoutBlock).has('opus-subagent-cap'),
+    'the block was not actually removed, so this proves nothing'
+  )
+  assert.deepEqual(
+    auditText(withoutBlock),
+    [],
+    'the audit now flags a missing block; if that is deliberate, the lessons pointing at npm test should be revisited'
+  )
+})
