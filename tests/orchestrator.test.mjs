@@ -1,8 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir } from 'node:fs/promises'
+import { readdir, mkdtemp, cp, writeFile, rm } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const run = promisify(execFile)
 import { read } from './helpers/repo.mjs'
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
 import { auditText, auditRepo, AUDITED_GLOBS } from '../scripts/prompt-audit.mjs'
@@ -126,10 +131,16 @@ test('the prompt audit does not detect a missing block - only the suite does', a
   )
 })
 
-/* The above pins auditText, the analysis function. The command the lessons name is the CLI,
-   which runs auditRepo - so a presence rule added THERE would leave the test above green while
-   the conflation happened anyway. This closes that: auditRepo must be exactly auditText applied
-   per file, contributing no findings of its own. */
+/* Two library-level guards and one that runs the actual binary.
+
+   The first pins auditText, the analysis function. That was not enough: the command the lessons
+   name is the CLI, which calls auditRepo, so a presence rule added there left it green. The
+   second closes that - auditRepo must be auditText applied per file and nothing more.
+
+   That was still not enough. A presence rule in the CLI's own main block bypasses both, because
+   until now no test in this repo ever executed a script - every guard imported functions. The
+   third runs `node scripts/prompt-audit.mjs` against a repo whose block has been removed, which
+   is the only form of this check that tests what the lesson actually tells someone to type. */
 
 test('auditRepo adds no rules of its own beyond auditText', async () => {
   const fromRepo = await auditRepo()
@@ -149,4 +160,38 @@ test('auditRepo adds no rules of its own beyond auditText', async () => {
     expected.length,
     `auditRepo reported ${fromRepo.length} findings, auditText over the same files reports ${expected.length} - auditRepo has gained a rule of its own`
   )
+})
+
+test('the prompt-audit CLI itself reports clean with a block removed', async () => {
+  const scratch = await mkdtemp(join(tmpdir(), 'audit-cli-'))
+  try {
+    for (const dir of ['scripts', '.claude']) {
+      await cp(join(root, dir), join(scratch, dir), { recursive: true })
+    }
+    const source = await read('CLAUDE.md')
+    const withoutBlock = source.replace(
+      /<!-- prompt-block: opus-subagent-cap -->[\s\S]*?<!-- \/prompt-block -->/,
+      ''
+    )
+    assert.notEqual(withoutBlock, source, 'the block this test removes is no longer in CLAUDE.md')
+    await writeFile(join(scratch, 'CLAUDE.md'), withoutBlock)
+
+    let stdout = ''
+    let code = 0
+    try {
+      const result = await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })
+      stdout = result.stdout
+    } catch (error) {
+      stdout = error.stdout ?? ''
+      code = error.code ?? 1
+    }
+    assert.equal(
+      code,
+      0,
+      `the CLI now fails on a missing block. If that is deliberate, Lessons 11 and 13 should stop saying npm test is the only thing that finds it. Output: ${stdout}`
+    )
+    assert.match(stdout, /prompt audit clean/, `expected a clean report, got: ${stdout}`)
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
 })
