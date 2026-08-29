@@ -175,6 +175,23 @@ export function validateProposals(written, ledger, catalogue) {
       if (!mentionsOne) {
         at(`was chosen over ${rejected.length} other candidate(s) without naming any of them — say which you rejected and why`)
       }
+
+    }
+
+    // A reason may not name something that was never on the table.
+    //
+    // `rejected.some(...)` above is satisfied by naming ONE of N, and nothing checked that a
+    // named item was ever offered. A walkthrough shipped a committed proposal citing
+    // "Rejected agent:sales" for a task where agent:sales was not a candidate in that repo -
+    // the shortlist had been computed somewhere else - and this file passed it. That is the
+    // one thing the engine is supposed to make impossible: the reason cannot invent.
+    const offered = new Set([textOf(row.item), ...entry.candidates.map((candidate) => candidate.id)])
+    const named = [...String(row.why ?? '').matchAll(/\b(?:agent|skill|workflow):[a-z0-9-]+/g)]
+      .map((found) => found[0])
+    for (const mention of new Set(named)) {
+      if (!offered.has(mention)) {
+        at(`names ${mention} in its reason, which was never offered for this task — the candidates were ${[...offered].join(', ')}`)
+      }
     }
   }
 

@@ -450,3 +450,42 @@ test('a choice from several candidates must name what it rejected', () => {
   }
   assert.deepEqual(validateProposals(named, ledgerOf([twoWays]), wider), [])
 })
+
+/* A reason may not name something that was never on the table.
+
+   `rejected.some(...)` is satisfied by naming ONE of N, and nothing checked that a named item was
+   ever offered. A walkthrough shipped a committed proposal citing "Rejected agent:sales" for a
+   task where agent:sales was not a candidate in that repo - the shortlist had been computed in a
+   different repo, whose catalogue ranks differently - and the file passed. Inventing an
+   alternative is the one thing the engine exists to make impossible, and the reason was the one
+   place nothing checked. */
+test('a reason that names a candidate which was never offered is refused', () => {
+  const file = {
+    proposals: [{
+      ...soundFile.proposals[0],
+      why: 'its description names newsletters directly. Rejected agent:sales, which only shared write.'
+    }],
+    gaps: []
+  }
+  const problems = validateProposals(file, ledgerOf([newsletter]), catalogue)
+  assert.ok(
+    problems.some((problem) => /agent:sales.*never offered/.test(problem)),
+    `expected a never-offered problem, got: ${JSON.stringify(problems)}`
+  )
+})
+
+test('naming the item that WAS offered - the chosen one - is not a phantom', () => {
+  // agent:content is the only candidate this task produces, so it is the only id nameable here.
+  // The first version of this test named agent:email, which is in the CATALOGUE but shares no
+  // word with the newsletter task and so was never a candidate - the check was right to flag it,
+  // and the test was wrong. Being in the catalogue is not the same as being on the table.
+  const file = {
+    proposals: [{
+      ...soundFile.proposals[0],
+      why: 'agent:content names newsletters in its own description, which is the job here.'
+    }],
+    gaps: []
+  }
+  const problems = validateProposals(file, ledgerOf([newsletter]), catalogue)
+  assert.deepEqual(problems.filter((problem) => /never offered/.test(problem)), [])
+})
