@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { auditText, auditRepo } from '../scripts/prompt-audit.mjs'
+import { auditText, auditRepo, RULES } from '../scripts/prompt-audit.mjs'
 
 test('flags pressure language', () => {
   const findings = auditText('CRITICAL: you MUST always call the tool.')
@@ -61,4 +61,46 @@ test('the whole repo passes the audit', async () => {
     .map((finding) => `${finding.file}:${finding.line} [${finding.rule}] ${finding.excerpt}`)
     .join('\n')
   assert.deepEqual(findings, [], report)
+})
+
+/* Lessons 11 and 13 tell a student what `prompt-audit` looks for: "seven banned phrasings,
+   listed at the top of scripts/prompt-audit.mjs", and that blocks are `npm test`'s job.
+
+   Ten earlier attempts guarded the opposite sentence - that the audit CANNOT detect a missing or
+   reworded block. That is a universal over an open space of rules, and over an unbounded space of
+   edits ("reworded" is a class, not a state), so no fixture set holds it. Both lessons now make a
+   positive claim about the shipped rule set instead, and a positive claim about a finite exported
+   table is exactly this size: enumerate it. Add an eighth rule, or one that reads structure rather
+   than phrasing, and the pages need rewriting - this fails and says so. */
+
+test('the audit is seven banned phrasings, which is what Lessons 11 and 13 tell students', () => {
+  assert.equal(
+    RULES.length,
+    7,
+    `Lessons 11 and 13 both say "seven banned phrasings"; the table now has ${RULES.length}. Update both rows.`
+  )
+  assert.deepEqual(
+    RULES.map((rule) => rule.id),
+    [
+      'critical-prefix',
+      'shouting-imperative',
+      'self-verification',
+      'reasoning-extraction',
+      'over-delegation',
+      'progress-scaffolding',
+      'tool-over-trigger'
+    ],
+    'the rule set changed - Lessons 11 and 13 describe it to students'
+  )
+  for (const rule of RULES) {
+    assert.ok(
+      rule.pattern instanceof RegExp,
+      `${rule.id} is not a phrasing pattern. Lessons 11 and 13 call this tool a phrasing scan and send students to npm test for anything structural.`
+    )
+    assert.equal(
+      typeof rule.why,
+      'string',
+      `${rule.id} has no rationale, so a student who trips it cannot be told why`
+    )
+  }
 })

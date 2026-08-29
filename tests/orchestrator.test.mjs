@@ -112,7 +112,8 @@ test('both files pass the prompt audit', async () => {
   }
 })
 
-/* Lessons 11 and 13 tell a student the prompt audit cannot detect a missing block. Guarding
+/* Lessons 11 and 13 route a student to `npm test` for blocks and call this tool a phrasing
+   scan. These states are why that routing is the right advice. Guarding
    that took four attempts, and the first three were the same mistake at different addresses.
 
    Attempt 1 pinned auditText. Attempt 2 added auditRepo, because the CLI calls that. Attempt 3
@@ -152,7 +153,7 @@ test('the prompt audit stays silent for every required block in every audited fi
       assert.deepEqual(
         auditText(stripped),
         [],
-        `${file}: the audit flags a MISSING ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it reports clean.`
+        `${file}: the audit flags a MISSING ${block}. Lessons 11 and 13 send students to npm test for blocks; if the audit has grown block checks, both rows need rewriting.`
       )
 
       const reworded = source.replace(
@@ -164,7 +165,7 @@ test('the prompt audit stays silent for every required block in every audited fi
       assert.deepEqual(
         auditText(reworded),
         [],
-        `${file}: the audit flags a REWORDED ${block}. If that is deliberate, Lessons 11 and 13 must stop saying it reports clean.`
+        `${file}: the audit flags a REWORDED ${block}. Lessons 11 and 13 send students to npm test for blocks; if the audit has grown block checks, both rows need rewriting.`
       )
 
       checked += 1
@@ -358,7 +359,7 @@ for (const state of cliStates) {
       assert.equal(
         code,
         0,
-        `the CLI fails with ${removed} block(s) missing. If that is deliberate, Lessons 11 and 13 must stop saying it cannot detect one. Output: ${stdout}`
+        `the CLI fails with ${removed} block(s) missing. Lessons 11 and 13 send students to npm test for blocks; if the audit has grown block checks, both rows need rewriting. Output: ${stdout}`
       )
       assert.match(stdout, /prompt audit clean/, `expected a clean report, got: ${stdout}`)
     } finally {
