@@ -62,6 +62,26 @@ export function classify(task) {
   return 'candidate'
 }
 
+// An answer that starts by saying nobody acts on it IS the parked condition - Rule 5 in words -
+// but classify() can only see that the field is non-empty, so it lands in `candidate` and becomes
+// buildable. A walkthrough persona answered "Nobody. This is the actual work I am paid for" and
+// the ledger called it ready to hand over.
+//
+// This FLAGS rather than reclassifies, because the leading word is not decisive: "Nobody but me"
+// and "Nobody else - I send it" both name someone. Only a negative with no exception after it is
+// worth raising, and it is raised for the reader to settle rather than settled for them.
+//
+// A phrasing check, and stated as one: it catches the ways people write this, not every way it
+// could be written. "That job dies with me" says the same thing and is not caught.
+const NOBODY = /^\s*(nobody|no[- ]one|none|nothing|n\/a)\b/i
+const EXCEPTION = /\b(but|except|other than|besides|apart from|unless|else)\b/i
+
+export function saysNobodyActs(handsOff) {
+  const text = typeof handsOff === 'string' ? handsOff.trim() : ''
+  if (!text || !NOBODY.test(text)) return false
+  return !EXCEPTION.test(text)
+}
+
 export function summarize(ledger) {
   const tasks = Array.isArray(ledger?.tasks) ? ledger.tasks : []
   const hourlyValue = ledger?.hourly_value
@@ -82,7 +102,10 @@ export function summarize(ledger) {
     unpriced: !priced,
     candidates: buckets.candidate,
     notes: buckets.note,
-    parked: buckets.parked
+    parked: buckets.parked,
+    // Ready rows whose own answer says nobody acts. The lesson's rule parks those; the reader
+    // decides, because only they know whether "nobody" meant nobody.
+    readyButNobody: buckets.candidate.filter((task) => saysNobodyActs(task?.hands_off))
   }
 }
 

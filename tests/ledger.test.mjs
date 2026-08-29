@@ -5,7 +5,8 @@ import {
   summarize,
   validateLedger,
   classify,
-  MAX_HOURS_IN_A_WEEK
+  MAX_HOURS_IN_A_WEEK,
+  saysNobodyActs
 } from '../scripts/lib/ledger.mjs'
 
 /* The ledger is the one file the whole team gets derived from. Every rule below is a rule that
@@ -220,4 +221,44 @@ test('a whitespace-only task name is refused too', () => {
 test('two tasks with the same name are refused - the numbers get crossed otherwise', () => {
   const problems = validateLedger(ledgerOf([chasing, { ...chasing, minutes_each: 600 }]))
   assert.ok(problems.some((problem) => /named 2 times/.test(problem)))
+})
+
+/* Rule 5 in the library says "if nobody can say who acts on the output, automating it produces
+   work that technically runs and nobody adopts". classify() can only see that the field is
+   non-empty, so an honest "Nobody." lands in candidate and becomes buildable - which is the exact
+   condition the rule exists to catch. A walkthrough persona wrote that answer and the ledger
+   called it ready to hand over.
+
+   This flags rather than reclassifies: the leading word is not decisive, because "Nobody but me"
+   and "Nobody else - I send it" both name somebody. It is a PHRASING check and holds only the
+   ways people write this - "that job dies with me" says the same thing and is not caught. */
+test('an answer that says nobody acts is flagged, and one that names somebody is not', () => {
+  for (const answer of ['Nobody.', 'No one acts on it.', 'Nobody yet.', 'N/A', 'none']) {
+    assert.equal(saysNobodyActs(answer), true, `${answer} should be flagged`)
+  }
+  for (const answer of [
+    'Nobody but me - I send it myself.',
+    'Nobody else; I read every one before it goes.',
+    'My bookkeeper reviews it and files it.',
+    'I read the draft and send it.'
+  ]) {
+    assert.equal(saysNobodyActs(answer), false, `${answer} names somebody and must not be flagged`)
+  }
+  assert.equal(saysNobodyActs(''), false, 'an empty answer is already parked by classify')
+  assert.equal(saysNobodyActs(undefined), false, 'a missing answer is already parked by classify')
+})
+
+test('summarize surfaces ready rows whose own answer says nobody acts', () => {
+  const ledger = {
+    owner_type: 'business',
+    tasks: [
+      { task: 'Real work', words: 'x', times_per_week: 1, minutes_each: 60,
+        confirmed: 'twice', hands_off: 'Nobody. This is the work itself.' },
+      { task: 'Handed over', words: 'y', times_per_week: 1, minutes_each: 60,
+        confirmed: 'twice', hands_off: 'I read the draft and send it.' }
+    ]
+  }
+  const summary = summarize(ledger)
+  assert.equal(summary.candidates.length, 2, 'both are still candidates - this flags, it does not reclassify')
+  assert.deepEqual(summary.readyButNobody.map((task) => task.task), ['Real work'])
 })
