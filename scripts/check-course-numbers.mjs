@@ -244,13 +244,25 @@ const deniesSend = (settings.permissions?.deny ?? []).some((rule) =>
 )
 
 if (!deniesSend) {
-  // Deliberately loose on both halves. The first version of this anchored on "settings file"
-  // and could not cross the period in "settings.json" - which is the form every other lesson
-  // in the corpus uses, so the likeliest next false claim would have walked straight past it.
-  const CLAIMS_DENY =
-    /settings[^\n]{0,40}\b(?:den(?:ies|y|ying)|block(?:s|ing)?|prevent(?:s|ing)?)\b[^\n]{0,60}send/i
+  // Three unordered tests rather than one ordered regex. Two earlier versions were ordered
+  // and both were beaten by an idiom the corpus already uses: the first could not cross the
+  // period in "settings.json", the second missed "permissions.deny" standing alone and any
+  // sentence putting the verb before the noun. Requiring the three ideas in any order is
+  // harder to walk past than requiring them in one sequence.
+  //
+  // This is still a phrasing guard, not a proof. It catches the ways this claim has actually
+  // been written. A determined paraphrase gets through, and that is worth knowing rather than
+  // forgetting.
+  const NAMES_THE_FILE = /settings|permissions\s*\.\s*deny/i
+  const CLAIMS_BLOCKING = /\b(?:den(?:ies|y|ying|ied)|block(?:s|ing|ed)?|prevent(?:s|ing|ed)?|cover(?:s|ing)?|stop(?:s|ping)?)\b/i
+  const ABOUT_SENDING = /\bsend|sending|forward|repl(?:y|ies|ying)|mail\b/i
+  // Lines that describe the gap, or tell the owner to close it, are the honest ones.
   const NEGATED =
-    /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you|secret file|does not deny|no send/i
+    /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you|secret file|does not deny|☐|you closed|add each|add them|to close|fill(?:ed)? in|is a gap|leave layer/i
+  const CLAIMS_DENY = {
+    test: (line) =>
+      NAMES_THE_FILE.test(line) && CLAIMS_BLOCKING.test(line) && ABOUT_SENDING.test(line)
+  }
   const offenders = []
   for (const file of all) {
     for (const line of (await read(file)).split('\n')) {

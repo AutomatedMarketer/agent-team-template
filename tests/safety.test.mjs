@@ -52,13 +52,28 @@ test('an unfilled deny table still says the layer is not in place', async () => 
 // layer 3, and a send means layer 1 just failed on a real account, on purpose.
 test('the safety doc never asks anyone to verify the rule by sending', async () => {
   const doc = await read('docs/safety/draft-only.md')
-  // Loose on purpose. Anchoring on the literal phrase "send a test" let "send a message to
-  // your own address" and "email yourself from the agent" through, which are the same
-  // instruction. What matters is: does this tell a person to make the agent send anything.
-  const instruction =
-    /(?:ask|have|get|tell)[^.\n]{0,70}\bsend(?:s|ing)?\b[^.\n]{0,70}(?:your own|yourself|test)|email yourself|send (?:a )?test/i
-  const SAFE = /do not|don't|never|rather than|instead of|not worth|cannot tell you|list every tool/i
-  const offending = doc.split('\n').filter((line) => instruction.test(line) && !SAFE.test(line))
+  // Keyed on the shape of the instruction rather than its wording: something that transmits
+  // (send, mail, fire off, attempt a send) aimed at the reader (yourself, your own address,
+  // you a message). Earlier versions anchored on the literal "send a test", then on a fixed
+  // verb order, and both were beaten by ordinary paraphrases - "mail yourself a short note",
+  // "fire off a message to your own address", "make the agent send mail to yourself".
+  //
+  // This remains a phrasing guard. It catches the ways this has been written, not every way
+  // it could be written. That limit is recorded rather than described away as a proof.
+  const TRANSMITS =
+    /\b(?:sends?|sending|mails?|mailing|fires? off|attempts? a send|transmits?)\b[^.\n]{0,70}\b(?:yourself|your own|your personal|to you\b|you a (?:message|note|mail|email))/i
+  const AIMED_AT_READER =
+    /\b(?:yourself|your own address|your personal)\b[^.\n]{0,70}\b(?:sends?|sending|mails?|mailing)\b/i
+  const LITERAL = /send (?:a )?test|email yourself/i
+  const SAFE =
+    /do not|don't|never|rather than|instead of|not worth|cannot tell you|list every tool|watch it decline|no mail leaves/i
+  const offending = doc
+    .split('\n')
+    .filter(
+      (line) =>
+        (TRANSMITS.test(line) || AIMED_AT_READER.test(line) || LITERAL.test(line)) &&
+        !SAFE.test(line)
+    )
   assert.deepEqual(
     offending,
     [],
