@@ -145,7 +145,7 @@ npm test
 `node --version` must say 20 or higher. `npm test` ends with these two lines:
 
 ```
-ℹ pass 377
+ℹ pass 379
 ℹ fail 0
 ```
 
@@ -167,7 +167,7 @@ that decides whether everything else is any good.
 Four commands, in this order. Each tells you something different.
 
 ```bash
-npm test                 # ends with "pass 377 / fail 0". If this fails, the clone is broken
+npm test                 # ends with "pass 379 / fail 0". If this fails, the clone is broken
 npm run check:ledger     # your week, measured
 npm run check:proposals  # what your numbers say your team should be
 npm run check:arming     # which jobs actually ring
