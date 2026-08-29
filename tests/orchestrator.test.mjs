@@ -382,11 +382,25 @@ for (const state of cliStates) {
    A phrasing rule added at ANY layer - the table, `auditText`, `auditRepo`, or the main block -
    survives the emptying and fails the second case. That is the same size as what the pages claim. */
 
+/* One line per shipped rule, because the intact arm now requires all seven to FIRE. Fifteen
+   rounds of guards all tested for a rule ADDED; none noticed a rule suppressed. A skip list keyed
+   on agent-card frontmatter turned the tool into a six-phrasing scan for every agent card and
+   every arm passed - the id set only constrains ids that appear, the emptied arm wants silence and
+   gets it, and both composition comparisons run through the same suppressed auditText, so the two
+   sides agree with each other. Absence has to be asserted directly or it is not covered. */
 const CLI_CORPUS = [
+  'CRITICAL: cite every source.',
+  'You MUST cite every source.',
+  'Please verify your work before answering.',
+  'Show your reasoning as you go.',
+  'Delegate liberally to the specialists.',
+  'Post an interim status update after every 3 tool calls.',
+  'If in doubt, use the search tool.',
+  // Not a shipped phrasing. Bait for a rule somebody ADDS - replacing the corpus with only
+  // the seven trip lines silently disarmed every addition probe, and the regression run is
+  // the only reason that was noticed. Both axes have to stay in the corpus at once.
   'Act as an expert researcher and think step by step.',
-  'You are the best assistant available.',
-  'CRITICAL: you MUST always verify your work.',
-  'Delegate liberally and show your reasoning.'
+  'You are the best assistant available.'
 ].join('\n\n')
 
 const buildScratch = async (emptyRules) => {
@@ -413,7 +427,14 @@ const buildScratch = async (emptyRules) => {
 ${CLI_CORPUS}
 `
   await writeFile(join(scratch, '.claude/rules/corpus-fixture.md'), corpusFile)
-  await writeFile(join(scratch, '.claude/agents/corpus-fixture.md'), corpusFile)
+  /* The agents copy carries real agent-card frontmatter. Suppression does not have to be
+     blanket - the attack that got through keyed on `model:` frontmatter, so it fired on plain
+     markdown and was silent on every agent card. Bait that does not look like the files being
+     audited cannot detect a rule conditioned on what those files look like. */
+  await writeFile(
+    join(scratch, '.claude/agents/corpus-fixture.md'),
+    ['---', 'name: corpus-fixture', 'description: bait', 'model: opus', '---', '', CLI_CORPUS, ''].join('\n')
+  )
   await writeFile(join(scratch, '.claude/skills/corpus-fixture.md'), corpusFile)
   await writeFile(join(scratch, 'CLAUDE.md'), `${await read('CLAUDE.md')}
 
@@ -443,13 +464,34 @@ test('the real command finds nothing once the table the lessons point at is empt
        emptied silent - any extra rule not coupled to the knob, including one reusing a real id
 
      What neither catches, stated rather than claimed away: a rule that BOTH reuses one of the
-     seven ids AND is coupled to the knob AND fires only on text the corpus does not contain.
+       seven ids AND is coupled to the knob. (An earlier version of this comment added "AND fires only
+       on text the corpus does not contain". That conjunct is not required - the reproduction keys
+       on a corpus line and still passes - and it disagreed with the same limit as stated in the
+       lesson log and in the comment below. Three statements of one limit, two shapes, one false.)
      That is a smaller residue than any previous round left, and it is not zero. */
   const intact = await buildScratch(false)
   try {
     const result = await runCli(intact)
     assert.equal(result.code, 1, `the corpus no longer trips the shipped audit, so this fixture proves nothing. Output: ${result.stdout}`)
-    assert.match(result.stdout, /critical-prefix|shouting-imperative/, `expected the shipped phrasings to fire, got: ${result.stdout}`)
+    /* Every one of the seven, in every audited location - not "somewhere in the output". Asking
+       for an alternation meant disabling either alone was invisible. Asking only that each id
+       appear SOMEWHERE is barely better: the attack suppresses `critical-prefix` in files with
+       `model:` frontmatter, so the agent card goes quiet while the three plain copies still report
+       all seven and the check passes. A rule conditioned on what a file looks like is only visible
+       if the same bait is checked in each shape of file. */
+    for (const bait of ['CLAUDE.md', '.claude/agents/corpus-fixture.md',
+      '.claude/rules/corpus-fixture.md', '.claude/skills/corpus-fixture.md']) {
+      const forFile = result.stdout
+        .split('\n')
+        .filter((line) => line.startsWith(`${bait}:`))
+        .join('\n')
+      for (const rule of RULES) {
+        assert.ok(
+          forFile.includes(`[${rule.id}]`),
+          `the command reports no [${rule.id}] in ${bait}, which carries a line written to trip it. Either the corpus stopped tripping that rule or it is suppressed for files of this shape - Lessons 11 and 13 tell students this tool scans for seven phrasings. Output: ${result.stdout}`
+        )
+      }
+    }
 
     const known = new Set(RULES.map((rule) => rule.id))
     const reported = [...result.stdout.matchAll(/\[([a-z0-9-]+)\]/g)].map((match) => match[1])
