@@ -531,6 +531,30 @@ for (const spec of SAMPLE_BLOCKS) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The arming lesson names the settled states. So does check-arming, in the sentence it prints when
+// it passes. They have to be the same sentence.
+//
+// The lesson opened with "exactly two settled states - armed, or off with a written reason" while
+// the checker's own success line has been "Every job is either armed, fired by webhook, or off
+// with a reason somebody wrote down" - three. A reader who built the webhook job in Lesson 10, as
+// the walkthrough persona did, gets a bucket the state lesson never mentions, in the lesson whose
+// entire subject is the state taxonomy. The word "webhook" appeared in it zero times.
+const armingScript = await readFile(path.join(templateRoot, 'scripts', 'check-arming.mjs'), 'utf8').catch(() => '')
+const settled = /'\\nEvery job is [^']+'/.exec(armingScript)
+const armLesson = all.find((file) => /_ARM_YOUR_JOBS\.md$/.test(file))
+if (armLesson && settled) {
+  const sentence = settled[0].slice(1, -1).replace(/^\\n/, '')
+  const body = await read(armLesson)
+  if (!body.includes(sentence)) {
+    fail(`${armLesson}: does not quote the sentence check:arming prints when it passes — ` +
+      `"${sentence}". That sentence is the list of settled states, and the lesson is where a ` +
+      'reader learns them.')
+  } else {
+    ok(`${armLesson}: quotes check:arming's settled-states sentence verbatim`)
+  }
+}
+
 for (const note of notes) console.log(`ok   ${note}`)
 
 
