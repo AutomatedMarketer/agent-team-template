@@ -46,6 +46,23 @@ test('an unfilled deny table still says the layer is not in place', async () => 
   )
 })
 
+// The safety doc once told the owner to verify the rule by asking the agent to send a test
+// message to their own address - on the page whose whole argument is that a bad send has no
+// undo. That test cannot succeed usefully: a refusal proves layer 1 and says nothing about
+// layer 3, and a send means layer 1 just failed on a real account, on purpose.
+test('the safety doc never asks anyone to verify the rule by sending', async () => {
+  const doc = await read('docs/safety/draft-only.md')
+  const instruction = /(?:ask|have|get)[^.\n]{0,60}\bsend a test\b|send a test (?:message|email)[^.\n]{0,40}to your own/i
+  const offending = doc
+    .split('\n')
+    .filter((line) => instruction.test(line) && !/do not|never|rather than|instead of/i.test(line))
+  assert.deepEqual(
+    offending,
+    [],
+    `the safety doc instructs a live send test: ${JSON.stringify(offending)}`
+  )
+})
+
 // The same trap from the other side: if settings.json denies nothing that could send, the
 // doc must not have been marked complete.
 test('settings denies only what it actually denies', async () => {

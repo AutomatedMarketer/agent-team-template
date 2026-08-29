@@ -34,9 +34,23 @@ implying a guarantee that does not exist. Layers 1 and 2 are live and tested tod
 |---|---|---|
 <!-- fill: verified-send-tools -->
 
-**How to fill this in.** Attach the Gmail connector, ask the email agent to send a test
-message to your own address, and record what happened. Then list every send-capable tool
-the connector exposes and add each one to `permissions.deny`.
+**How to fill this in — without sending anything.**
+
+1. With the connector attached, ask the email agent to **list every tool it can see that could
+   send, forward, or reply**. Naming a capability does not use it.
+2. Add each of those names to `permissions.deny` in `.claude/settings.json`.
+3. Record them in the table above with today's date.
+
+**Do not verify this by sending a test message.** That test cannot tell you what you want to
+know and can only cost you something. If the agent refuses, you have learned that layer 1 works
+and nothing about layer 3. If it sends, layer 1 has just failed and you caused it on purpose, on
+a real account. The thing being protected here is that no mail leaves without a person deciding —
+an exercise that asks a person to decide to send is not evidence about the unattended case,
+which is the only case that matters.
+
+The check that *is* worth running is the refusal, and it is already on the course's Day 3 safety
+pass: ask each outbound agent to send, and watch it decline. That tests layer 1, which is the
+layer doing the work.
 
 Verification date: <!-- fill: safety-verification-date -->
 

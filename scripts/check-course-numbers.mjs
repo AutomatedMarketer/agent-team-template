@@ -228,6 +228,37 @@ if (coverageClaim) {
   }
 }
 
+// ------------------------------------------ the course cannot promise safety we do not have
+//
+// Not a number, but the same failure this file exists for: two places asserting the same fact
+// with nothing keeping them agreed. Lesson 8 told students the settings file denied send-capable
+// tools by name, citing docs/safety/draft-only.md as recording which ones. The deny list held
+// secret-file reads and nothing else, and that doc said "pending". A lesson may describe layer 3
+// as a gap for the owner to close. It may not describe it as done while this repo says it is not.
+
+const settings = JSON.parse(
+  await readFile(new URL('../.claude/settings.json', import.meta.url), 'utf8')
+)
+const deniesSend = (settings.permissions?.deny ?? []).some((rule) =>
+  /send|mail|message|reply|forward/i.test(rule)
+)
+
+if (!deniesSend) {
+  const CLAIMS_DENY =
+    /settings[^.\n]{0,24}(?:file|json)[^.\n]{0,48}\bden(?:ies|y|ying)\b[^.\n]{0,48}send/i
+  const NEGATED = /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you/i
+  const offenders = []
+  for (const file of all) {
+    for (const line of (await read(file)).split('\n')) {
+      if (CLAIMS_DENY.test(line) && !NEGATED.test(line)) offenders.push(`${file}: ${line.trim()}`)
+    }
+  }
+  for (const offender of offenders) {
+    fail(`a lesson says the settings file denies send tools, but none is denied — ${offender}`)
+  }
+  if (!offenders.length) ok('no lesson claims a send-tool deny list this repo does not have')
+}
+
 // ---------------------------------------------------------------- the verdict
 
 for (const note of notes) console.log(`ok   ${note}`)
