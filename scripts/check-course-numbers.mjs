@@ -244,9 +244,13 @@ const deniesSend = (settings.permissions?.deny ?? []).some((rule) =>
 )
 
 if (!deniesSend) {
+  // Deliberately loose on both halves. The first version of this anchored on "settings file"
+  // and could not cross the period in "settings.json" - which is the form every other lesson
+  // in the corpus uses, so the likeliest next false claim would have walked straight past it.
   const CLAIMS_DENY =
-    /settings[^.\n]{0,24}(?:file|json)[^.\n]{0,48}\bden(?:ies|y|ying)\b[^.\n]{0,48}send/i
-  const NEGATED = /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you/i
+    /settings[^\n]{0,40}\b(?:den(?:ies|y|ying)|block(?:s|ing)?|prevent(?:s|ing)?)\b[^\n]{0,60}send/i
+  const NEGATED =
+    /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you|secret file|does not deny|no send/i
   const offenders = []
   for (const file of all) {
     for (const line of (await read(file)).split('\n')) {

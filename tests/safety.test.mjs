@@ -52,10 +52,13 @@ test('an unfilled deny table still says the layer is not in place', async () => 
 // layer 3, and a send means layer 1 just failed on a real account, on purpose.
 test('the safety doc never asks anyone to verify the rule by sending', async () => {
   const doc = await read('docs/safety/draft-only.md')
-  const instruction = /(?:ask|have|get)[^.\n]{0,60}\bsend a test\b|send a test (?:message|email)[^.\n]{0,40}to your own/i
-  const offending = doc
-    .split('\n')
-    .filter((line) => instruction.test(line) && !/do not|never|rather than|instead of/i.test(line))
+  // Loose on purpose. Anchoring on the literal phrase "send a test" let "send a message to
+  // your own address" and "email yourself from the agent" through, which are the same
+  // instruction. What matters is: does this tell a person to make the agent send anything.
+  const instruction =
+    /(?:ask|have|get|tell)[^.\n]{0,70}\bsend(?:s|ing)?\b[^.\n]{0,70}(?:your own|yourself|test)|email yourself|send (?:a )?test/i
+  const SAFE = /do not|don't|never|rather than|instead of|not worth|cannot tell you|list every tool/i
+  const offending = doc.split('\n').filter((line) => instruction.test(line) && !SAFE.test(line))
   assert.deepEqual(
     offending,
     [],
