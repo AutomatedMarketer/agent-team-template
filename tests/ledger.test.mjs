@@ -1,4 +1,7 @@
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
+import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
+import { read } from './helpers/repo.mjs'
 import assert from 'node:assert/strict'
 import {
   deriveTask,
@@ -6,7 +9,7 @@ import {
   validateLedger,
   classify,
   MAX_HOURS_IN_A_WEEK,
-  saysNobodyActs
+  beginsWithNegative
 } from '../scripts/lib/ledger.mjs'
 
 /* The ledger is the one file the whole team gets derived from. Every rule below is a rule that
@@ -223,32 +226,50 @@ test('two tasks with the same name are refused - the numbers get crossed otherwi
   assert.ok(problems.some((problem) => /named 2 times/.test(problem)))
 })
 
-/* Rule 5 in the library says "if nobody can say who acts on the output, automating it produces
-   work that technically runs and nobody adopts". classify() can only see that the field is
-   non-empty, so an honest "Nobody." lands in candidate and becomes buildable - which is the exact
-   condition the rule exists to catch. A walkthrough persona wrote that answer and the ledger
-   called it ready to hand over.
+/* classify() can only see that hands_off is non-empty, so an honest "Nobody." lands in candidate
+   and becomes buildable - the condition Rule 5 exists to catch.
 
-   This flags rather than reclassifies: the leading word is not decisive, because "Nobody but me"
-   and "Nobody else - I send it" both name somebody. It is a PHRASING check and holds only the
-   ways people write this - "that job dies with me" says the same thing and is not caught. */
-test('an answer that says nobody acts is flagged, and one that names somebody is not', () => {
-  for (const answer of ['Nobody.', 'No one acts on it.', 'Nobody yet.', 'N/A', 'none']) {
-    assert.equal(saysNobodyActs(answer), true, `${answer} should be flagged`)
-  }
+   The claim under test is deliberately small: the answer BEGINS WITH A NEGATIVE. An earlier
+   version tried to decide whether an answer MEANT nobody, with exception words that suppressed
+   the flag, and made both kinds of error - "Nobody. It is my core work, but I would love it
+   faster" cleared because `but` appeared anywhere, "None of my staff - my VA handles it" flagged
+   though it names somebody. Nothing separates "No one acts on it" from "No one, my assistant
+   does" without knowing which of those is a person.
+
+   Every alternative in the pattern has a case here, so none can be deleted while the suite is
+   green - the previous version had five of seven exception words and two of five negatives inert
+   under mutation. */
+test('an answer beginning with a negative is flagged, whatever follows it', () => {
   for (const answer of [
-    'Nobody but me - I send it myself.',
-    'Nobody else; I read every one before it goes.',
-    'My bookkeeper reviews it and files it.',
-    'I read the draft and send it.'
+    'Nobody.', 'nobody yet', 'No one acts on it.', 'No-one.', 'none', 'Nothing automated.',
+    'N/A', 'Not me - it is the work itself.',
+    // the six that the exception list used to clear, every one of them meaning nobody
+    'Nobody, unless you count the filing cabinet.',
+    'Nobody, besides the shredder.',
+    'Nobody. It is my core work, but I would love it to be faster.',
+    'Nobody. I do it myself and nothing else depends on it.',
+    'Nobody acts on it - it is the work itself, and nothing else uses it.',
+    'No one. Everything else in the week waits on it.',
+    // and the five it used to flag, which still flag - correctly, under this claim
+    'None of my staff - my VA handles it.',
+    'Nothing automated; Sarah reviews it and sends it.'
   ]) {
-    assert.equal(saysNobodyActs(answer), false, `${answer} names somebody and must not be flagged`)
+    assert.equal(beginsWithNegative(answer), true, `"${answer}" begins with a negative`)
   }
-  assert.equal(saysNobodyActs(''), false, 'an empty answer is already parked by classify')
-  assert.equal(saysNobodyActs(undefined), false, 'a missing answer is already parked by classify')
+
+  for (const answer of [
+    'I read the draft and send it.',
+    'My bookkeeper reviews it and files it.',
+    'Sarah acts on it; nobody else needs to.',
+    'The ops team picks it up, and none of it waits on me.',
+    ''
+  ]) {
+    assert.equal(beginsWithNegative(answer), false, `"${answer}" does not begin with a negative`)
+  }
+  assert.equal(beginsWithNegative(undefined), false, 'a missing answer is already parked by classify')
 })
 
-test('summarize surfaces ready rows whose own answer says nobody acts', () => {
+test('summarize surfaces ready rows whose answer begins with a negative', () => {
   const ledger = {
     owner_type: 'business',
     tasks: [
@@ -259,6 +280,41 @@ test('summarize surfaces ready rows whose own answer says nobody acts', () => {
     ]
   }
   const summary = summarize(ledger)
-  assert.equal(summary.candidates.length, 2, 'both are still candidates - this flags, it does not reclassify')
-  assert.deepEqual(summary.readyButNobody.map((task) => task.task), ['Real work'])
+  assert.equal(summary.candidates.length, 2, 'both stay candidates - this flags, it does not reclassify')
+  assert.deepEqual(summary.readyStartingWithNo.map((task) => task.task), ['Real work'])
+})
+
+/* The lesson prints a sample run and tells the manual-way reader to copy ledger.example.yml and
+   "run the check below". Those two drifted: the sample said 9.9 hours / $1,488 / 2 ready while the
+   example file produces 16.3 / $2,438 / 4 ready - a stale snapshot from when the file had two
+   tasks. The same figures had been copied into the /ledger skill's read-back script, so the
+   assistant would have said them out loud.
+
+   Nothing paired them, which is why it survived: the example file has tests, the lesson has a
+   guard, and the sentence "this is what that file prints" belonged to neither. This test owns it.
+   The lesson lives outside this repo, so it is skipped rather than failed when not reachable -
+   a skip says so, where a silent pass would not. */
+test('the ledger lesson quotes what ledger.example.yml actually prints', async (t) => {
+  const lesson = 'd:/dev/Claude Code - Second Brain/COURSE_SOPs_AND_PRESENTATION/LEVEL_2/15_YOUR_LEDGER.md'
+  const body = await readFile(lesson, 'utf8').catch(() => null)
+  if (body === null) {
+    t.skip('course folder not present beside this repo')
+    return
+  }
+
+  const example = parseSimpleYaml(await read('ledger.example.yml'))
+  const summary = summarize(example)
+  const hours = summary.hoursPerWeek.toFixed(1)
+  const money = Math.round(summary.costPerWeek).toLocaleString('en-US')
+
+  assert.ok(
+    body.includes(`Your week: ${hours} hours a week - $${money} a week`),
+    `the lesson's sample no longer matches ledger.example.yml, which now prints ` +
+    `"Your week: ${hours} hours a week - $${money} a week". The lesson tells a reader to copy ` +
+    'that file and run the check, so the two have to say the same thing.'
+  )
+  assert.ok(
+    body.includes(`${summary.candidates.length} ready to hand over`),
+    `the example file now has ${summary.candidates.length} ready; the lesson's sample says otherwise`
+  )
 })

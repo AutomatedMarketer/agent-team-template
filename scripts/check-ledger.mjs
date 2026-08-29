@@ -58,12 +58,13 @@ for (const [label, tasks] of [
   }
 }
 
-if (summary.readyButNobody.length) {
-  console.log('\nReady, but the answer says nobody acts on it:')
-  for (const task of summary.readyButNobody) {
+if (summary.readyStartingWithNo.length) {
+  console.log('\nReady, but the answer starts with a negative - read these back:')
+  for (const task of summary.readyStartingWithNo) {
     console.log(`  ${task.task} - "${String(task.hands_off).trim()}"`)
   }
-  console.log('  The rule is that those get parked. Reword it if somebody does act, or move it.')
+  console.log('  If nobody really acts on it, the rule is that it gets parked. If somebody does,')
+  console.log('  say who - the wording will carry that better than a bucket does.')
 }
 
 console.log('\nIs that right? If the number is wrong, the file is wrong - change it and re-run.')

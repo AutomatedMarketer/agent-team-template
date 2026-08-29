@@ -62,24 +62,26 @@ export function classify(task) {
   return 'candidate'
 }
 
-// An answer that starts by saying nobody acts on it IS the parked condition - Rule 5 in words -
-// but classify() can only see that the field is non-empty, so it lands in `candidate` and becomes
-// buildable. A walkthrough persona answered "Nobody. This is the actual work I am paid for" and
-// the ledger called it ready to hand over.
+// The lesson's Ready row means "you named who acts on the output"; Parked means "nobody acts on
+// the result yet". classify() can only see that hands_off is non-empty, so an honest "Nobody."
+// lands in candidate and becomes buildable - the condition Rule 5 exists to catch. A walkthrough
+// persona wrote exactly that and the ledger called it ready to hand over.
 //
-// This FLAGS rather than reclassifies, because the leading word is not decisive: "Nobody but me"
-// and "Nobody else - I send it" both name someone. Only a negative with no exception after it is
-// worth raising, and it is raised for the reader to settle rather than settled for them.
+// The first attempt here tried to decide whether an answer MEANT nobody, with a list of exception
+// words that suppressed the flag. It made both kinds of error, six and five of them found in one
+// pass: "Nobody. It is my core work, but I would love it faster" was silently cleared because
+// `but` appeared anywhere in the string, and "None of my staff - my VA handles it" was flagged
+// though it names somebody. No pattern separates "No one acts on it" from "No one, my assistant
+// does" without knowing that Sarah and my VA are people.
 //
-// A phrasing check, and stated as one: it catches the ways people write this, not every way it
-// could be written. "That job dies with me" says the same thing and is not caught.
-const NOBODY = /^\s*(nobody|no[- ]one|none|nothing|n\/a)\b/i
-const EXCEPTION = /\b(but|except|other than|besides|apart from|unless|else)\b/i
+// So the claim is smaller and exactly true instead: this answer BEGINS WITH A NEGATIVE. That is
+// checkable, and it is all the reader needs - the row is printed back with their own sentence and
+// they settle it. Flagging "Nobody but me" is not a false positive under that claim; it is a row
+// worth glancing at, and glancing is the whole cost.
+const BEGINS_NEGATIVE = /^\s*(nobody|no[- ]?one|none|nothing|n\/a|not me)\b/i
 
-export function saysNobodyActs(handsOff) {
-  const text = typeof handsOff === 'string' ? handsOff.trim() : ''
-  if (!text || !NOBODY.test(text)) return false
-  return !EXCEPTION.test(text)
+export function beginsWithNegative(handsOff) {
+  return BEGINS_NEGATIVE.test(typeof handsOff === 'string' ? handsOff : '')
 }
 
 export function summarize(ledger) {
@@ -103,9 +105,9 @@ export function summarize(ledger) {
     candidates: buckets.candidate,
     notes: buckets.note,
     parked: buckets.parked,
-    // Ready rows whose own answer says nobody acts. The lesson's rule parks those; the reader
-    // decides, because only they know whether "nobody" meant nobody.
-    readyButNobody: buckets.candidate.filter((task) => saysNobodyActs(task?.hands_off))
+    // Ready rows whose answer begins with a negative. The reader settles it: only they know
+    // whether "None of my staff" ends in somebody's name.
+    readyStartingWithNo: buckets.candidate.filter((task) => beginsWithNegative(task?.hands_off))
   }
 }
 
