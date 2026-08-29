@@ -532,28 +532,54 @@ for (const spec of SAMPLE_BLOCKS) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The arming lesson names the settled states. So does check-arming, in the sentence it prints when
-// it passes. They have to be the same sentence.
+// The arming lesson names the settled states. So does check-arming - in a TERNARY, with two
+// branches, and the lesson has to quote the right one.
 //
-// The lesson opened with "exactly two settled states - armed, or off with a written reason" while
-// the checker's own success line has been "Every job is either armed, fired by webhook, or off
-// with a reason somebody wrote down" - three. A reader who built the webhook job in Lesson 10, as
-// the walkthrough persona did, gets a bucket the state lesson never mentions, in the lesson whose
-// entire subject is the state taxonomy. The word "webhook" appeared in it zero times.
-const armingScript = await readFile(path.join(templateRoot, 'scripts', 'check-arming.mjs'), 'utf8').catch(() => '')
-const settled = /'\\nEvery job is [^']+'/.exec(armingScript)
+// The first version of this guard took the first regex match, which is the `fired by webhook`
+// branch. That branch only prints when a webhook job is sitting at `armed: false` - i.e. when
+// Lesson 10 part 3 is unfinished. A student who finished sees the other branch. So the guard was
+// enforcing the failure-path sentence as the lesson's promise, and a walkthrough had already
+// written it into the lesson as "the sentence check:arming prints when it passes". Both wrong,
+// and the guard would have kept them wrong.
+//
+// Now: the lesson must quote the PASS branch, and must not present the webhook branch as the pass
+// sentence. Whitespace is normalised so wrapping a quote across two lines is not a failure, and a
+// missing check-arming.mjs fails rather than skipping the whole block in silence.
 const armLesson = all.find((file) => /_ARM_YOUR_JOBS\.md$/.test(file))
-if (armLesson && settled) {
-  const sentence = settled[0].slice(1, -1).replace(/^\\n/, '')
-  const body = await read(armLesson)
-  if (!body.includes(sentence)) {
-    fail(`${armLesson}: does not quote the sentence check:arming prints when it passes — ` +
-      `"${sentence}". That sentence is the list of settled states, and the lesson is where a ` +
-      'reader learns them.')
+if (armLesson) {
+  const armingScript = await readFile(path.join(templateRoot, 'scripts', 'check-arming.mjs'), 'utf8')
+    .catch(() => null)
+  if (armingScript === null) {
+    fail(`${armLesson}: scripts/check-arming.mjs could not be read, so its settled-states sentence cannot be checked`)
   } else {
-    ok(`${armLesson}: quotes check:arming's settled-states sentence verbatim`)
+    const branches = [...armingScript.matchAll(/'\\nEvery job is ([^']+)'/g)].map((m) => m[1])
+    if (branches.length !== 2) {
+      fail(`check-arming.mjs no longer has two settled-states branches (found ${branches.length}) — ${armLesson} quotes one of them`)
+    } else {
+      // Strips blockquote markers as well as whitespace: the lesson quotes this inside a
+      // `>` block, so a wrap puts `> ` in the middle of the sentence. Normalising spaces
+      // alone left that as a false positive - proven, not assumed.
+      const flat = (text) => text.replace(/^[ \t]*>[ \t]?/gm, ' ').replace(/\s+/g, ' ')
+      const body = flat(await read(armLesson))
+      const [webhookBranch, passBranch] = branches[0].includes('webhook')
+        ? [branches[0], branches[1]]
+        : [branches[1], branches[0]]
+      if (!body.includes(flat(passBranch))) {
+        fail(`${armLesson}: does not quote the sentence check:arming prints when a finished repo passes — "${passBranch}"`)
+      } else if (body.includes(flat(webhookBranch))) {
+        fail(`${armLesson}: quotes "${webhookBranch}" — that branch prints only while a webhook job sits at armed: false, so it is not what passing looks like`)
+      } else if (!webhookBranch.includes('fired by webhook')) {
+        // The lesson does not quote this branch - it describes it as "with `fired by webhook`
+        // in the middle". If the branch stops containing that phrase, the description is stale
+        // and nothing else would notice.
+        fail(`${armLesson}: describes check:arming's other branch as containing "fired by webhook", which it no longer does — the branch now reads "${webhookBranch}"`)
+      } else {
+        ok(`${armLesson}: quotes check:arming's pass sentence, describes its webhook branch, and does not confuse the two`)
+      }
+    }
   }
 }
+
 
 for (const note of notes) console.log(`ok   ${note}`)
 
