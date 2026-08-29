@@ -12,7 +12,11 @@
 // claims. A lesson added, removed or re-timed fails this check until every dependent number
 // is updated with it.
 
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, writeFile, rm } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
 import path from 'node:path'
 
 const root = process.argv[2]
@@ -450,6 +454,80 @@ if (ledgerLesson && PAIRED_LINES.length) {
     fail(`${ledgerLesson}: quotes ${quotedish.length} of the check's output lines, expected ${QUOTED_IN_LESSON}. A line was reworded on one side only, or the block changed shape.`)
   } else {
     ok(`${ledgerLesson}: quotes all ${QUOTED_IN_LESSON} lines of the check's flag block verbatim`)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A lesson that shows what a command prints has to show what it prints.
+//
+// Lesson 15's sample was a stale snapshot of ledger.example.yml, four screens above the paragraph
+// telling the reader to copy that file and run the check. Lesson 16's was almost right - ten of
+// its eleven lines verbatim, and one "why this one" line paraphrased inside a fenced block, with
+// a trailing ellipsis that implied truncation rather than rewording.
+//
+// So: run the checks against the shipped example files, and require every line of a lesson's
+// sample block to be a line the command actually printed. A line ending in "..." is allowed to be
+// a prefix, because truncating a long line is honest and rewording it is not.
+const SAMPLE_BLOCKS = [
+  { lesson: /_YOUR_LEDGER\.md$/, script: 'check-ledger.mjs', starts: /^Your week: / },
+  { lesson: /_THE_MATCH\.md$/, script: 'check-proposals.mjs', starts: /^\d+ proposals?, covering / }
+]
+
+const withExamples = async (run) => {
+  const copies = [['ledger.example.yml', 'ledger.yml'], ['proposals.example.yml', 'proposals.yml']]
+  const made = []
+  try {
+    for (const [src, dst] of copies) {
+      const source = await readFile(path.join(templateRoot, src), 'utf8').catch(() => null)
+      if (source === null) continue
+      const target = path.join(templateRoot, dst)
+      if (await readFile(target, 'utf8').then(() => true).catch(() => false)) continue
+      await writeFile(target, source)
+      made.push(target)
+    }
+    return await run()
+  } finally {
+    for (const file of made) await rm(file, { force: true })
+  }
+}
+
+for (const spec of SAMPLE_BLOCKS) {
+  const lessonFile = all.find((file) => spec.lesson.test(file))
+  if (!lessonFile) continue
+  const body = await read(lessonFile)
+  // Anchored at line starts, or a closing fence pairs with the NEXT opening one and the
+  // capture is the prose between two blocks. That is what happened first, and it made this
+  // whole check silently find nothing.
+  const fenced = [...body.matchAll(/^```[a-z]*\n([\s\S]*?)^```/gm)].map((m) => m[1])
+  const sample = fenced.find((chunk) => spec.starts.test(chunk.trimStart()))
+  if (!sample) {
+    // A guard that finds nothing must say so. Three guards in two lessons have been
+    // silently inert, and every one looked like a pass.
+    fail(`${lessonFile}: no sample block matching ${spec.starts} - either the lesson stopped showing what ${spec.script} prints, or this check stopped being able to find it.`)
+    continue
+  }
+
+  const printed = await withExamples(async () => {
+    const result = await run(process.execPath, [path.join(templateRoot, 'scripts', spec.script)],
+      { cwd: templateRoot }).catch((error) => ({ stdout: error.stdout ?? '' }))
+    return (result.stdout ?? '').split(/\r?\n/).map((line) => line.trimEnd())
+  })
+
+  const missing = []
+  for (const raw of sample.split(/\r?\n/)) {
+    const line = raw.trimEnd()
+    if (!line.trim()) continue
+    const truncated = line.endsWith('...')
+    const stem = truncated ? line.slice(0, -3) : line
+    const found = printed.some((out) => (truncated ? out.startsWith(stem) : out === line))
+    if (!found) missing.push(line.trim())
+  }
+
+  if (missing.length) {
+    fail(`${lessonFile}: its sample block shows ${missing.length} line(s) the command does not ` +
+      `print. First: "${missing[0].slice(0, 90)}". A line may be truncated with "..." but not reworded.`)
+  } else {
+    ok(`${lessonFile}: every line of its sample block is real output of ${spec.script}`)
   }
 }
 
