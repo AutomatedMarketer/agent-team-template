@@ -352,7 +352,11 @@ const stepsIn = (body) => {
       found.push(...match[1].split(',').map((step) => step.trim()).filter(Boolean))
     } else if (match[2] !== undefined) {
       for (const row of match[2].split(/\r?\n/)) {
-        const item = /^[ \t]*-[ \t]*(?:skill:[ \t]*)?([A-Za-z0-9][\w-]*)/.exec(row)
+        // Skill slugs are lowercase kebab - all 25 are, and the validator resolves only that
+        // shape. Requiring it keeps out a prose line that happens to start `steps:` above an
+        // ordinary markdown list: widening the accepted forms made this guard unable to tell a
+        // YAML example from prose, and "Read"/"Validate" are not candidate skill names.
+        const item = /^[ \t]*-[ \t]*(?:skill:[ \t]*)?([a-z][a-z0-9-]*)[ \t]*$/.exec(row)
         if (item) found.push(item[1])
       }
     }
