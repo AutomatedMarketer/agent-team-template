@@ -257,8 +257,13 @@ if (!deniesSend) {
   const CLAIMS_BLOCKING = /\b(?:den(?:ies|y|ying|ied)|block(?:s|ing|ed)?|prevent(?:s|ing|ed)?|cover(?:s|ing)?|stop(?:s|ping)?)\b/i
   const ABOUT_SENDING = /\bsend|sending|forward|repl(?:y|ies|ying)|mail\b/i
   // Lines that describe the gap, or tell the owner to close it, are the honest ones.
+  // Every token here is an excuse, so each one is a way for a false claim to escape if it
+  // happens to contain the phrase. Two have already had to be removed for exactly that:
+  // "no send" rescued "...so there is no send capability left", and "filled in" rescued
+  // "the settings file denies send tools and the table is filled in". Keep these anchored to
+  // whole instructions ("fill this in", "fill in the table"), never to bare fragments.
   const NEGATED =
-    /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you|secret file|does not deny|☐|you closed|add each|add them|to close|fill(?:ed)? in|is a gap|leave layer/i
+    /not (?:yet )?in place|not there|pending|⬜|would deny|once you|after you|secret file|does not deny|☐|you closed|add each|add them|to close|fill this in|fill in the table|is a gap|leave layer/i
   const CLAIMS_DENY = {
     test: (line) =>
       NAMES_THE_FILE.test(line) && CLAIMS_BLOCKING.test(line) && ABOUT_SENDING.test(line)

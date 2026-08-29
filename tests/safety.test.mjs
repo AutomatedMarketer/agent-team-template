@@ -60,10 +60,19 @@ test('the safety doc never asks anyone to verify the rule by sending', async () 
   //
   // This remains a phrasing guard. It catches the ways this has been written, not every way
   // it could be written. That limit is recorded rather than described away as a proof.
-  const TRANSMITS =
-    /\b(?:sends?|sending|mails?|mailing|fires? off|attempts? a send|transmits?)\b[^.\n]{0,70}\b(?:yourself|your own|your personal|to you\b|you a (?:message|note|mail|email))/i
-  const AIMED_AT_READER =
-    /\b(?:yourself|your own address|your personal)\b[^.\n]{0,70}\b(?:sends?|sending|mails?|mailing)\b/i
+  // The verbs are the four the agent's own Boundaries prohibit - send, forward, reply,
+  // deliver - plus the informal ones people reach for. An earlier version had only send and
+  // mail, so "ask it to forward something to yourself" walked through a guard written to stop
+  // exactly that. The reader-target half allows an adjective ("send you a QUICK note"), which
+  // one word was previously enough to defeat.
+  const VERBS =
+    '(?:sends?|sending|mails?|mailing|emails?|emailing|forwards?|forwarding|repl(?:y|ies|ying)|delivers?|delivering|dispatch(?:es|ing)?|fires? off|shoots?|attempts? a send|transmits?)'
+  const READER = '(?:yourself|your own|your personal|to you\\b|you a(?:n)?(?: \\w+){0,2} (?:message|note|mail|email|thread))'
+  const TRANSMITS = new RegExp(`\\b${VERBS}\\b[^.\\n]{0,70}\\b${READER}`, 'i')
+  const AIMED_AT_READER = new RegExp(
+    `\\b(?:yourself|your own (?:address|inbox)|your personal)\\b[^.\\n]{0,70}\\b${VERBS}\\b`,
+    'i'
+  )
   const LITERAL = /send (?:a )?test|email yourself/i
   const SAFE =
     /do not|don't|never|rather than|instead of|not worth|cannot tell you|list every tool|watch it decline|no mail leaves/i
