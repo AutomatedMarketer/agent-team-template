@@ -13,7 +13,15 @@ import { loadAgents } from '../scripts/lib/agents.mjs'
 
    Each agent is checked against the verb the LESSON asks it to refuse, not a shared alternation,
    because "do not send" is not what makes content safe - "do not publish, schedule, or post" is. A
-   loose pattern would pass content.md on a sentence about something else entirely. */
+   loose pattern would pass content.md on a sentence about something else entirely.
+
+   This remains a PHRASING guard, held to the same standard as the one below it: it catches the
+   ways this has been written, not every way it could be written. A sentence that keeps the phrase
+   and reverses the meaning passes - "you do not publish, schedule, or post before nine a.m.;
+   after that, publish freely" matches and is not safe. Five such rewordings were demonstrated
+   against this block, one per agent. What it does hold is deletion, and rewording that drops the
+   verb, which is how the rule has actually decayed. The limit is recorded rather than described
+   away as a proof. */
 const OUTBOUND_AGENTS = {
   email: {
     asked: 'Send that reply',
