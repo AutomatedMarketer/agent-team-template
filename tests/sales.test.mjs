@@ -22,9 +22,13 @@ test('the pipeline table has the columns the agent appends', async () => {
 })
 
 // Stage was a required, tested column with no defined vocabulary anywhere - not in the agent
-// file, not in pipeline.md, not in review-pipeline. A real run invented "Disqualified", and
-// the weekly review decides who has gone quiet by reading this column, so a value it does not
-// know makes that prospect invisible to it.
+// file, not in pipeline.md, not in review-pipeline. A real run invented "Disqualified".
+//
+// Why that matters is narrower than it first looks, and worth stating exactly: a column every
+// run words differently cannot be sorted, filtered or counted, which is most of what the
+// column is for. review-pipeline does NOT read this column - it infers state from prose in the
+// row - so nothing is blinded by an unknown value. An earlier version of this comment claimed
+// it was, which was not true of the code.
 const STAGES = ['Researched', 'Skipped', 'Approached', 'Replied', 'Cold', 'Closed']
 
 test('the pipeline defines its stage vocabulary, and the agent knows it', async () => {

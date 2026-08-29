@@ -21,9 +21,9 @@ The sales agent appends one row per prospect. This is your CRM until you have on
 ## Stage — the only permitted values
 
 Without a fixed list, every run invents its own word and the column stops being sortable,
-filterable or countable — which is most of why it exists. These six are the states the weekly
-pipeline review already reasons about, so putting them in one column means it can read them
-from there instead of inferring them from prose.
+filterable or countable — which is most of why it exists. Four of these six - `Skipped`, `Approached`, `Replied`, `Cold` - are the states the weekly
+pipeline review already reasons about; it infers them from prose in the row today. `Researched`
+and `Closed` are the two ends that column needs to be complete.
 
 | Stage | Means | What it means for chasing |
 |---|---|---|
