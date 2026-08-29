@@ -1,6 +1,13 @@
 # Draft-only — the rule and why it holds
 
-**Applies to:** the `email` and `customer-service` agents.
+**Applies to:** every agent that could reach the outside world — `email`, `customer-service`,
+`research`, `content` and `sales`. The five Lesson 13's safety pass asks you to test.
+
+This page is written around the two mail agents because that is where the rule bites hardest
+and where the deny list matters. The other three state the same rule in their own files, in
+their own verbs: `research` does not send, post or contact; `content` does not publish,
+schedule or post; `sales` does not email the prospect. All five are held by
+`tests/safety.test.mjs`, each against the verb it actually has to refuse.
 
 ## The rule
 
@@ -22,7 +29,9 @@ affordable when the worst case is a draft you delete.
 1. **The agent is told, literally, in its own file.** Sonnet 5 follows literal
    instructions without generalising past them, which is the reason both inbox agents run
    on Sonnet rather than Opus.
-2. **`tests/safety.test.mjs`** fails if either agent file stops saying it.
+2. **`tests/safety.test.mjs`** fails if any of the five agent files stops saying it. It covered
+   only the two mail agents until Lesson 13's walkthrough found that the other three could be
+   reworded silently — the lesson tested five, the guard held two.
 3. **`.claude/settings.json` `permissions.deny`** blocks the send tools by name.
 
 ### Deny list — verified names
