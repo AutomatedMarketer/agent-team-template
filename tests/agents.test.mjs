@@ -97,6 +97,31 @@ test('every agent writes to its workspace and finishes with the run-log skill', 
   }
 })
 
+// The content agent is told to recommend one of its two hooks. Its output template had
+// nowhere to put that, so the recommendation landed wherever the model felt like it - an
+// instruction with no home in the artifact is one that quietly stops happening.
+test('content gives its hook recommendation a named home in the template', async () => {
+  const content = (await loadAgents()).find((agent) => agent.slug === 'content')
+  assert.ok(content, 'content agent is missing')
+  assert.match(
+    content.body,
+    /Alternate hook\n<[^>]*which you would pick and why/,
+    'the output template never says where the hook recommendation goes'
+  )
+})
+
+// Only the register may be stated as fact - that is line S3 of the content rubric. The agent
+// file said "check against business-brain.md", which is the whole file, leaving a student's
+// true-but-unregistered story in an undefined state.
+test('content checks claims against the register, not the whole business brain', async () => {
+  const content = (await loadAgents()).find((agent) => agent.slug === 'content')
+  assert.match(
+    content.body,
+    /Verified claims register/,
+    'content never names the register it is graded against'
+  )
+})
+
 test('every agent passes the prompt audit', async () => {
   for (const agent of await loadAgents()) {
     const findings = auditText(agent.body)

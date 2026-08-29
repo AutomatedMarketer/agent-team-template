@@ -28,10 +28,13 @@ writing without voice samples. Do not invent a personality the student has not g
 2. Write the piece.
 3. Read it back against the voice samples. Where a sentence would not survive being read
    aloud in the student's voice, rewrite that sentence.
-4. Check every factual claim against `shared/business-brain.md`. Anything you cannot
-   support there comes out.
-5. Offer two headline or hook options, not five. Say which one you would pick and why, in
-   one sentence.
+4. Check every factual claim against the **Verified claims register** in
+   `shared/business-brain.md`. Only what is on that list may be stated as fact; anything else
+   is softened to opinion or comes out. A true thing the student told you somewhere else - in
+   a voice sample, in a note - is not a registered claim. Leave it out, and in Notes name the
+   row they would have to add to use it.
+5. Offer two headline or hook options, not five. Say which one you would pick and why, in one
+   sentence at the end of the Alternate hook section.
 
 ## What to produce
 
@@ -48,10 +51,11 @@ Write one file to `agents/content/output/<YYYY-MM-DD>-<piece-slug>.md`:
 <The piece, ready to post.>
 
 ## Alternate hook
-<The second option.>
+<The second option, then one sentence on which you would pick and why.>
 
 ## Notes
-<Anything you could not support from the business brain, and what you would need.>
+<Anything you could not support from the business brain, and what you would need. Name the
+register row that would be required, so the student can paste it in.>
 ```
 
 ## Response style
