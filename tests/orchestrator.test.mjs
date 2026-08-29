@@ -11,7 +11,7 @@ const run = promisify(execFile)
 import { read } from './helpers/repo.mjs'
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
 import { loadAgents, AGENT_SPECS, COMMON_BLOCKS, OPUS_BLOCKS, SONNET_BLOCKS } from '../scripts/lib/agents.mjs'
-import { auditText, auditRepo, AUDITED_GLOBS } from '../scripts/prompt-audit.mjs'
+import { auditText, auditRepo, AUDITED_GLOBS, RULES } from '../scripts/prompt-audit.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
@@ -432,13 +432,79 @@ const runCli = async (scratch) => {
 }
 
 test('the real command finds nothing once the table the lessons point at is empty', async () => {
-  /* Live first. If the corpus stopped tripping the shipped rules this whole test would pass
-     vacuously, which is how a fixture goes hollow without anybody noticing. */
+  /* Two independent discriminators, because a single-knob mutation test can always be defeated by
+     coupling to the knob - `if (RULES.length > 0)` turns an extra rule off exactly when the
+     emptied arm looks. So the primary check does not use the knob at all: every id the INTACT
+     command reports must be one of the seven the pages point students at. A rule gated on the
+     table being non-empty fires here, reports an id that is not in RULES, and is caught.
+
+     What each arm catches:
+       intact id-set  - any extra rule at any layer that reports an id outside RULES
+       emptied silent - any extra rule not coupled to the knob, including one reusing a real id
+
+     What neither catches, stated rather than claimed away: a rule that BOTH reuses one of the
+     seven ids AND is coupled to the knob AND fires only on text the corpus does not contain.
+     That is a smaller residue than any previous round left, and it is not zero. */
   const intact = await buildScratch(false)
   try {
     const result = await runCli(intact)
     assert.equal(result.code, 1, `the corpus no longer trips the shipped audit, so this fixture proves nothing. Output: ${result.stdout}`)
     assert.match(result.stdout, /critical-prefix|shouting-imperative/, `expected the shipped phrasings to fire, got: ${result.stdout}`)
+
+    const known = new Set(RULES.map((rule) => rule.id))
+    const reported = [...result.stdout.matchAll(/\[([a-z0-9-]+)\]/g)].map((match) => match[1])
+    assert.ok(reported.length > 0, `no rule ids could be parsed out of the report, so this check is vacuous. Output: ${result.stdout}`)
+    for (const id of reported) {
+      assert.ok(
+        known.has(id),
+        `the command reported [${id}], which is not one of the phrasings in RULES. Lessons 11 and 13 send students to that table as the list. Output: ${result.stdout}`
+      )
+    }
+
+    /* The id check above is defeated by a rule that reuses one of the seven ids, and the emptied
+       arm by a rule coupled to the knob. A rule doing both evades each arm - demonstrated, not
+       guessed: see the probe table in the log.
+
+       Two of the three layers close by composition instead of by fixture, because each has a
+       reference to be compared against on the same content:
+
+         the CLI's report      must equal   auditRepo()          -> closes the main block
+         auditRepo()           must equal   auditText() per file -> closes auditRepo
+
+       Neither comparison uses an id, so reusing a real id does not help; neither uses the knob,
+       so coupling to it does not help. What is left is a rule inside `auditText` itself that both
+       reuses one of the seven ids and is coupled to the knob - which is the residue, and it is
+       named here rather than claimed away. */
+    await writeFile(join(intact, '_compose.mjs'), [
+      "import { readFile } from 'node:fs/promises'",
+      "import path from 'node:path'",
+      "const m = await import('./scripts/prompt-audit.mjs')",
+      'const repo = await m.auditRepo()',
+      'const perFile = []',
+      'const seen = new Set(repo.map((f) => f.file))',
+      'for (const file of seen) {',
+      "  const body = await readFile(path.join(process.cwd(), file), 'utf8')",
+      '  for (const finding of m.auditText(body)) perFile.push({ file, rule: finding.rule, line: finding.line })',
+      '}',
+      'console.log(JSON.stringify({',
+      '  repo: repo.map((f) => `${f.file}:${f.line}:${f.rule}`).sort(),',
+      '  perFile: perFile.map((f) => `${f.file}:${f.line}:${f.rule}`).sort()',
+      '}))'
+    ].join('\n'))
+
+    const composed = JSON.parse((await run(process.execPath, ['_compose.mjs'], { cwd: intact })).stdout)
+
+    assert.ok(composed.repo.length > 0, 'auditRepo found nothing on the corpus repo, so these comparisons are vacuous')
+    assert.deepEqual(
+      composed.repo,
+      composed.perFile,
+      'auditRepo reports something auditText does not, so it carries a rule of its own. Lessons 11 and 13 describe one list.'
+    )
+    assert.equal(
+      reported.length,
+      composed.repo.length,
+      `the command reported ${reported.length} findings and auditRepo found ${composed.repo.length}, so the CLI's own main block adds a rule. Lessons 11 and 13 describe one list.`
+    )
   } finally {
     await rm(intact, { recursive: true, force: true })
   }
