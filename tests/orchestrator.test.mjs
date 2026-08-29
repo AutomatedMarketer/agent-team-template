@@ -148,7 +148,27 @@ test('the prompt audit stays silent for every required block in every audited fi
       checked += 1
     }
   }
-  assert.ok(checked >= 30, `only ${checked} block removals were exercised; the sweep has gone hollow`)
+  /* The floor here was `>= 30`, a number from nowhere - 53% of the 57 removals it actually
+     does. Dropping `unattended-run` from COMMON_BLOCKS took the sweep to 49 and it still
+     passed, so the floor did not protect the one dimension that caused this rewrite. It is now
+     the exact count the specs imply, plus an assertion on the spec lists themselves. */
+  const expected =
+    REQUIRED_BLOCKS.length +
+    (await loadAgents()).reduce(
+      (n, agent) => n + (AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS).length,
+      0
+    )
+  assert.equal(
+    checked,
+    expected,
+    `${checked} of ${expected} required blocks were found and removed - a block named in a spec is missing from the file that must carry it`
+  )
+  for (const block of ['unattended-run', 'progress-grounding', 'boundaries', 'final-summary']) {
+    assert.ok(
+      COMMON_BLOCKS.includes(block),
+      `${block} left COMMON_BLOCKS, so this sweep silently stopped covering it`
+    )
+  }
 })
 
 test('auditRepo adds no rules of its own beyond auditText', async () => {
@@ -171,25 +191,55 @@ test('auditRepo adds no rules of its own beyond auditText', async () => {
   )
 })
 
-test('the prompt-audit CLI itself reports clean with a block removed', async () => {
+/* Layer and fixture are not separate axes - they are a grid, and covering a cross through it
+   leaves the product cells open. Two guards each closed one line of that cross: the sweep above
+   covers every fixture but only through auditText, and the earlier version of this test ran the
+   real binary but for a single fixture. A rule in the CLI's main block keyed on unattended-run
+   in an agent card sat in the cell neither reached, and passed both.
+
+   So this runs the real command ONCE against a scratch repo with EVERY required block stripped
+   from EVERY audited file. Whatever layer a presence rule is placed in, and whichever block it
+   keys on, it has to fire here. */
+
+test('the prompt-audit CLI reports clean with every required block stripped everywhere', async () => {
   const scratch = await mkdtemp(join(tmpdir(), 'audit-cli-'))
   try {
     for (const dir of ['scripts', '.claude']) {
       await cp(join(root, dir), join(scratch, dir), { recursive: true })
     }
-    const source = await read('CLAUDE.md')
-    const withoutBlock = source.replace(
-      /<!-- prompt-block: opus-subagent-cap -->[\s\S]*?<!-- \/prompt-block -->/,
-      ''
-    )
-    assert.notEqual(withoutBlock, source, 'the block this test removes is no longer in CLAUDE.md')
-    await writeFile(join(scratch, 'CLAUDE.md'), withoutBlock)
+
+    const strip = (source, blocks) => {
+      let out = source
+      let removed = 0
+      for (const block of blocks) {
+        const next = out.replace(
+          new RegExp(`<!-- prompt-block: ${block} -->[\\s\\S]*?<!-- /prompt-block -->`),
+          ''
+        )
+        if (next !== out) removed += 1
+        out = next
+      }
+      return { out, removed }
+    }
+
+    let stripped = 0
+    const top = strip(await read('CLAUDE.md'), REQUIRED_BLOCKS)
+    stripped += top.removed
+    await writeFile(join(scratch, 'CLAUDE.md'), top.out)
+
+    for (const agent of await loadAgents()) {
+      const spec = AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS
+      const card = strip(await read(agent.path), spec)
+      stripped += card.removed
+      await writeFile(join(scratch, agent.path), card.out)
+    }
+
+    assert.ok(stripped >= 50, `only ${stripped} blocks were stripped; the fixture has gone hollow`)
 
     let stdout = ''
     let code = 0
     try {
-      const result = await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })
-      stdout = result.stdout
+      stdout = (await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })).stdout
     } catch (error) {
       stdout = error.stdout ?? ''
       code = error.code ?? 1
@@ -197,7 +247,7 @@ test('the prompt-audit CLI itself reports clean with a block removed', async () 
     assert.equal(
       code,
       0,
-      `the CLI now fails on a missing block. If that is deliberate, Lessons 11 and 13 should stop saying npm test is the only thing that finds it. Output: ${stdout}`
+      `the CLI fails with blocks missing. If that is deliberate, Lessons 11 and 13 must stop saying it cannot detect one. Output: ${stdout}`
     )
     assert.match(stdout, /prompt audit clean/, `expected a clean report, got: ${stdout}`)
   } finally {
