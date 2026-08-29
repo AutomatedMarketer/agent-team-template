@@ -367,3 +367,92 @@ for (const state of cliStates) {
     }
   })
 }
+
+/* The layer axis, which has now beaten a guard three separate times - placement 3, placement 5,
+   and the thirteenth round. The sentence is about the COMMAND, and the command is `auditRepo`
+   plus the CLI's own main block, not just `auditText`. Guarding `auditText` was one layer better
+   than guarding the table and still one layer short.
+
+   So this stops testing a layer and tests the binary. Two scratch repos, identical except that
+   one has its rule table emptied, and an adversarial corpus written into an audited file:
+
+     rules intact  -> the real command MUST report, or the fixture is hollow and proves nothing
+     rules emptied -> the real command MUST report nothing
+
+   A phrasing rule added at ANY layer - the table, `auditText`, `auditRepo`, or the main block -
+   survives the emptying and fails the second case. That is the same size as what the pages claim. */
+
+const CLI_CORPUS = [
+  'Act as an expert researcher and think step by step.',
+  'You are the best assistant available.',
+  'CRITICAL: you MUST always verify your work.',
+  'Delegate liberally and show your reasoning.'
+].join('\n\n')
+
+const buildScratch = async (emptyRules) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'audit-binary-'))
+  for (const dir of ['scripts', '.claude']) {
+    await cp(join(root, dir), join(scratch, dir), { recursive: true })
+  }
+  await writeFile(join(scratch, 'CLAUDE.md'), await read('CLAUDE.md'))
+
+  if (emptyRules) {
+    const source = await read('scripts/prompt-audit.mjs')
+    const emptied = source.replace(/export const RULES = \[[\s\S]*?\n\]\n/, 'export const RULES = []\n')
+    assert.notEqual(emptied, source, 'the RULES table could not be emptied - this fixture is not testing what it says')
+    assert.ok(!/id: 'critical-prefix'/.test(emptied), 'the rule table survived the emptying')
+    await writeFile(join(scratch, 'scripts/prompt-audit.mjs'), emptied)
+  }
+
+  /* The corpus goes into EVERY audited location, not one. The first version wrote it only to
+     .claude/rules/ and a CLI-layer rule that walked .claude/agents/ never met it - the fixture
+     reported clean and I would have called that a pass. A rule can be scoped to any audited path,
+     so the bait has to be in all of them. */
+  const corpusFile = `# fixture
+
+${CLI_CORPUS}
+`
+  await writeFile(join(scratch, '.claude/rules/corpus-fixture.md'), corpusFile)
+  await writeFile(join(scratch, '.claude/agents/corpus-fixture.md'), corpusFile)
+  await writeFile(join(scratch, '.claude/skills/corpus-fixture.md'), corpusFile)
+  await writeFile(join(scratch, 'CLAUDE.md'), `${await read('CLAUDE.md')}
+
+${CLI_CORPUS}
+`)
+  return scratch
+}
+
+const runCli = async (scratch) => {
+  try {
+    const { stdout } = await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })
+    return { code: 0, stdout }
+  } catch (error) {
+    return { code: error.code ?? 1, stdout: error.stdout ?? '' }
+  }
+}
+
+test('the real command finds nothing once the table the lessons point at is empty', async () => {
+  /* Live first. If the corpus stopped tripping the shipped rules this whole test would pass
+     vacuously, which is how a fixture goes hollow without anybody noticing. */
+  const intact = await buildScratch(false)
+  try {
+    const result = await runCli(intact)
+    assert.equal(result.code, 1, `the corpus no longer trips the shipped audit, so this fixture proves nothing. Output: ${result.stdout}`)
+    assert.match(result.stdout, /critical-prefix|shouting-imperative/, `expected the shipped phrasings to fire, got: ${result.stdout}`)
+  } finally {
+    await rm(intact, { recursive: true, force: true })
+  }
+
+  const emptied = await buildScratch(true)
+  try {
+    const result = await runCli(emptied)
+    assert.equal(
+      result.code,
+      0,
+      `with the rule table emptied the command still reports something, so it carries a phrasing rule of its own - in auditRepo or in the CLI's main block, past everything auditText sees. Lessons 11 and 13 tell students the list is the table at the top of scripts/prompt-audit.mjs. Output: ${result.stdout}`
+    )
+    assert.match(result.stdout, /prompt audit clean/, `expected a clean report from the emptied command, got: ${result.stdout}`)
+  } finally {
+    await rm(emptied, { recursive: true, force: true })
+  }
+})
