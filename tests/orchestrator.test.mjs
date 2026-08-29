@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir, mkdtemp, cp, writeFile, rm } from 'node:fs/promises'
+import { readdir, mkdtemp, cp, writeFile, rm, readFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
@@ -303,6 +303,15 @@ for (const state of cliStates) {
           await writeFile(join(scratch, agent.path), card.out)
         }
         assert.equal(removed, expectedBlockCount(await loadAgents()), 'the all-reworded fixture no longer touches every required block')
+        // The single-reword states assert the block survives so the fixture cannot decay into
+        // another removal test. That assertion was not carried across to this one.
+        for (const [file, blocks] of [['CLAUDE.md', REQUIRED_BLOCKS],
+          ...(await loadAgents()).map((a) => [a.path, AGENT_SPECS[a.slug]?.blocks ?? COMMON_BLOCKS])]) {
+          const written = extractBlocks(await readFile(join(scratch, file), 'utf8'))
+          for (const block of blocks) {
+            assert.ok(written.has(block), `${file}: ${block} was removed by the all-reworded fixture, not reworded`)
+          }
+        }
       } else if (state.reword) {
         const [file, block] = state.reword
         const before = await read(file)
