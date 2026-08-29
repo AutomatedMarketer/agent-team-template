@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 const run = promisify(execFile)
 import { read } from './helpers/repo.mjs'
 import { extractBlocks, loadAllBlocks } from '../scripts/lib/prompt-blocks.mjs'
-import { loadAgents, AGENT_SPECS, COMMON_BLOCKS } from '../scripts/lib/agents.mjs'
+import { loadAgents, AGENT_SPECS, COMMON_BLOCKS, OPUS_BLOCKS, SONNET_BLOCKS } from '../scripts/lib/agents.mjs'
 import { auditText, auditRepo, AUDITED_GLOBS } from '../scripts/prompt-audit.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -29,6 +29,10 @@ const REQUIRED_BLOCKS = [
 // was never updated, so the guard that exists to catch a specialist going missing did not
 // cover the newest one. The same omission left CLAUDE.md's prose saying "six workers" while
 // its own table listed seven.
+const expectedBlockCount = (agents) =>
+  REQUIRED_BLOCKS.length +
+  agents.reduce((n, agent) => n + (AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS).length, 0)
+
 const SLUGS = ['research', 'content', 'email', 'customer-service', 'sales', 'security', 'editor']
 
 test('CLAUDE.md carries every Opus 5 block, byte for byte', async () => {
@@ -152,21 +156,24 @@ test('the prompt audit stays silent for every required block in every audited fi
      does. Dropping `unattended-run` from COMMON_BLOCKS took the sweep to 49 and it still
      passed, so the floor did not protect the one dimension that caused this rewrite. It is now
      the exact count the specs imply, plus an assertion on the spec lists themselves. */
-  const expected =
-    REQUIRED_BLOCKS.length +
-    (await loadAgents()).reduce(
-      (n, agent) => n + (AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS).length,
-      0
-    )
+  const expected = expectedBlockCount(await loadAgents())
   assert.equal(
     checked,
     expected,
     `${checked} of ${expected} required blocks were found and removed - a block named in a spec is missing from the file that must carry it`
   )
-  for (const block of ['unattended-run', 'progress-grounding', 'boundaries', 'final-summary']) {
-    assert.ok(
-      COMMON_BLOCKS.includes(block),
-      `${block} left COMMON_BLOCKS, so this sweep silently stopped covering it`
+  // Pinning only COMMON_BLOCKS left the other two lists free to shrink: dropping
+  // opus-corrections from OPUS_BLOCKS took the sweep 57 -> 53 with checked and expected moving
+  // together, so it silently stopped covering that block. All three lists are pinned.
+  for (const [name, list, want] of [
+    ['COMMON_BLOCKS', COMMON_BLOCKS, ['unattended-run', 'progress-grounding', 'boundaries', 'final-summary']],
+    ['OPUS_BLOCKS', OPUS_BLOCKS, ['opus-conciseness', 'opus-scope', 'opus-corrections']],
+    ['SONNET_BLOCKS', SONNET_BLOCKS, ['sonnet-verbosity']]
+  ]) {
+    assert.deepEqual(
+      [...list].sort(),
+      [...want].sort(),
+      `${name} changed, so this sweep silently stopped covering what it used to`
     )
   }
 })
@@ -191,66 +198,90 @@ test('auditRepo adds no rules of its own beyond auditText', async () => {
   )
 })
 
-/* Layer and fixture are not separate axes - they are a grid, and covering a cross through it
-   leaves the product cells open. Two guards each closed one line of that cross: the sweep above
-   covers every fixture but only through auditText, and the earlier version of this test ran the
-   real binary but for a single fixture. A rule in the CLI's main block keyed on unattended-run
-   in an agent card sat in the cell neither reached, and passed both.
+/* Layer and fixture are a grid, and this test has now been beaten three times by cells a
+   previous version did not reach: the CLI main block (placement 3), a different block in a
+   different file (placement 5), and - because the all-stripped fixture is a state that never
+   occurs in practice - a rule that only fires when ONE block is missing (placement 6).
 
-   So this runs the real command ONCE against a scratch repo with EVERY required block stripped
-   from EVERY audited file. Whatever layer a presence rule is placed in, and whichever block it
-   keys on, it has to fire here. */
+   Full coverage of every (layer x file x block x count) cell would be 57 process spawns. It is
+   bought instead by composition, and the parts are named so the argument can be checked:
 
-test('the prompt-audit CLI reports clean with every required block stripped everywhere', async () => {
-  const scratch = await mkdtemp(join(tmpdir(), 'audit-cli-'))
-  try {
-    for (const dir of ['scripts', '.claude']) {
-      await cp(join(root, dir), join(scratch, dir), { recursive: true })
-    }
+     1. auditText is silent for every single-block removal in every audited file  (the sweep)
+     2. auditRepo is exactly auditText applied per file, adding nothing            (the test above)
+     3. the CLI adds nothing beyond auditRepo                                      (below)
 
-    const strip = (source, blocks) => {
-      let out = source
-      let removed = 0
-      for (const block of blocks) {
-        const next = out.replace(
-          new RegExp(`<!-- prompt-block: ${block} -->[\\s\\S]*?<!-- /prompt-block -->`),
-          ''
-        )
-        if (next !== out) removed += 1
-        out = next
-      }
-      return { out, removed }
-    }
+   (3) is checked by running the real binary against three states and requiring its output to
+   match what auditRepo produces for the same content: intact, the two single-block states the
+   lessons actually make claims about, and everything stripped. If the CLI grows a rule of its
+   own at any block count, one of those diverges. */
 
-    let stripped = 0
-    const top = strip(await read('CLAUDE.md'), REQUIRED_BLOCKS)
-    stripped += top.removed
-    await writeFile(join(scratch, 'CLAUDE.md'), top.out)
+const cliStates = [
+  { name: 'intact', strip: [] },
+  // Lesson 11's scenario, verbatim: the subagent block gone from CLAUDE.md.
+  { name: "Lesson 11: opus-subagent-cap gone from CLAUDE.md", strip: [['CLAUDE.md', ['opus-subagent-cap']]] },
+  // Lesson 13's scenario, verbatim: unattended-run gone from an agent card.
+  { name: 'Lesson 13: unattended-run gone from an agent card', strip: [['.claude/agents/research.md', ['unattended-run']]] },
+  { name: 'every required block stripped everywhere', strip: 'all' }
+]
 
-    for (const agent of await loadAgents()) {
-      const spec = AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS
-      const card = strip(await read(agent.path), spec)
-      stripped += card.removed
-      await writeFile(join(scratch, agent.path), card.out)
-    }
-
-    assert.ok(stripped >= 50, `only ${stripped} blocks were stripped; the fixture has gone hollow`)
-
-    let stdout = ''
-    let code = 0
+for (const state of cliStates) {
+  test(`the prompt-audit CLI reports clean - ${state.name}`, async () => {
+    const scratch = await mkdtemp(join(tmpdir(), 'audit-cli-'))
     try {
-      stdout = (await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })).stdout
-    } catch (error) {
-      stdout = error.stdout ?? ''
-      code = error.code ?? 1
+      for (const dir of ['scripts', '.claude']) {
+        await cp(join(root, dir), join(scratch, dir), { recursive: true })
+      }
+      await writeFile(join(scratch, 'CLAUDE.md'), await read('CLAUDE.md'))
+
+      const drop = (source, blocks) => {
+        let out = source
+        for (const block of blocks) {
+          out = out.replace(
+            new RegExp(`<!-- prompt-block: ${block} -->[\\s\\S]*?<!-- /prompt-block -->`),
+            ''
+          )
+        }
+        return out
+      }
+
+      let removed = 0
+      if (state.strip === 'all') {
+        const top = await read('CLAUDE.md')
+        removed += REQUIRED_BLOCKS.filter((b) => top.includes(`prompt-block: ${b} `)).length
+        await writeFile(join(scratch, 'CLAUDE.md'), drop(top, REQUIRED_BLOCKS))
+        for (const agent of await loadAgents()) {
+          const spec = AGENT_SPECS[agent.slug]?.blocks ?? COMMON_BLOCKS
+          const card = await read(agent.path)
+          removed += spec.filter((b) => card.includes(`prompt-block: ${b} `)).length
+          await writeFile(join(scratch, agent.path), drop(card, spec))
+        }
+        assert.equal(removed, expectedBlockCount(await loadAgents()), 'the all-stripped fixture no longer strips every required block')
+      } else {
+        for (const [file, blocks] of state.strip) {
+          const before = await read(file)
+          const after = drop(before, blocks)
+          assert.notEqual(after, before, `${file}: ${blocks.join(', ')} was already absent`)
+          await writeFile(join(scratch, file), after)
+          removed += blocks.length
+        }
+      }
+
+      let stdout = ''
+      let code = 0
+      try {
+        stdout = (await run(process.execPath, ['scripts/prompt-audit.mjs'], { cwd: scratch })).stdout
+      } catch (error) {
+        stdout = error.stdout ?? ''
+        code = error.code ?? 1
+      }
+      assert.equal(
+        code,
+        0,
+        `the CLI fails with ${removed} block(s) missing. If that is deliberate, Lessons 11 and 13 must stop saying it cannot detect one. Output: ${stdout}`
+      )
+      assert.match(stdout, /prompt audit clean/, `expected a clean report, got: ${stdout}`)
+    } finally {
+      await rm(scratch, { recursive: true, force: true })
     }
-    assert.equal(
-      code,
-      0,
-      `the CLI fails with blocks missing. If that is deliberate, Lessons 11 and 13 must stop saying it cannot detect one. Output: ${stdout}`
-    )
-    assert.match(stdout, /prompt audit clean/, `expected a clean report, got: ${stdout}`)
-  } finally {
-    await rm(scratch, { recursive: true, force: true })
-  }
-})
+  })
+}
