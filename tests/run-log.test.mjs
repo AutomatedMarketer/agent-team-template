@@ -29,6 +29,16 @@ test('the filename must equal run_id.json', async () => {
   assert.ok(problems.some((problem) => /filename/i.test(problem)), problems.join('; '))
 })
 
+test('a missing run_id does not produce an "undefined.json" filename complaint', async () => {
+  const { run_id, ...entry } = await fixture('valid-schedule.json')
+  const problems = validateRunLog(entry, { filename: `${run_id}.json` })
+  assert.ok(problems.some((problem) => /run_id/.test(problem)), problems.join('; '))
+  assert.ok(
+    !problems.some((problem) => problem.includes('undefined')),
+    `no problem should name "undefined": ${problems.join('; ')}`
+  )
+})
+
 test('a scheduled run without a session link is rejected', async () => {
   const entry = { ...(await fixture('valid-schedule.json')), session_id: null, session_url: null }
   const problems = validateRunLog(entry, { filename: `${entry.run_id}.json` })

@@ -112,7 +112,10 @@ export function validateRunLog(entry, { filename } = {}) {
     )
   }
 
-  if (filename) {
+  // Only compare the filename once run_id is itself well-formed. A missing run_id would
+  // otherwise report "filename must be undefined.json", which names no fixable problem and
+  // buries the real one - the run_id line directly above it.
+  if (filename && RUN_ID.test(entry.run_id ?? '')) {
     expect(filename === `${entry.run_id}.json`, `filename must be ${entry.run_id}.json, got ${filename}`)
   }
 
