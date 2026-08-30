@@ -69,7 +69,12 @@ for (const [heading, rows] of [
   ['Armed', result.armed],
   ['DECLARED - these are wishes, not jobs', result.declared],
   ['UNAPPROVED - these are spending runs nobody agreed to', result.unapproved],
-  ['Off', result.off]
+  // Off and the webhook rows are listed apart because they are COUNTED apart, twenty lines up.
+  // Printing `result.off` whole put a webhook row into a list of ten under a summary line that
+  // said nine - the same total-disagrees-with-the-detail fault the comment above describes,
+  // left behind when that fix corrected the counts and did not touch the listing.
+  ['Off', result.off.filter((row) => !isWebhookRow(row))],
+  ['Fired by webhook - no clock, so nothing to be off from', offWebhook]
 ]) {
   if (!rows.length) continue
   console.log(`\n${heading}:`)
