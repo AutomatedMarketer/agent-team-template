@@ -45,6 +45,10 @@ git commit -m "<what changed, in a sentence>"
 git push
 ```
 
+If you were told not to commit, do not commit — and do not push. Leave everything
+uncommitted, say what is staged and waiting, and stop. This skill commits and pushes by
+design, which is exactly why an instruction not to has to win here.
+
 If there is nothing to commit, say so and stop. An empty sync is a normal outcome.
 
 ## 3. Why conflicts are rare by design

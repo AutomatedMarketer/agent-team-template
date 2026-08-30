@@ -51,3 +51,6 @@ structural, not a promise.
 
 Follow `.claude/skills/run-log/SKILL.md`. The triage file and the run log go in the
 same commit.
+
+If you were told not to commit, do not commit — leave them both uncommitted instead. What
+matters is that they move together, not that a commit always happens.

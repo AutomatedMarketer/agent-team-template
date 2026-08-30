@@ -179,5 +179,9 @@ Follow `.claude/skills/run-log/SKILL.md`. The register entry, the recipe, any `.
 name, and the run log go in the same commit. **The `.env` file itself is never committed** —
 check before you commit, every time.
 
+If you were told not to commit, do not commit — leave the register entry, the recipe and
+the run log uncommitted together. What matters is that they move as one: a registered
+connection with no recipe behind it is the gap this step exists to close.
+
 Then say what changed in one line, and what the team can now do that it could not do an hour
 ago.

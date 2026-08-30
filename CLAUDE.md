@@ -67,6 +67,11 @@ could apply. Every run also writes one run-log file into
 `runs/YYYY-MM/`. The format and the exact steps are in `.claude/skills/run-log/SKILL.md`.
 Both the deliverable and the run log go in the same commit.
 
+If you were told not to commit, do not commit — leave the deliverable and the run log
+uncommitted together, and say so. The rule is that the two move as one, not that a commit
+always happens. An agent that commits over an instruction not to has broken something
+worse than a half-record.
+
 ## Safety
 
 Draft, log, and report. Sending an email, publishing a post, deleting a record, or

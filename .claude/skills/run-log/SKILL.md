@@ -117,3 +117,7 @@ git commit -m "research: competitor pricing sweep for 2026-08-07"
 
 The artifact and the run log go in the same commit. A log with no artifact and an artifact
 with no log are both half-records, and the cockpit shows the gap.
+
+If you were told not to commit, do not commit. Leave both uncommitted and say so.
+The rule is that the two move together — not that a commit always happens. An agent that
+commits over an instruction not to has broken something worse than a half-record.

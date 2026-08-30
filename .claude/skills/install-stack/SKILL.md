@@ -118,6 +118,9 @@ has gone missing, and the note is what tells a second machine what it is still s
 
 Commit that file. No run log — this is setup, not a run.
 
+If you were told not to commit, do not commit — leave the note uncommitted and say so.
+A second machine reading an uncommitted note learns nothing, so tell them it is waiting.
+
 ## When something here is not available
 
 Any of these can vanish: a marketplace moves, a plugin is renamed, an install breaks on one

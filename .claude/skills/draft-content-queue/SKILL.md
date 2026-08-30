@@ -54,3 +54,6 @@ person makes, on every run, including unattended ones.
 
 Follow `.claude/skills/run-log/SKILL.md`. The queue file and the run log go in the same
 commit.
+
+If you were told not to commit, do not commit — leave the queue file and the run log
+uncommitted together. What matters is that they move as one.

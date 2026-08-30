@@ -117,3 +117,7 @@ clear.
 One run log per swept task, written per `.claude/skills/run-log/SKILL.md`, with the
 specialist as the agent and `task-sweep` as the workflow. Each card, its artifact, and
 its run log go in the same commit.
+
+If you were told not to commit, do not commit — leave them all uncommitted instead.
+What matters is that they move together. A log without its artifact, or an artifact
+without its log, is a half-record either way.

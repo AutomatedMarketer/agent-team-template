@@ -134,3 +134,7 @@ clear.
 
 Finish by following `.claude/skills/run-log/SKILL.md`. The report and the run log go in
 the same commit.
+
+If you were told not to commit, do not commit — leave them all uncommitted instead.
+What matters is that they move together. A log without its artifact, or an artifact
+without its log, is a half-record either way.

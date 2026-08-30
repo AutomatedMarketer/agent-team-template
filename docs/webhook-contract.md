@@ -43,7 +43,8 @@ Content-Type: application/json
 
 It reads `agents/customer-service/knowledge/faq.md`, drafts a reply, writes one file to
 `agents/customer-service/output/`, writes a run log with `trigger` set to `webhook`, and
-commits both. It does not reply to the customer. A person sends the draft.
+commits both — unless you told it not to, in which case it leaves both uncommitted and
+says so. It does not reply to the customer. A person sends the draft.
 
 ## Keeping the URL safe
 

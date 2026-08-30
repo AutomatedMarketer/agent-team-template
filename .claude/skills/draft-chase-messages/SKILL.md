@@ -53,3 +53,7 @@ made, because it was not.
 
 Follow `.claude/skills/run-log/SKILL.md`. The gone-cold file, the pipeline update, and
 the run log go in the same commit.
+
+If you were told not to commit, do not commit — leave them all uncommitted together. What
+matters is that they move as one: a pipeline that moved with no message behind it is a
+record nobody can follow back.

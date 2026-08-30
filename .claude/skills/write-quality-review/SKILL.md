@@ -118,3 +118,6 @@ percentage above it.
 
 Follow `.claude/skills/run-log/SKILL.md`. The review file and the run log go in the same
 commit. This run has no `quality` block of its own — the reviewer is not graded by itself.
+
+If you were told not to commit, do not commit — leave the review file and the run log
+uncommitted together. What matters is that they move as one.

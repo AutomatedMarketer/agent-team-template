@@ -97,6 +97,10 @@ Follow `.claude/skills/run-log/SKILL.md`. The report, the applied edits, and any
 the same commit. This run carries no `quality` block — the tune-up is not graded, it is the
 thing that improves what gets graded.
 
+If you were told not to commit, do not commit — leave the report, the edits and the cards
+uncommitted together. What matters is that they move as one: applied edits with no report
+explaining them are changes nobody can trace.
+
 ```bash
 git add inbox/<date>/tune-up.md shared/writing-rules.md tasks/ agents/orchestrator/output/last-checked.md runs/<YYYY-MM>/<run_id>.json
 git commit -m "tune-up: 2 rules applied, 1 card raised for <date>"

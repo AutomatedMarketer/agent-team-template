@@ -103,3 +103,7 @@ git commit -m "verdict: hiring post edited - opening rule added to writing-rules
 ```
 
 No run log. This is the owner talking, not a run.
+
+If the owner told you not to commit, do not commit — leave the verdict file and the rule
+edit uncommitted instead. What matters is that they move together. A rule edit with no
+verdict explaining it is a change nobody can trace back.

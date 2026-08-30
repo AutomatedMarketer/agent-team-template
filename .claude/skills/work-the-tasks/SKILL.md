@@ -56,6 +56,10 @@ When a card's work is done:
 
 The card, the artifact, and the run log go in the same commit.
 
+If you were told not to commit, do not commit — leave all three uncommitted together. What
+matters is that they move as one: a card marked done with no artifact behind it is the gap
+the board exists to show.
+
 ## 4. Write the digest
 
 The workflow's `output` path gets a short digest — the thing the owner actually reads:

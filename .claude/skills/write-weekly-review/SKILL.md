@@ -55,3 +55,6 @@ That last line is the contract. The proposals sit there until a person picks one
 
 Follow `.claude/skills/run-log/SKILL.md`. The review and the run log go in the same
 commit — yes, the review of the run logs gets a run log. It is a run.
+
+If you were told not to commit, do not commit — leave the review and the run log
+uncommitted together. What matters is that they move as one.
