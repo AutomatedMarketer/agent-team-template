@@ -455,3 +455,68 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+/* 15_YOUR_LEDGER.md says there are "two rules if you do it this way, both enforced in code", and
+   names `hours` as one of them - "a number you typed straight in is a number nobody derived".
+   Only one of the two was enforced. A row carrying `hours: 20` validated clean and the total
+   stayed at the 3.3 hours derived from times_per_week x minutes_each, so the reader saw a number
+   that did not include what they typed and was told nothing about why. */
+const soundTask = {
+  task: 'Sorting the inbox',
+  words: 'The inbox eats my morning before I get to anything real',
+  who: 'me',
+  times_per_week: 5,
+  minutes_each: 40,
+  confirmed: 'twice',
+  hands_off: 'Replies wait in my drafts folder. I read each one and send it.'
+}
+const ledgerWith = (task, extra = {}) => ({ owner_type: 'business', hourly_value: 150, tasks: [task], ...extra })
+
+test('a number the file works out cannot be typed into a row', () => {
+  for (const field of ['hours', 'hours_per_week', 'cost', 'cost_per_week', 'value']) {
+    const problems = validateLedger(ledgerWith({ ...soundTask, [field]: 20 }))
+    assert.equal(problems.length, 1, `${field} was accepted: ${JSON.stringify(problems)}`)
+    assert.match(problems[0], /worked out from/, `${field} must say where the number really comes from`)
+    assert.match(problems[0], /never typed/, `${field} must say it is never typed`)
+  }
+})
+
+test('a field nothing reads is refused rather than silently dropped', () => {
+  for (const field of ['wibble', 'minutes_eachh', 'notes', 'priority']) {
+    const problems = validateLedger(ledgerWith({ ...soundTask, [field]: 'x' }))
+    assert.ok(
+      problems.some((problem) => problem.includes(`\`${field}\``)),
+      `${field} was accepted in silence: ${JSON.stringify(problems)}`
+    )
+  }
+})
+
+test('an unknown field at the top of the file is refused too', () => {
+  const problems = validateLedger(ledgerWith(soundTask, { currency: 'GBP' }))
+  assert.ok(problems.some((problem) => problem.includes('`currency`')), JSON.stringify(problems))
+})
+
+// The other half of the bargain: refusing unknown fields must not refuse the template's own.
+test('the ledger the repo ships still validates clean', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { parseSimpleYaml } = await import('../scripts/lib/yaml-lite.mjs')
+  const { fromRoot } = await import('./helpers/repo.mjs')
+  const example = parseSimpleYaml(await readFile(fromRoot('ledger.example.yml'), 'utf8'))
+  assert.deepEqual(validateLedger(example), [], 'the shipped example must not trip the new check')
+})
+
+/* The field list and the template have to agree, or the check refuses a row the example told the
+   student to copy. Pinning it here means adding a field to one without the other fails loudly. */
+test('the known-field list covers every field the shipped example uses', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { parseSimpleYaml } = await import('../scripts/lib/yaml-lite.mjs')
+  const { fromRoot } = await import('./helpers/repo.mjs')
+  const { TASK_FIELDS, LEDGER_FIELDS } = await import('../scripts/lib/ledger.mjs')
+  const example = parseSimpleYaml(await readFile(fromRoot('ledger.example.yml'), 'utf8'))
+  for (const field of new Set(example.tasks.flatMap(Object.keys))) {
+    assert.ok(TASK_FIELDS.includes(field), `ledger.example.yml uses "${field}" and TASK_FIELDS does not list it`)
+  }
+  for (const field of Object.keys(example)) {
+    assert.ok(LEDGER_FIELDS.includes(field), `ledger.example.yml uses "${field}" and LEDGER_FIELDS does not list it`)
+  }
+})

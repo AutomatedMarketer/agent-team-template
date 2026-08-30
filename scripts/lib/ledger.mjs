@@ -26,6 +26,44 @@ export async function loadLedger(root = repoRoot) {
   return parseSimpleYaml(await readFile(path.join(root, LEDGER), 'utf8'))
 }
 
+// The fields a task really has. Anything else typed into a row is READ BY NOTHING, and until
+// this existed it was dropped in silence: `hours: 20` on a task validated clean while the total
+// stayed at the 3.3 hours derived from times_per_week x minutes_each. The reader sees a number
+// that does not include what they typed and is told nothing.
+//
+// 15_YOUR_LEDGER.md says there are "two rules if you do it this way, both enforced in code", and
+// names `hours` as one of them - "a number you typed straight in is a number nobody derived".
+// One of the two was enforced. This is the other.
+// `who` is on this list although no code reads it: every row of ledger.example.yml carries it
+// and its comment block documents it, so a student who copies the example must not be refused.
+// It is read by the person looking at their own week, which is a use.
+export const TASK_FIELDS = [
+  'task', 'words', 'who', 'times_per_week', 'minutes_each', 'confirmed', 'hands_off',
+  'parked_because'
+]
+
+export const LEDGER_FIELDS = ['owner_type', 'hourly_value', 'tasks']
+
+// Numbers this file WORKS OUT. Typing one is not a spelling mistake, it is a misunderstanding of
+// where the number comes from, so it gets its own sentence rather than the generic one.
+const DERIVED_FIELDS = new Map([
+  ['hours', 'times_per_week and minutes_each'],
+  ['hours_per_week', 'times_per_week and minutes_each'],
+  ['hoursperweek', 'times_per_week and minutes_each'],
+  ['cost', 'the hours and your hourly_value'],
+  ['cost_per_week', 'the hours and your hourly_value'],
+  ['costperweek', 'the hours and your hourly_value'],
+  ['value', 'the hours and your hourly_value']
+])
+
+export function unknownFieldProblem(field) {
+  const derivedFrom = DERIVED_FIELDS.get(field.toLowerCase())
+  if (derivedFrom) {
+    return `\`${field}\` is worked out from ${derivedFrom}, never typed. Nothing reads the number you wrote, so the total will not match it. Remove it`
+  }
+  return `\`${field}\` is not a field this file has, so nothing reads it and anything you put there is lost. Check it against ledger.example.yml, or remove it`
+}
+
 // Same marker the rest of the repo uses for a template nobody filled in.
 export function isUnfilled(value) {
   return typeof value === 'string' && /<!--\s*fill:/.test(value)
@@ -127,6 +165,10 @@ export function validateLedger(ledger) {
     problems.push('hourly_value must be a positive number, or left out entirely')
   }
 
+  for (const field of Object.keys(ledger ?? {})) {
+    if (!LEDGER_FIELDS.includes(field)) problems.push(unknownFieldProblem(field))
+  }
+
   const tasks = ledger?.tasks
   if (!Array.isArray(tasks)) {
     problems.push('tasks must be a list, even if empty')
@@ -159,6 +201,10 @@ export function validateLedger(ledger) {
     const handsOffText = typeof task?.hands_off === 'string' ? task.hands_off.trim() : ''
     if (parkedBecause && handsOffText && !isUnfilled(handsOffText)) {
       at('says who acts on the output and also says why it is parked - it cannot be both, so pick one')
+    }
+
+    for (const field of Object.keys(task ?? {})) {
+      if (!TASK_FIELDS.includes(field)) at(unknownFieldProblem(field))
     }
 
     const words = typeof task?.words === 'string' ? task.words.trim() : ''
