@@ -25,12 +25,12 @@ Read `quality/verdicts/` for the same seven days.
 
 ```
 acceptance rate = shipped / (shipped + edited + rejected)
+```
 
 **Count what no bucket holds, and say it.** A verdict whose value is not one of the three is not
 part of either half of that fraction, so dropping one does not report a worse week - it reports a
 better one. `npm run check:verdicts` refuses them, but if you meet one, report it beside the rate
 as "N verdicts could not be counted" rather than leaving it out.
-```
 
 **Verdicts, not grades, decide acceptance.** The editor's score says the work met the
 standard; the verdict says the owner used it. When those two disagree, the standard is wrong.

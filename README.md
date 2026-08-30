@@ -164,7 +164,7 @@ that decides whether everything else is any good.
 
 ## Did it work?
 
-Four commands, in this order. Each tells you something different.
+Five commands, in this order. Each tells you something different.
 
 ```bash
 npm test                 # ends with "pass 411 / fail 0". If this fails, the clone is broken
