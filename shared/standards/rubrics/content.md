@@ -9,6 +9,12 @@ into passing something. Score is `met / 12`. **Threshold is 10/12 (80%).**
 Any `never` item in the workflow's `done` block is an **automatic fail** regardless of the
 score. The rubric measures craft; the `never` list is the owner's taste, and taste wins.
 
+**On a run with no workflow** — a direct request rather than a chained job, which is how most
+content gets written — there is no `done` block to read. Use the `never`-shaped lists that always
+exist instead: `claims-to-avoid` and any "never" line in `shared/business-brain.md`, and
+`hard-boundaries` in `shared/about-me.md`. Same rule, same automatic fail. A grader that skips the
+taste check because the job arrived without a YAML file is grading half the thing.
+
 ---
 
 ## Voice — 4 points
@@ -32,6 +38,19 @@ that the piece was graded without voice samples.
 | S2 | At least one concrete, specific thing — a number, a name, a moment. Not a category |
 | S3 | Every factual claim is on the **Verified claims register** in `shared/business-brain.md`, or is softened to opinion, or is cut |
 | S4 | It tells the reader something they could not have written themselves |
+
+**If the verified claims register is empty or every row reads `None`, S2 is scored differently.**
+An empty register is not always a thin brain — someone who works for the business rather than
+owning it may have no claim they are permitted to state, and that is the correct answer rather
+than a gap to fill. In that case S2 is met by **a moment**: something that happened, told without
+asserting a result, a figure, a client or a credential. Mark it met and say in the report card
+that the piece was graded against an empty register, so the writer knows why it reads thinner
+than it could.
+
+Do not mark S2 not-met and then prescribe a replacement fact — that is a fix the writer is not
+allowed to apply, and the retry it costs is wasted. If a registrable claim would obviously
+improve the piece, write the register row it needs and who would have to source it, the way a
+failure note names its fix.
 
 ## Craft — 4 points
 
