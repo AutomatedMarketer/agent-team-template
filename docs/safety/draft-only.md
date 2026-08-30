@@ -65,3 +65,20 @@ Verification date: <!-- fill: safety-verification-date -->
 
 If the connector exposes no send capability at all, record that here as the finding — it
 is a stronger guarantee than a deny rule, and it should be stated rather than assumed.
+
+**Three states, and only two of them close layer 3.** They are easy to confuse, and the third
+one is the trap:
+
+| State | What it means | Closes layer 3? |
+|---|---|---|
+| **Denied** | A connector is attached, you asked it to name its send-capable tools, and those names are in `permissions.deny`. | **Yes.** Fill the table and the date. |
+| **Inspected, none found** | A connector is attached, you asked, and it exposes nothing that can send. | **Yes**, and it is the stronger finding. Record which connector you inspected, and when. |
+| **No connector attached** | `connections/register.yml` is empty, or carries no mail connector. | **No.** Nothing has been verified. |
+
+**The third state is not the second one.** An empty register by default proves nothing about what
+a connector would expose; an empty register *after inspection* is a positive finding about a named
+connector on a named date. Writing "no send capability" when nothing was ever attached records a
+guarantee nobody checked — which is the exact failure this file exists to prevent.
+
+If you have no connector, leave this **pending** and say so. That is the honest state, layers 1
+and 2 are still doing their work, and nothing is pretending otherwise.
