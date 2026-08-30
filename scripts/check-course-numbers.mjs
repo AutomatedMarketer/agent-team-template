@@ -449,7 +449,10 @@ if (ledgerLesson && PAIRED_LINES.length) {
   // counting one lower. That is the same shape as the defect this whole section exists for, so
   // the number is asserted rather than printed. If the reporter gains or loses a line the
   // lesson shows, this fails and both get updated together - which is the point of a pairing.
-  const QUOTED_IN_LESSON = 3
+  // Was 3. The lesson gained a second sample block showing the hours-only branch - the output
+  // someone with a job actually gets - which quotes one more of the reporter's lines,
+  // "No rate recorded, so this is counted in hours only." Updated together, as intended.
+  const QUOTED_IN_LESSON = 4
   if (quotedish.length !== QUOTED_IN_LESSON) {
     fail(`${ledgerLesson}: quotes ${quotedish.length} of the check's output lines, expected ${QUOTED_IN_LESSON}. A line was reworded on one side only, or the block changed shape.`)
   } else {
