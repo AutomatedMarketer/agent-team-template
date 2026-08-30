@@ -481,7 +481,18 @@ const withExamples = async (run) => {
       const source = await readFile(path.join(templateRoot, src), 'utf8').catch(() => null)
       if (source === null) continue
       const target = path.join(templateRoot, dst)
-      if (await readFile(target, 'utf8').then(() => true).catch(() => false)) continue
+      // A real file here is NOT something to quietly step around. This guard grades a lesson's
+      // sample block against what the command actually prints; if the student's own ledger is
+      // sitting in the repo it grades the lesson against THEIR week and reports the lesson
+      // wrong. That is a false FAIL on a correct lesson, and it is the same class of bug as
+      // writing a fixture into the repo under test - silently skipping is what made it silent.
+      if (await readFile(target, 'utf8').then(() => true).catch(() => false)) {
+        console.error(`FAIL cannot grade sample blocks: a real ${dst} is in the repo root.`)
+        console.error(`     This guard needs ${src} to be the file the command reads. Move`)
+        console.error(`     ${dst} aside and re-run - grading a lesson against your own data`)
+        console.error('     reports the lesson broken when it is not.')
+        process.exit(1)
+      }
       await writeFile(target, source)
       made.push(target)
     }

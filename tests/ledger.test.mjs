@@ -332,7 +332,7 @@ test('a parked task can say why, and saying why does not unpark it', () => {
 /* The USER-VISIBLE half of parked_because had no test: the data model was proven, the printed
    line was not, and a verifier deleted the console.log with the suite still green.
 
-   Two things this test must not do, both learned the hard way:
+   Three things this test must not do, each learned by shipping it wrong:
 
    1. It must not write a ledger.yml into the repo. The first version did, and skipped itself
       whenever one already existed - which is every student repo past Lesson 15, including the
@@ -342,10 +342,14 @@ test('a parked task can say why, and saying why does not unpark it', () => {
       the real binary is pointed at it.
 
    2. It must not just grep stdout for the reason. Moving the print out of the per-task loop and
-      dumping every reason at the top of the report passed that check while the parked row
-      displayed with no reason - the exact defect. The reason has to be ON the line under its
-      task. */
-test('the parked reason is printed under the task it belongs to', async () => {
+      dumping every reason at the top passed that check while the parked row displayed bare -
+      the exact defect. The reason has to be ON the line under its task.
+
+   3. The fixture needs TWO parked tasks. With one, "the reason under this row" and "the first
+      reason in this bucket" are indistinguishable, and a mutation printing one task's reason
+      under every parked row passed green while silently misattributing it and dropping the
+      other. Two distinct markers is what makes attachment checkable at all. */
+test('each parked task is printed with its own reason, not the bucket\'s', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ledger-parked-'))
   try {
     await writeFile(join(dir, 'ledger.yml'), [
@@ -364,7 +368,14 @@ test('the parked reason is printed under the task it belongs to', async () => {
       '    times_per_week: 3',
       '    minutes_each: 25',
       '    confirmed: twice',
-      '    parked_because: "ZZ-MARKER the upload IS the submission"',
+      '    parked_because: "MARKER-ONE the upload IS the submission"',
+      '  - task: Filing the site photos',
+      '    words: "they sit on my phone until someone asks"',
+      '    who: me',
+      '    times_per_week: 2',
+      '    minutes_each: 20',
+      '    confirmed: twice',
+      '    parked_because: "MARKER-TWO nobody has ever opened the folder"',
       ''
     ].join('\n'))
 
@@ -372,20 +383,26 @@ test('the parked reason is printed under the task it belongs to', async () => {
     const lines = stdout.split('\n').map((line) => line.trimEnd())
 
     const parkedHeading = lines.findIndex((line) => line.startsWith('Parked:'))
-    assert.ok(parkedHeading !== -1, 'the task with no handover should be parked')
+    assert.ok(parkedHeading !== -1, 'the tasks with no handover should be parked')
 
-    const taskRow = lines.findIndex((line, i) => i > parkedHeading && line.includes('Portal uploads'))
-    assert.ok(taskRow !== -1, 'the parked task should be listed under Parked')
+    const rowFor = (task) => {
+      const i = lines.findIndex((line, n) => n > parkedHeading && line.includes(task))
+      assert.ok(i !== -1, `${task} should be listed under Parked`)
+      return i
+    }
 
-    assert.match(
-      lines[taskRow + 1] ?? '',
-      /ZZ-MARKER the upload IS the submission/,
-      'the reason must sit directly under its own task row - printing it anywhere else leaves the parked row bare, which is the defect'
-    )
+    // each row carries ITS OWN reason on the line beneath it
+    assert.match(lines[rowFor('Portal uploads') + 1] ?? '', /MARKER-ONE/)
+    assert.match(lines[rowFor('Filing the site photos') + 1] ?? '', /MARKER-TWO/)
 
-    // and the task that WAS handed off must not acquire a reason it never had
+    // and not the other one's - printing the bucket's first reason under every row is the
+    // mutation that passed a single-task fixture
+    assert.doesNotMatch(lines[rowFor('Portal uploads') + 1] ?? '', /MARKER-TWO/)
+    assert.doesNotMatch(lines[rowFor('Filing the site photos') + 1] ?? '', /MARKER-ONE/)
+
+    // a task that WAS handed off must not acquire a reason it never had
     const readyRow = lines.findIndex((line) => line.includes('Chasing subcontractor quotes'))
-    assert.doesNotMatch(lines[readyRow + 1] ?? '', /ZZ-MARKER/)
+    assert.doesNotMatch(lines[readyRow + 1] ?? '', /MARKER-/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
