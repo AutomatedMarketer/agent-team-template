@@ -1,4 +1,12 @@
 import test from 'node:test'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { writeFile, rm } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const run = promisify(execFile)
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 import assert from 'node:assert/strict'
 import {
   deriveTask,
@@ -113,6 +121,21 @@ test('an empty ledger totals zero rather than throwing', () => {
 
 test('a sound ledger has no problems', () => {
   assert.deepEqual(validateLedger(ledgerOf([chasing, outreach])), [])
+})
+
+/* parked_because was added so a considered "nobody, and here is why" had somewhere to live.
+   Nothing bound it to the parked bucket, so a row could name who acts on the output AND say
+   why nobody does - and print its park reason under "Ready". */
+test('a row cannot both name a handover and say why it is parked', () => {
+  const contradictory = { ...chasing, hands_off: 'Priya reads it', parked_because: 'nobody acts on it' }
+  const problems = validateLedger(ledgerOf([contradictory]))
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /it cannot be both/i)
+})
+
+test('parked_because alone, with no handover, is sound', () => {
+  const parked = { ...chasing, hands_off: '', parked_because: 'the upload IS the submission' }
+  assert.deepEqual(validateLedger(ledgerOf([parked])), [])
 })
 
 test('a task with no verbatim quote is refused - rule 2, no citation no proposal', () => {
@@ -303,4 +326,42 @@ test('a parked task can say why, and saying why does not unpark it', () => {
   assert.equal(summary.candidates.length, 0)
   assert.equal(summary.parked[0].parked_because, parked.parked_because)
   assert.deepEqual(validateLedger(ledgerOf([parked])), [], 'the field must not be rejected')
+})
+
+/* The USER-VISIBLE half of parked_because had no test: the data model was proven, the printed
+   line was not, and a verifier deleted the console.log with the suite still green. The commit
+   message said "mutation-proven" while the half a reader actually sees was the untested half -
+   the same class this project keeps rediscovering, one layer down.
+
+   This runs the real command against a scratch ledger rather than asserting on a string. */
+test('the parked reason is actually printed, not just stored', async (t) => {
+  const scratch = join(repoRoot, 'ledger.yml')
+  const { existsSync } = await import('node:fs')
+  if (existsSync(scratch)) {
+    t.skip('a real ledger.yml is present - not overwriting it')
+    return
+  }
+  await writeFile(scratch, [
+    'owner_type: job',
+    'tasks:',
+    '  - task: Portal uploads',
+    '    words: "four portals, four ways to fail"',
+    '    who: me',
+    '    times_per_week: 3',
+    '    minutes_each: 25',
+    '    confirmed: twice',
+    '    parked_because: "ZZ-MARKER the upload IS the submission"',
+    ''
+  ].join('\n'))
+  try {
+    const { stdout } = await run(process.execPath, ['scripts/check-ledger.mjs'], { cwd: repoRoot })
+    assert.match(stdout, /Parked:/, 'the task should be parked')
+    assert.match(
+      stdout,
+      /ZZ-MARKER the upload IS the submission/,
+      'the park reason must reach the screen - storing it and never printing it is the defect this fixes'
+    )
+  } finally {
+    await rm(scratch, { force: true })
+  }
 })

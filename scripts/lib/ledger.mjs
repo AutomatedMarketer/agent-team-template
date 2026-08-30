@@ -152,6 +152,15 @@ export function validateLedger(ledger) {
 
     // Rule 2, at its source. A task with no quote cannot produce a proposal that cites one,
     // so it is refused here rather than three steps downstream.
+    // A row cannot both name who acts on the output and say why nobody does. The field was
+    // added for the parked bucket and nothing bound it there, so a self-contradicting row passed
+    // and printed its park reason under "Ready".
+    const parkedBecause = typeof task?.parked_because === 'string' ? task.parked_because.trim() : ''
+    const handsOffText = typeof task?.hands_off === 'string' ? task.hands_off.trim() : ''
+    if (parkedBecause && handsOffText && !isUnfilled(handsOffText)) {
+      at('says who acts on the output and also says why it is parked - it cannot be both, so pick one')
+    }
+
     const words = typeof task?.words === 'string' ? task.words.trim() : ''
     if (!words) at("needs the owner's own words about it, quoted, not a summary")
 
