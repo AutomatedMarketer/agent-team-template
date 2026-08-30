@@ -4,6 +4,7 @@ import path from 'node:path'
 import { parseFrontmatter } from './frontmatter.mjs'
 import { parseSimpleYaml } from './yaml-lite.mjs'
 import { isUnfilled } from './ledger.mjs'
+import { notInUseAgents } from './knowledge.mjs'
 
 // The catalogue is the list of things this team can actually do: every agent, every skill, and
 // every workflow, each with the plain-language description its own file already carries.
@@ -124,9 +125,28 @@ function fromYaml(file) {
 
 // Takes already-read files so the parsing is testable without a filesystem, the same way
 // tiles.mjs separates its shaping from its loading.
-export function buildCatalogue(files) {
+// A workflow's owner decides whether it can run at all, so it is read here as well as by the
+// workflow validator. `check:arming` found the live case: two of the nine shipped workflows are
+// owned by `sales` and `customer-service`, so an owner who switches those off is left with two
+// jobs that validate clean and never fire.
+function ownerOf(file) {
+  if (file.kind !== 'workflow') return ''
+  try {
+    return textOf((parseSimpleYaml(file.source) ?? {}).owner)
+  } catch {
+    return ''
+  }
+}
+
+// `notInUse` is a set of agent slugs. Items belonging to a switched-off agent stay in the
+// catalogue and stay on shortlists - the engine is deliberately generous about what it SHOWS, and
+// hiding this one would quietly rerank the shortlist with no way for the owner to tell. What the
+// flag buys is that `validateProposals` can refuse it, which is where every other "you may not
+// cite that" rule already lives.
+export function buildCatalogue(files, notInUse = new Set()) {
   return files.map((file) => {
     const read = file.kind === 'workflow' ? fromYaml(file) : fromMarkdown(file)
+    const owner = ownerOf(file)
     return {
       id: itemId(file.kind, file.slug),
       kind: file.kind,
@@ -134,6 +154,11 @@ export function buildCatalogue(files) {
       name: read.name,
       description: read.description,
       audience: read.audience,
+      inUse: !(
+        (file.kind === 'agent' && notInUse.has(file.slug)) ||
+        (file.kind === 'workflow' && owner !== '' && notInUse.has(owner))
+      ),
+      owner,
       path: file.path
     }
   })
@@ -175,7 +200,7 @@ export async function loadCatalogue(root = repoRoot) {
     files.push({ kind: 'workflow', slug: entry.slice(0, -4), path: relative, source: await readFile(path.join(root, relative), 'utf8') })
   }
 
-  return buildCatalogue(files)
+  return buildCatalogue(files, await notInUseAgents(root))
 }
 
 // Returns human-readable problems, the same contract as validateLedger and validateWorkflow.

@@ -12,10 +12,9 @@
 // Until this existed, validateArming was imported by exactly one file: its own test. A rule only
 // the test suite can run is a rule students never see.
 
-import { readFile } from 'node:fs/promises'
 import { loadWorkflows } from './lib/workflows.mjs'
 import { loadRoutineSnapshot, reconcile } from './lib/arm.mjs'
-import { notInUse } from './lib/knowledge.mjs'
+import { notInUseAgents } from './lib/knowledge.mjs'
 
 const workflows = await loadWorkflows()
 const snapshot = await loadRoutineSnapshot()
@@ -109,15 +108,9 @@ if (result.problems.length) {
 // usually do not apply to someone who works for the business rather than owning it. So this is
 // not a hypothetical about files people write by hand; it is the state a fresh clone is already
 // in the moment they answer those two knowledge files honestly.
-const KNOWLEDGE = {
-  sales: 'agents/sales/knowledge/offer-sheet.md',
-  'customer-service': 'agents/customer-service/knowledge/faq.md'
-}
-const readOrNull = async (path) => readFile(path, 'utf8').catch(() => null)
-const offAgents = []
-for (const [slug, path] of Object.entries(KNOWLEDGE)) {
-  if (notInUse(await readOrNull(path))) offAgents.push(slug)
-}
+// The map used to live here as a second copy. It is now in knowledge.mjs, which the catalogue
+// reads too, so this guard and the matcher cannot disagree about which agents are switched off.
+const offAgents = [...(await notInUseAgents(process.cwd()))]
 // loadWorkflows returns { slug, path, data } - the owner is on `data`, not the row. Writing
 // row.owner instead gave every workflow an owner of undefined, so this guard matched nothing and
 // printed nothing, which reads exactly like a clean repo. Caught by testing it against a repo

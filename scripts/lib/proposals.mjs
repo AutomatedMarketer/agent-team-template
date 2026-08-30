@@ -33,6 +33,24 @@ function textOf(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+// A key written with nothing under it - `proposals:` on its own line - is how anyone would write
+// "none of these". yaml-lite parses that to an EMPTY OBJECT, not to a list and not to the empty
+// string. Both guards below used to test for the empty string, on the strength of a comment that
+// said so, and neither had ever been run against the file it described. The result: an employee
+// whose every task correctly declined could not write a valid proposals.yml at all, and was told
+// `proposals.yml needs a proposals: list, even if it is empty` by the very check refusing his
+// empty one. An object with keys in it is still a real mistake and still gets reported.
+// `undefined` deliberately returns null, not []. A key written empty and a key not written at all
+// are different statements: `proposals:` on its own line says "none of them", and no `proposals:`
+// key at all says the file is not a proposals file. Only the caller knows which of those is legal
+// for its key - absent `gaps:` is fine, absent `proposals:` is not.
+export function listOrEmpty(value) {
+  if (value === null || value === '') return []
+  if (Array.isArray(value)) return value
+  if (value !== null && typeof value === 'object' && Object.keys(value).length === 0) return []
+  return null
+}
+
 // Short enough to write honestly, long enough that a tautology does not fit.
 export const MIN_REASON_LENGTH = 25
 
@@ -65,18 +83,16 @@ export function validateProposals(written, ledger, catalogue) {
   const shortlistFor = new Map(derived.shortlists.map((entry) => [entry.task, entry]))
   const gapTasks = new Set(derived.gaps.map((gap) => gap.task))
 
-  const rows = Array.isArray(written?.proposals) ? written.proposals : null
+  const rows = listOrEmpty(written?.proposals)
   if (!rows) {
     problems.push('proposals.yml needs a `proposals:` list, even if it is empty')
     return problems
   }
 
-  // `gaps:` with nothing under it is the natural way to write "I declined nothing", and it parses
-  // to an empty string rather than a list. Guarded like `proposals:` because a Node stack trace is
-  // not a validation message, and the person who sees it wrote a reasonable file.
-  const gapRows = written?.gaps === undefined || written?.gaps === '' || written?.gaps === null
-    ? []
-    : (Array.isArray(written.gaps) ? written.gaps : null)
+  // `gaps:` with nothing under it is the natural way to write "I declined nothing". Guarded like
+  // `proposals:` because a Node stack trace is not a validation message, and the person who sees
+  // it wrote a reasonable file.
+  const gapRows = written?.gaps === undefined ? [] : listOrEmpty(written.gaps)
   if (!gapRows) {
     problems.push('`gaps:` must be a list, or left out entirely')
     return problems
@@ -133,6 +149,24 @@ export function validateProposals(written, ledger, catalogue) {
     // deliberately flat and its own comment says richer nesting means a config file is drifting
     // away from something a person can read at a glance. A side effect worth having: the item
     // and its citation are now the SAME field, so they cannot disagree by construction.
+    // An item can exist, be on the shortlist, and still be unable to do a single thing - because
+    // the owner said so themselves, in the agent's own knowledge file. This was the last place the
+    // switched-off state was not known: `agent:customer-service` came back TOP-ranked for a bid
+    // coordinator whose faq.md says he does not deal with customers, and the file passed, printing
+    // "names something that already exists" underneath it. Existing is not the claim being made.
+    //
+    // Refused here rather than filtered out of the catalogue, so the owner still sees that the
+    // thing which would do this job is one they switched off. That is worth knowing; it is just
+    // not a proposal.
+    const chosen = entry.candidates.find((candidate) => candidate.id === textOf(row.item))
+    if (chosen && chosen.inUse === false) {
+      at(
+        chosen.owner
+          ? `names ${chosen.id}, which is owned by ${chosen.owner} — an agent you have said is not in use, so this job would never run. Decline it into gaps, or give the workflow an owner you do use`
+          : `names ${chosen.id}, which you have said is not in use — its own knowledge file says this agent does not apply to you, so it cannot answer this. Decline it into gaps`
+      )
+    }
+
     const cited = citationsOf(row)
     if (textOf(cited.words) !== textOf(task.words)) {
       at('quotes something other than the owner\'s words — the quote is verbatim or it is not a quote')
@@ -267,7 +301,7 @@ export function validateProposals(written, ledger, catalogue) {
 // to without re-deriving it themselves.
 export function summarizeProposals(written, ledger, catalogue) {
   const derived = match(ledger, catalogue)
-  const rows = Array.isArray(written?.proposals) ? written.proposals : []
+  const rows = (written?.proposals === undefined ? [] : listOrEmpty(written.proposals)) ?? []
   const hourlyValue = ledger?.hourly_value
 
   let hoursPerWeek = 0
@@ -284,7 +318,7 @@ export function summarizeProposals(written, ledger, catalogue) {
   // derived gaps alone reported zero while the file plainly carried two.
   return {
     proposed: rows.length,
-    gaps: (written?.gaps ?? []).length,
+    gaps: ((written?.gaps === undefined ? [] : listOrEmpty(written.gaps)) ?? []).length,
     notes: derived.notes.length,
     parked: derived.parked.length,
     hoursPerWeek,

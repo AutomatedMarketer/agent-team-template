@@ -382,11 +382,111 @@ test('a parked task cannot be promoted into the build list by declining it', () 
 })
 
 test('a bare gaps: key is a validation message, not a stack trace', () => {
-  for (const value of ['', null, 'none', 42]) {
+  // This used to loop over ['', null, 'none', 42] and assert every one produced a problem. It
+  // passed, but never for its own reason: '' and null were ALREADY legal, and the problem it saw
+  // was the undeclined shortlist sitting underneath. Split apart, so each half means something.
+  for (const value of ['none', 42]) {
     const problems = validateProposals({ proposals: [], gaps: value }, ledgerOf([newsletter]), catalogue)
     assert.ok(Array.isArray(problems), `gaps: ${JSON.stringify(value)} should not throw`)
-    assert.ok(problems.length > 0)
+    assert.ok(
+      problems.some((problem) => /`gaps:` must be a list/.test(problem)),
+      `gaps: ${JSON.stringify(value)} should be reported as not a list`
+    )
   }
+})
+
+test('gaps written empty is "I declined nothing", not a malformed file', () => {
+  // yaml-lite parses a key with nothing under it to an EMPTY OBJECT. The guard tested for the
+  // empty string instead, on the strength of a comment that said so and had never been run
+  // against the parser, so `gaps:` on its own line was rejected as "must be a list".
+  for (const value of [{}, '', null]) {
+    const problems = validateProposals(
+      { proposals: soundFile.proposals, gaps: value },
+      ledgerOf([newsletter]),
+      catalogue
+    )
+    assert.deepEqual(problems, [], `gaps: ${JSON.stringify(value)} should be an empty decline list`)
+  }
+})
+
+test('a week where everything correctly declines is a valid file, not a dead end', () => {
+  // The employee case, and the one that dead-ended: an owner with no proposals at all. Their
+  // shortlists were read and every one was refused, which the lesson calls the correct output.
+  // `proposals:` written empty parsed to {}, so the check refused the file with the words
+  // "needs a `proposals:` list, even if it is empty" - over a file whose list was empty.
+  const file = {
+    proposals: {},
+    gaps: [
+      {
+        task: 'Writing the newsletter',
+        question: 'Offered agent:content, which writes in the owner\'s own voice; this newsletter is my employer\'s and I only assemble it. Nothing here does that - should it?'
+      }
+    ]
+  }
+  assert.deepEqual(validateProposals(file, ledgerOf([newsletter]), catalogue), [])
+  assert.equal(summarizeProposals(file, ledgerOf([newsletter]), catalogue).proposed, 0)
+})
+
+test('a file with no proposals key at all is still a problem', () => {
+  // The other half of the same change, and the reason `undefined` is not folded in with `{}`:
+  // a key written empty says "none of them", and no key at all says this is not a proposals file.
+  const problems = validateProposals({ gaps: [] }, ledgerOf([newsletter]), catalogue)
+  assert.ok(problems.some((problem) => /needs a `proposals:` list/.test(problem)))
+})
+
+/* ---------- an agent the owner switched off is not an answer -------------------------------- */
+
+test('a proposal naming an agent the owner is not using is refused', () => {
+  // Existing, describable, owner-facing, and top-ranked - and it cannot do a thing, because the
+  // owner wrote in its own knowledge file that it does not apply to them. Every other check
+  // passed it, and the reporter printed "names something that already exists" underneath.
+  const offCatalogue = catalogue.map((item) =>
+    item.id === 'agent:content' ? { ...item, inUse: false } : item
+  )
+  const problems = validateProposals(soundFile, ledgerOf([newsletter]), offCatalogue)
+  assert.ok(
+    problems.some((problem) => /agent:content, which you have said is not in use/.test(problem)),
+    problems.join('\n')
+  )
+})
+
+test('a proposal naming a workflow owned by a switched-off agent is refused', () => {
+  const withWorkflow = [
+    ...catalogue,
+    {
+      id: 'workflow:newsletter-run',
+      kind: 'workflow',
+      slug: 'newsletter-run',
+      name: 'Newsletter Run',
+      audience: 'owner',
+      inUse: false,
+      owner: 'content',
+      description: 'Writes the newsletter draft and leaves it for you to read before it goes out.',
+      path: 'workflows/newsletter-run.yml'
+    }
+  ]
+  const file = {
+    proposals: [
+      {
+        ...soundFile.proposals[0],
+        item: 'workflow:newsletter-run',
+        why: 'Beat agent:content, which drafts one piece; this runs the whole newsletter job end to end.'
+      }
+    ],
+    gaps: []
+  }
+  const problems = validateProposals(file, ledgerOf([newsletter]), withWorkflow)
+  assert.ok(
+    problems.some((problem) => /workflow:newsletter-run, which is owned by content/.test(problem)),
+    problems.join('\n')
+  )
+})
+
+test('an item with no inUse flag at all is still proposable', () => {
+  // The flag is set by loadCatalogue. A hand-built catalogue - every other test in this file, and
+  // any caller written before the flag existed - must not have everything silently refused.
+  assert.ok(catalogue.every((item) => item.inUse === undefined))
+  assert.deepEqual(validateProposals(soundFile, ledgerOf([newsletter]), catalogue), [])
 })
 
 test('gaps left out entirely is fine when there is nothing to decline', () => {

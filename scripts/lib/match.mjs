@@ -274,6 +274,10 @@ export function shortlist(task, catalogue, index, limit = SHORTLIST_LIMIT) {
       kind: item.kind,
       path: item.path,
       description: item.description,
+      // Carried, not filtered on. A switched-off agent still gets SHOWN, because removing it here
+      // would rerank the shortlist with nothing saying why. validateProposals refuses it instead.
+      inUse: item.inUse !== false,
+      owner: item.owner ?? '',
       score: measured.score,
       shared: measured.shared,
       words: measured.words
