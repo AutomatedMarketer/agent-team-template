@@ -31,6 +31,28 @@ export function notInUse(knowledgeBody) {
   return NOT_IN_USE.test(knowledgeBody)
 }
 
+// A knowledge file is in one of exactly two good states, and a test that demands the first one
+// fails every repo that reached the second.
+//
+//   SHIPPED   - still carries fill markers, so /onboard and /audit can see what is blank
+//   ANSWERED  - the markers are gone and there is prose under a heading
+//
+// Both files ship with instructions telling the owner to "delete the rest of the file's markers,
+// and you are done". The test asserting the markers are present therefore contradicted the file's
+// own text, and passed only because the TEMPLATE's copy is never the one that gets answered. In a
+// student's repo it failed permanently from the moment they followed lesson 9 or 10 - under a
+// README that says "If this fails, the clone is broken".
+export function answered(body) {
+  const text = String(body ?? '')
+  if (fillMarkers(text).length) return false
+  return text
+    .split('\n')
+    .some((line) => {
+      const trimmed = line.trim()
+      return trimmed.length > 0 && !trimmed.startsWith('#')
+    })
+}
+
 // The slugs of the agents this owner has said, in their own knowledge file, do not apply to them.
 // A missing file is not a refusal: a repo that never had one is not the same as a repo where
 // somebody wrote "I do not sell".
