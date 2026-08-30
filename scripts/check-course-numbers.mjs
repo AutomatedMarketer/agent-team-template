@@ -309,7 +309,9 @@ for (const file of FIRE_DOCS) {
   // Naming the slug ANYWHERE in the file covers that file - a reader who is told is told.
   // A file that never names it has to defer in the passage itself. File-level deferral was
   // the first attempt and it was wrong: RUN_OF_SHOW.md lists 12_COCKPIT.md as a SOP, so it
-  // "mentions Lesson 12" three hundred lines from the wiring it instructs, and sailed past.
+  // "mentions Lesson 12" far from the wiring it instructs, and sailed past. (This comment said
+  // "three hundred lines" until a walkthrough checked it: RUN_OF_SHOW.md is 362 lines, names
+  // 12_COCKPIT.md at :257, wires at :264 and diagnoses at :345 - 7 lines and 88, not 300.)
   if (body.includes('task-intake')) {
     ok(`${file}: names task-intake alongside FIRE_TRIGGERS`)
     continue
