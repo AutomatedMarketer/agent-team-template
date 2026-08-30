@@ -486,12 +486,15 @@ const withExamples = async (run) => {
       // sitting in the repo it grades the lesson against THEIR week and reports the lesson
       // wrong. That is a false FAIL on a correct lesson, and it is the same class of bug as
       // writing a fixture into the repo under test - silently skipping is what made it silent.
+      // Loudly, but NOT with process.exit() - that sits inside this try and would skip the
+      // finally below, stranding a ledger.yml the guard itself wrote when proposals.yml is the
+      // file that blocked it. A guard against a stray file in the repo root must not leave one.
+      // fail() accumulates and the script exits 1 after cleanup has run.
       if (await readFile(target, 'utf8').then(() => true).catch(() => false)) {
-        console.error(`FAIL cannot grade sample blocks: a real ${dst} is in the repo root.`)
-        console.error(`     This guard needs ${src} to be the file the command reads. Move`)
-        console.error(`     ${dst} aside and re-run - grading a lesson against your own data`)
-        console.error('     reports the lesson broken when it is not.')
-        process.exit(1)
+        fail(`cannot grade sample blocks: a real ${dst} is in the repo root. This guard needs ` +
+             `${src} to be the file the command reads - move ${dst} aside and re-run. Grading a ` +
+             'lesson against your own data reports the lesson broken when it is not.')
+        return null
       }
       await writeFile(target, source)
       made.push(target)
@@ -523,6 +526,8 @@ for (const spec of SAMPLE_BLOCKS) {
       { cwd: templateRoot }).catch((error) => ({ stdout: error.stdout ?? '' }))
     return (result.stdout ?? '').split(/\r?\n/).map((line) => line.trimEnd())
   })
+
+  if (printed === null) continue   // withExamples refused; the reason is already in problems
 
   const missing = []
   for (const raw of sample.split(/\r?\n/)) {

@@ -345,10 +345,13 @@ test('a parked task can say why, and saying why does not unpark it', () => {
       dumping every reason at the top passed that check while the parked row displayed bare -
       the exact defect. The reason has to be ON the line under its task.
 
-   3. The fixture needs TWO parked tasks. With one, "the reason under this row" and "the first
+   3. The fixture needs THREE parked tasks: two with distinct reasons, one with none.
+      With one, "the reason under this row" and "the first
       reason in this bucket" are indistinguishable, and a mutation printing one task's reason
       under every parked row passed green while silently misattributing it and dropping the
-      other. Two distinct markers is what makes attachment checkable at all. */
+      other. And with every parked row carrying a reason, "print mine" and "print the last
+      one I saw" are the same program - a sticky carry-forward passed until a reasonless
+      row was added. The discriminating case is the one the fixture keeps omitting. */
 test('each parked task is printed with its own reason, not the bucket\'s', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ledger-parked-'))
   try {
@@ -376,6 +379,12 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
       '    minutes_each: 20',
       '    confirmed: twice',
       '    parked_because: "MARKER-TWO nobody has ever opened the folder"',
+      '  - task: Tidying the shared drive',
+      '    words: "it just gets messy"',
+      '    who: me',
+      '    times_per_week: 1',
+      '    minutes_each: 30',
+      '    confirmed: twice',
       ''
     ].join('\n'))
 
@@ -399,6 +408,13 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
     // mutation that passed a single-task fixture
     assert.doesNotMatch(lines[rowFor('Portal uploads') + 1] ?? '', /MARKER-TWO/)
     assert.doesNotMatch(lines[rowFor('Filing the site photos') + 1] ?? '', /MARKER-ONE/)
+
+    // A parked task with NO reason must not wear someone else's. This is the case that makes
+    // the fixture discriminating: with every parked row carrying a reason, "print mine" and
+    // "print the last one I saw" are the same program, and a sticky carry-forward passes. The
+    // field is optional by design, so a mix of reasoned and unreasoned parked rows is the
+    // normal ledger - and it was the one arrangement the fixture did not contain.
+    assert.doesNotMatch(lines[rowFor('Tidying the shared drive') + 1] ?? '', /MARKER-/)
 
     // a task that WAS handed off must not acquire a reason it never had
     const readyRow = lines.findIndex((line) => line.includes('Chasing subcontractor quotes'))
