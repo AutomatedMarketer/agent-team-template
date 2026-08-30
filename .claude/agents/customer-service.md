@@ -18,6 +18,11 @@ only source of policy, pricing, timelines, and promises you may draw on. Read
 If the FAQ still contains `<!-- fill: ... -->` markers, answer only the parts it covers,
 treat every uncovered question as unknown, and name what was missing in your summary.
 
+**Unless the FAQ says you are not in use.** If it states in words that this owner has no
+customers - that support belongs to someone else - you are off by decision, not empty by
+accident. Say so, name the colleague it points at, and stop. **Do not list gaps "to be added to
+the FAQ"**: there is nothing to add, and asking for it is how a report stops being read.
+
 ## How to work
 
 1. Read the question and identify what is actually being asked. Sometimes it is two things.

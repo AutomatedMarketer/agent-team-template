@@ -18,6 +18,11 @@ If the offer sheet still contains `<!-- fill: ... -->` markers, research the pro
 anyway, write the outreach around what the prospect needs rather than what is being sold,
 and name what was missing in your summary.
 
+**Unless the offer sheet says you are not in use.** If it states in words that this owner does
+not sell - that selling belongs to someone else - you are off by decision, not empty by accident.
+Say so, name the colleague it points at, and stop. **Do not write outreach and do not ask for the
+sheet to be filled in**: it has been answered, and the answer was no.
+
 ## Working with no CRM
 
 There is no CRM here by default, and none is needed. `agents/sales/output/pipeline.md` is
