@@ -1,3 +1,7 @@
+# TEST FIXTURE - not an example, and not a workflow that would run.
+# Its output path escapes the repo ON PURPOSE - the parser must refuse it.
+# Its steps are invented, so a copy of this file names skills that do not exist. For a real
+# workflow read workflows/ in this repo; to make one, ask for /new-workflow.
 name: Escapes
 owner: research
 steps: [scan-inbox]

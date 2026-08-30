@@ -181,3 +181,58 @@ test('the nine pre-loaded workflows ship, four for the owner and five for the te
     assert.ok(owners.has(agent), `no shipped workflow is owned by ${agent}`)
   }
 })
+
+/* A well-formed fixture named `valid` is a loaded gun for documentation. Anyone looking for
+   "a valid workflow to show someone" finds tests/fixtures/workflows/valid.yml first: it parses,
+   it reads like a real job, and its steps - pull-calendar, scan-inbox, check-pipeline,
+   write-brief - are invented. A copy of it names four skills that do not exist.
+
+   The rule is not "these files must be realistic". It is that a file whose job is to be parsed
+   has to SAY so, on its first line, where somebody skimming will see it before they copy it. */
+test('every workflow fixture says it is a fixture, on its first line', async () => {
+  const { readdir, readFile } = await import('node:fs/promises')
+  const { fromRoot } = await import('./helpers/repo.mjs')
+  const dir = 'tests/fixtures/workflows'
+  const files = (await readdir(fromRoot(dir))).filter((file) => file.endsWith('.yml'))
+  assert.ok(files.length > 0, 'no workflow fixtures found - this guard has stopped guarding')
+  for (const file of files) {
+    const body = await readFile(fromRoot(dir, file), 'utf8')
+    const [first] = body.split('\n')
+    assert.match(first, /^# TEST FIXTURE\b/, `${dir}/${file} does not open by saying it is a fixture`)
+    assert.match(body, /steps are invented/, `${dir}/${file} must say why copying it would not work`)
+    // The redirect is the part that actually helps somebody who came here looking for an example.
+    // Pinned, because without it the banner can be cut to two words and still pass.
+    assert.match(body, /workflows\/ in this repo/, `${dir}/${file} must point at the real workflows`)
+    assert.match(body, /\/new-workflow/, `${dir}/${file} must say how to make a real one`)
+  }
+})
+
+// Every one of those banners claims the steps are invented. That claim is only worth printing
+// while it is true, so it is checked across all of them, not just the one the finding named.
+// If somebody makes a step real, the warning becomes a lie and should be rewritten, not deleted.
+//
+// Steps come from parseWorkflow, not a regex. A regex for `steps: [a, b]` silently skipped the
+// two fixtures that exist precisely BECAUSE they use the other two step forms - dashed-steps.yml
+// and skill-map-steps.yml - so the guard covered four of six and looked like it covered all.
+test('the parser fixtures name skills this repo does not have', async () => {
+  const { readdir, readFile } = await import('node:fs/promises')
+  const { fromRoot } = await import('./helpers/repo.mjs')
+  const skills = new Set(
+    (await readdir(fromRoot('.claude/skills'), { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  )
+  const dir = 'tests/fixtures/workflows'
+  const files = (await readdir(fromRoot(dir))).filter((file) => file.endsWith('.yml'))
+  let checked = 0
+  for (const file of files) {
+    const data = parseWorkflow(await readFile(fromRoot(dir, file), 'utf8'))
+    for (const step of normaliseSteps(data.steps ?? [])) {
+      if (typeof step !== 'string' || !step) continue
+      checked += 1
+      assert.ok(!skills.has(step),
+        `${dir}/${file}: step "${step}" is a real skill now - the banner saying its steps are invented is no longer true`)
+    }
+  }
+  assert.ok(checked >= 10, `only ${checked} fixture steps were checked across ${files.length} files - the guard is missing a step form`)
+})

@@ -1,4 +1,7 @@
-# The exact step form the design spec shows: each step as `- skill: name`.
+# TEST FIXTURE - not an example, and not a workflow that would run.
+# It is the exact step form the design spec shows: each step as `- skill: name`.
+# Its steps are invented, so a copy of this file names skills that do not exist. For a real
+# workflow read workflows/ in this repo; to make one, ask for /new-workflow.
 name: Monday Brief
 owner: research
 steps:

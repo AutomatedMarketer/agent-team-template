@@ -1,3 +1,7 @@
+# TEST FIXTURE - not an example, and not a workflow that would run.
+# It is malformed ON PURPOSE - the parser must refuse it.
+# Its steps are invented, so a copy of this file names skills that do not exist. For a real
+# workflow read workflows/ in this repo; to make one, ask for /new-workflow.
 name: ""
 owner: research
 steps: [scan-inbox, scan-inbox]

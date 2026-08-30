@@ -597,6 +597,50 @@ if (armLesson) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A workflow file a lesson tells you to open has to be in the repo it tells you to open it in.
+// Two lessons said `read workflows/monday-brief.yml`. Nine workflows ship and that was never one
+// of them - the only files of that name anywhere were tests/fixtures/workflows/valid.yml and
+// skill-map-steps.yml, both parse-only fixtures whose steps are invented. A reader who went
+// looking would have found one and copied a workflow naming skills this repo does not have.
+//
+// A placeholder is fine, and is what the lessons use elsewhere - `workflows/<your-slug>.yml` is
+// honest about being yours. A specific name that does not exist is not.
+//
+// FIRE_DOCS, not `all`. The first version of this scanned only NN_*.md, which is the same
+// narrowing the FIRE_TRIGGERS check twenty lines up had already been widened OUT of, for the
+// same reason and with a comment saying so. The run of show is the script somebody teaches from.
+const shippedWorkflows = new Set(
+  (await readdir(path.join(templateRoot, 'workflows')).catch(() => []))
+    .filter((entry) => /\.ya?ml$/.test(entry))
+)
+if (shippedWorkflows.size === 0) {
+  fail('could not read workflows/ in the template, so lesson references to workflow files cannot be checked')
+} else {
+  let dangling = 0
+  const seen = new Set()
+  for (const file of FIRE_DOCS) {
+    const body = await read(file).catch(() => null)
+    if (body === null) continue
+    // Scanned twice: as written, and with line breaks closed up, because a path that wraps
+    // across two lines is still a path a reader will follow.
+    for (const text of [body, body.replace(/\n[ \t]*/g, '')]) {
+      for (const [, named] of text.matchAll(/workflows\/([A-Za-z0-9._<>{}-]+\.ya?ml)/g)) {
+        if (/[<{]/.test(named)) continue
+        if (shippedWorkflows.has(named)) continue
+        const key = `${file}:${named}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        dangling += 1
+        fail(`${file}: names workflows/${named}, which the template does not ship`)
+      }
+    }
+  }
+  if (dangling === 0) {
+    ok('every workflow file a lesson names is one the repo actually ships')
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // The guard above is scoped to ONE lesson, and check:arming's output is quoted in more than one.
 // Renaming its clockless count line broke a quote in 10_CUSTOMER_SERVICE.md and both course
 // checks stayed green, because nothing looked outside _ARM_YOUR_JOBS.md. That is the second time
