@@ -4,6 +4,11 @@
 # Owned by customer-service because every agent on the team owns one shipped workflow, and this
 # is the one left for it. The review is the orchestrator's job by nature; the ownership line is
 # about giving each worker something real on day one, not about who the work belongs to.
+#
+# So if customer-service is NOT IN USE for you - if agents/customer-service/knowledge/faq.md says
+# you have no customers - change this to `owner: orchestrator` rather than leaving the whole-team
+# review owned by an agent you switched off. Nothing else about the workflow changes, and the
+# line above is the reason: the owner here was always a day-one convenience.
 name: Weekly Review
 audience: team
 owner: customer-service
