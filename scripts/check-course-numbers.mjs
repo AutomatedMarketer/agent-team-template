@@ -597,6 +597,79 @@ if (armLesson) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A slash command the course tells somebody to type has to exist. The pairing runs across three
+// repos - the lessons here, the plugin's skills in agent-team-os, and this template's own skills -
+// and nothing checked it. Renaming a skill in the plugin would break 41 references to /arm and no
+// test anywhere would go red. Same shape as the FIRE_TRIGGERS defect, unguarded for the same
+// reason: the two halves live in different repos.
+//
+// Measured while writing this, over FIRE_DOCS: 10 commands, 146 references. The walkthrough said
+// "124" in two places and "132" in a third and admitted the number had been copied rather than
+// re-counted; its one checkable figure, 41 for /arm, is exactly right.
+//
+// Four things are deliberately NOT treated as commands, because each produced a false positive:
+//   <!-- /prompt-block -->      a marker comment, not something anybody types
+//   github.com/<you>/repo       a URL
+//   `agents/<name>/output/`     a path - the > of the placeholder reads as a blockquote marker
+//   /plugin, /schedule          Claude Code's own commands, not this course's to ship
+const CLAUDE_CODE_COMMANDS = new Set(['plugin', 'schedule'])
+const skillDirs = async (dir) =>
+  (await readdir(dir, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+
+const pluginSkills = process.env.AGENT_TEAM_OS
+  ? path.join(process.env.AGENT_TEAM_OS, 'skills')
+  : path.join(templateRoot, '..', 'agent-team-os', 'agent-team-os', 'skills')
+const fromPlugin = await skillDirs(pluginSkills)
+const fromTemplate = await skillDirs(path.join(templateRoot, '.claude', 'skills'))
+
+if (fromPlugin.length === 0) {
+  // Loudly. Half the commands live in the plugin, so without it this check would pass by seeing
+  // nothing - which is the failure mode every guard in this file exists to avoid.
+  fail(`could not read the plugin's skills at ${pluginSkills}, so slash commands cannot be checked. Clone agent-team-os beside this repo, or set AGENT_TEAM_OS to it`)
+} else {
+  const commands = new Set([...fromPlugin, ...fromTemplate])
+  const SLASH = /(^|[\s`"'(\[|:])\/([a-z][a-z0-9-]*)/gm
+  const counts = new Map()
+  let dangling = 0
+  for (const file of FIRE_DOCS) {
+    const body = await read(file).catch(() => null)
+    if (body === null) continue
+    body.split(/\r?\n/).forEach((raw, index) => {
+      // STRIPPED, not skipped. Dropping a whole line because it holds a URL or a marker comment
+      // loses every command on it too, and "go to claude.ai/code, then run `/arm`" is a sentence
+      // this course would write. Removing just the URL and just the comment keeps the rest.
+      // `**` goes because a command written in bold - **`/arm`** - otherwise has an asterisk in
+      // front of it, and an asterisk cannot join the prefix class: `agents/*/output/` is a path.
+      //
+      // A command written INSIDE a comment is therefore not checked, and that is the right
+      // answer rather than a gap: a reader cannot type what a reader cannot see. The three in
+      // this course are the closing halves of paired markers - <!-- /prompt-block --> - which
+      // is what made the exclusion necessary in the first place.
+      const line = raw
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/\*\*/g, ' ')
+        .replace(/^\s*>[\s>]*/, '')
+      for (const [, , name] of line.matchAll(SLASH)) {
+        if (CLAUDE_CODE_COMMANDS.has(name)) continue
+        if (commands.has(name)) {
+          counts.set(name, (counts.get(name) ?? 0) + 1)
+          continue
+        }
+        dangling += 1
+        fail(`${file}:${index + 1}: names /${name}, which is neither a skill in agent-team-os nor one in this template`)
+      }
+    })
+  }
+  const total = [...counts.values()].reduce((sum, n) => sum + n, 0)
+  if (dangling === 0) {
+    ok(`all ${total} slash-command references resolve to a real skill (${counts.size} commands)`)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // A workflow file a lesson tells you to open has to be in the repo it tells you to open it in.
 // Two lessons said `read workflows/monday-brief.yml`. Nine workflows ship and that was never one
 // of them - the only files of that name anywhere were tests/fixtures/workflows/valid.yml and
