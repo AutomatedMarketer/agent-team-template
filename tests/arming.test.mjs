@@ -102,11 +102,11 @@ test('a webhook job is not demanded a reason for being off - it is not off', asy
     'a webhook job has no schedule to be off from, and being asked for a reason is nonsense')
 })
 
-test('a scheduled job with no reason is still refused - the exemption is webhooks only', async () => {
+test('a scheduled job with no reason is still refused - the exemption is jobs with no clock', async () => {
   const { validateArming } = await import('../scripts/lib/arm.mjs')
   const scheduled = { slug: 'x', data: { name: 'X', trigger: { schedule: 'daily 06:00' } } }
   assert.equal(validateArming(scheduled).length, 1,
-    'the webhook exemption must not let ordinary scheduled jobs through without a reason')
+    'the clockless exemption must not let ordinary scheduled jobs through without a reason')
 })
 
 test('a webhook routine is recognised, not reported as an orphan somebody should delete', async () => {
@@ -259,4 +259,71 @@ test('with no proposals.yml at all, approval is reported UNKNOWN rather than ass
     `an absent file is not evidence of approval:\n${result.stdout}`)
   assert.doesNotMatch(result.stdout, /nothing in proposals\.yml approves it/,
     'a missing file must not be reported as a refusal - those are different claims')
+})
+
+/* A dashboard button is clockless for exactly the reason a webhook is, and the exemption named
+   only webhooks. workflows.mjs accepts "at least one of: schedule, fire, webhook", so a button-only
+   job is a LEGAL file that the arming check then failed twice - once for carrying no reason, once
+   for being "armed but declares no schedule". A validator rejecting what its own sibling accepts
+   is a defect whether or not anyone has tripped on it; every course example pairs `fire` with a
+   `schedule`, which is the only reason no reader has. */
+test('a dashboard-button job is not demanded a reason for being off - it is not off', async () => {
+  const { validateArming } = await import('../scripts/lib/arm.mjs')
+  const button = { slug: 'b', data: { name: 'Run it now', trigger: { fire: true } } }
+  assert.deepEqual(validateArming(button), [],
+    'a button job has no schedule to be off from, and being asked for a reason is nonsense')
+})
+
+/* Both clockless kinds can be armed, and getting this wrong once is why the comment in arm.mjs
+   is long. A dashboard button looked like it had no routine behind it. It has one:
+   12_COCKPIT.md's FIRE_TRIGGERS maps each slug to "its routine's trigger link", copied from
+   claude.ai/code, and agent-cockpit fires that URL. Exempting only webhooks meant a student who
+   wired a button exactly as Lesson 12 says got "1 job armed - a routine exists" and "is armed but
+   declares no schedule" in one run about one job. */
+test('an armed clockless job is allowed no schedule - its routine is real', async () => {
+  const { validateArming } = await import('../scripts/lib/arm.mjs')
+  for (const trigger of [{ webhook: true, armed: true }, { fire: true, armed: true }]) {
+    assert.deepEqual(validateArming({ slug: 'j', data: { name: 'Job', trigger } }), [],
+      `an armed ${trigger.fire ? 'button' : 'webhook'} job has a routine - demanding a schedule denies it`)
+  }
+})
+
+// The rule still has to refuse the thing it was written for.
+test('an armed job with no clock at all is still refused', async () => {
+  const { validateArming } = await import('../scripts/lib/arm.mjs')
+  const nothing = { slug: 'n', data: { name: 'Nothing', trigger: { armed: true } } }
+  assert.ok(validateArming(nothing).some((problem) => /declares no schedule/.test(problem)),
+    'no schedule, no webhook, no button - nothing could have created that routine')
+})
+
+/* The two halves have to agree about the same job. When the webhook exemption went into arm.mjs
+   and this reporter was not touched, one run printed both "1 job off with no reason written down"
+   and "Every job is either armed, or off with a reason somebody wrote down" - two contradictory
+   sentences about one job, from the command whose whole purpose is catching that. The button case
+   was the same trap set again. */
+test('the reporter and the validator agree about a clockless job', async () => {
+  const { reconcile, validateArming } = await import('../scripts/lib/arm.mjs')
+  for (const trigger of [{ webhook: true }, { fire: true }]) {
+    const workflow = { slug: 'j', path: 'workflows/j.yml', data: { name: 'Job', trigger } }
+    assert.deepEqual(validateArming(workflow), [], 'the validator must not ask this job for a reason')
+    const result = reconcile([workflow], [], { routinesKnown: true })
+    assert.deepEqual(result.problems, [], 'the reporter must not raise a problem the validator does not')
+    const [row] = result.off
+    assert.ok(
+      (row.webhook === true || row.fire === true) && !row.schedule,
+      'the row must carry enough for the reporter to count it apart from jobs that owe a reason'
+    )
+  }
+})
+
+/* Exiting 0 with no snapshot is deliberate - a fresh clone has not run /routines yet. But three
+   checklist boxes in Lesson 17 LOOK ticked by that run and were never judged: without a snapshot
+   nothing is ever CALLED declared, so "declared is empty" is empty because nothing was compared.
+   A student ticks the box believing it was checked. The command has to say so itself. */
+test('with no snapshot, check:arming names the boxes it could not judge', async () => {
+  const { stdout } = await run(process.execPath, ['scripts/check-arming.mjs'], { cwd: root })
+  assert.match(stdout, /could not judge/i, 'a clean exit with no data must not read as a clean check')
+  for (const box of ['declared is empty', 'unapproved is empty', 'exits without complaining']) {
+    assert.ok(stdout.includes(box), `the unjudgeable box "${box}" is not named in the output`)
+  }
 })

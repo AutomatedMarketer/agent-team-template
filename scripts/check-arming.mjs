@@ -54,13 +54,16 @@ if (routinesKnown) {
 // single run printed both "1 job off with no reason written down" and "Every job is either armed,
 // or off with a reason somebody wrote down" - two contradictory sentences about the same job, in
 // the command whose whole purpose is catching a claim its own detail contradicts.
-const isWebhookRow = (row) => row.webhook === true && !row.schedule
-const offWebhook = result.off.filter(isWebhookRow)
-const offWithReason = result.off.filter((row) => !isWebhookRow(row) && row.reason)
-const offWithNone = result.off.filter((row) => !isWebhookRow(row) && !row.reason)
+// A dashboard button is clockless for the same reason a webhook is, and was left out of this
+// for a while - so a button-only job appeared in the 'off' total while arm.mjs refused to ask
+// it for a reason. Both sides now use the same rule.
+const isClocklessRow = (row) => (row.webhook === true || row.fire === true) && !row.schedule
+const offClockless = result.off.filter(isClocklessRow)
+const offWithReason = result.off.filter((row) => !isClocklessRow(row) && row.reason)
+const offWithNone = result.off.filter((row) => !isClocklessRow(row) && !row.reason)
 console.log(`  ${plural(offWithReason, 'job')} off, with a written reason`)
-if (offWebhook.length) {
-  console.log(`  ${plural(offWebhook, 'job')} fired by webhook - no clock, so nothing to be off from`)
+if (offClockless.length) {
+  console.log(`  ${plural(offClockless, 'job')} with no clock - fired by webhook or a dashboard button, so nothing to be off from`)
 }
 if (offWithNone.length) {
   console.log(`  ${plural(offWithNone, 'job')} off with no reason written down - counted here, credited nowhere`)
@@ -75,8 +78,8 @@ for (const [heading, rows] of [
   // Printing `result.off` whole put a webhook row into a list of ten under a summary line that
   // said nine - the same total-disagrees-with-the-detail fault the comment above describes,
   // left behind when that fix corrected the counts and did not touch the listing.
-  ['Off', result.off.filter((row) => !isWebhookRow(row))],
-  ['Fired by webhook - no clock, so nothing to be off from', offWebhook]
+  ['Off', result.off.filter((row) => !isClocklessRow(row))],
+  ['No clock - fired by webhook or a dashboard button, so nothing to be off from', offClockless]
 ]) {
   if (!rows.length) continue
   console.log(`\n${heading}:`)
@@ -149,10 +152,21 @@ if (orphanedByOwner.length) {
 }
 
 if (routinesKnown) {
-  console.log(offWebhook.length
-    ? '\nEvery job is either armed, fired by webhook, or off with a reason somebody wrote down.'
+  console.log(offClockless.length
+    ? '\nEvery job is either armed, fired by webhook or a dashboard button, or off with a reason somebody wrote down.'
     : '\nEvery job is either armed, or off with a reason somebody wrote down.')
 } else {
   console.log('\nEverything above is what your FILES claim. Run /routines and commit the result\n' +
     'before you believe any of it.')
+  // Exiting 0 here is deliberate: a fresh clone has not reached /routines yet, and failing would
+  // make the first run of this command look like a broken repo. But a clean exit is not evidence,
+  // and the lesson's checklist has boxes this run LOOKS to have ticked and did not judge at all.
+  // Without a snapshot nothing is ever called `declared`, so "declared is empty" is empty because
+  // nothing was compared. Naming the boxes is the difference between a check that is honest in
+  // its prose and one a reader can act on.
+  console.log('\nThis run could not judge:')
+  console.log('  - "declared is empty" - nothing was CALLED declared, because nothing was compared')
+  console.log('  - "unapproved is empty" - no routine was visible to compare against')
+  console.log('  - "check:arming exits without complaining" - it exited without DATA, not without problems')
+  console.log('Those three cannot be ticked from this run. Run /routines, then run this again.')
 }

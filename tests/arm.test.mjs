@@ -106,8 +106,13 @@ test('a job that has never been armed also needs its reason', () => {
   assert.ok(problems.some((problem) => /no reason/.test(problem)))
 })
 
+// `fire: true` used to be the vehicle here, purely to make the trigger block legal. It is no
+// longer: a button is fired by its routine's trigger link, the same object a webhook posts to,
+// so an armed button-only job describes something that does exist. What this rule still refuses
+// is a trigger with no clock of any kind - which validateWorkflow rejects first, making this the
+// second layer rather than the first.
 test('an armed job with no schedule is refused - there is nothing for a routine to fire on', () => {
-  const problems = validateArming(workflow('gone-cold', { armed: true, fire: true }))
+  const problems = validateArming(workflow('gone-cold', { armed: true }))
   assert.ok(problems.some((problem) => /declares no schedule/.test(problem)))
 })
 

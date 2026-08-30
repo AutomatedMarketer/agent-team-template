@@ -210,17 +210,24 @@ export function validateArming(workflow) {
     problems.push(`${name}: trigger.armed must be true or false`)
   }
 
-  // A webhook job has no clock. It is fired by an inbound request, it is live the moment its
-  // routine exists, and there is no schedule for it to be on or off. Demanding a reason for it
-  // being "off" is asking somebody to justify a state it was never in - and it is the one
-  // routine in the whole course a student genuinely has to create by hand, because /arm passes a
-  // schedule on every create and there is no schedule to pass.
-  const isWebhook = trigger?.webhook === true && textOf(trigger?.schedule) === ''
+  // Some jobs have no clock. A webhook is fired by an inbound request; a `fire: true` job is
+  // fired by a button on the dashboard. Neither is ever "off" in the sense this check means, so
+  // demanding a reason is asking somebody to justify a state the job was never in - and neither
+  // can be armed with a schedule, because there is no schedule to pass.
+  //
+  // This exempted `webhook` alone for a while, which contradicted the repo's own workflow
+  // validator: workflows.mjs accepts "at least one of: schedule, fire, webhook", so a button-only
+  // job is a legal file that the arming check then failed twice over - once for carrying no
+  // reason, once for being "armed but declares no schedule". Every course example pairs `fire`
+  // with a `schedule`, so no reader has met it; a validator that rejects what its own sibling
+  // accepts is a defect whether or not anyone has tripped on it yet.
+  const clockless = textOf(trigger?.schedule) === '' &&
+    (trigger?.webhook === true || trigger?.fire === true)
 
   // Nothing is deleted here, ever. A job that is off keeps its file and gains a reason, so that
   // six weeks later the silence is a decision somebody made rather than something that looks
   // exactly like a mistake.
-  if (armed !== true && !isWebhook && !reasonFor(workflow)) {
+  if (armed !== true && !clockless && !reasonFor(workflow)) {
     problems.push(
       `${name}: is not armed and carries no reason - say what would have to change for it to be worth a run`
     )
@@ -228,8 +235,21 @@ export function validateArming(workflow) {
 
   // You cannot arm what has no time attached. An armed job with no schedule is a routine nobody
   // could have created, which means the flag is describing something that does not exist.
-  // A webhook is the exception, and the only one: its routine is real and fires on request.
-  if (armed === true && !isWebhook && textOf(trigger?.schedule) === '') {
+  //
+  // Both clockless kinds are exempt, and it took being wrong once to get here. A webhook is
+  // obviously exempt: its routine is real and fires on request. A dashboard button looked
+  // different - "no routine, just a button" - and is not. 12_COCKPIT.md's FIRE_TRIGGERS maps each
+  // slug to "its routine's trigger link… copied from the routine at claude.ai/code", and
+  // agent-cockpit's api/fire.js fires that registered URL. It is the same object a webhook posts
+  // to. Exempting only webhooks meant a student who wired a button exactly as Lesson 12 says got
+  // "1 job armed - a routine exists" and "is armed but declares no schedule" in ONE run, about
+  // ONE job: the contradiction this file's own comments say it exists to catch.
+  //
+  // This rule now only fires on a trigger with no schedule, no fire and no webhook - which
+  // validateWorkflow already rejects. That makes it the second layer rather than the first, and
+  // it is kept deliberately: validateArming is called directly, and a rule that refuses to
+  // describe a routine nobody could have created should not depend on another function running.
+  if (armed === true && !clockless && textOf(trigger?.schedule) === '') {
     problems.push(`${name}: is armed but declares no schedule - there is nothing for a routine to fire on`)
   }
 
@@ -288,8 +308,11 @@ export function reconcile(workflows, routines, { routinesKnown = true } = {}) {
       name: textOf(workflow?.data?.name) || workflow?.slug || '(unnamed)',
       path: workflow?.path ?? null,
       schedule: textOf(workflow?.data?.trigger?.schedule) || null,
-      // Carried so the reporter can tell a clockless webhook from a job that owes a reason.
+      // Carried so the reporter can tell a clockless job from one that owes a reason. Both
+      // kinds are carried: a webhook and a dashboard button are clockless for different
+      // reasons and a reader deserves to be told which.
       webhook: workflow?.data?.trigger?.webhook === true,
+      fire: workflow?.data?.trigger?.fire === true,
       reason: reasonFor(workflow) || null,
       // Set exactly when something rings. The state test that used to guard this was dead code:
       // `armed` and `unapproved` are the two states where a routine matched, so the guard could

@@ -606,6 +606,39 @@ if (armLesson) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The guard above is scoped to ONE lesson, and check:arming's output is quoted in more than one.
+// Renaming its clockless count line broke a quote in 10_CUSTOMER_SERVICE.md and both course
+// checks stayed green, because nothing looked outside _ARM_YOUR_JOBS.md. That is the second time
+// a line printed by a script drifted away from a lesson quoting it.
+//
+// So: find the line the script actually prints, and require every lesson that quotes any part of
+// it to quote the current version. Em dashes and wrapping are normalised - a lesson typesetting
+// "-" as "—" is not a defect, quoting a sentence the script no longer prints is.
+const clocklessLine = (await readFile(path.join(templateRoot, 'scripts', 'check-arming.mjs'), 'utf8')
+  .catch(() => ''))
+  .match(/\}\s*(with no clock[^`]*?)`\)/)?.[1]
+
+if (!clocklessLine) {
+  fail('check-arming.mjs no longer prints a "with no clock" count line - the lessons quoting it cannot be checked')
+} else {
+  const flatten = (text) =>
+    text.replace(/^[ 	]*>[ 	]?/gm, ' ').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim()
+  const wanted = flatten(clocklessLine)
+  const tail = 'nothing to be off from'
+  let stale = 0
+  for (const file of all) {
+    const body = flatten(await read(file))
+    if (!body.includes(tail)) continue
+    if (body.includes(wanted)) continue
+    stale += 1
+    fail(`${file}: quotes check:arming's clockless line, but not as it now reads - "${clocklessLine}"`)
+  }
+  if (stale === 0) {
+    ok(`every lesson quoting check:arming's clockless line quotes it as the script now prints it`)
+  }
+}
+
 
 // ---------------------------------------------------------------------------------------------
 // A distinction a lesson tells the reader to make has to exist in the tool that reports it - and
