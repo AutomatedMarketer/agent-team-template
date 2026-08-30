@@ -346,7 +346,10 @@ test('a parked task can say why, and saying why does not unpark it', () => {
       the exact defect. The reason has to be ON the line under its task.
 
    3. The fixture must cover every bucket the printer has. Three parked tasks - two with
-      distinct reasons, one with none - plus a handed-off row and a note.
+      distinct reasons, one with none - plus a note, and a Ready row whose answer begins with
+      a negative so the readyStartingWithNo flag block (a SECOND per-task print loop) is
+      reached. The only branch left unexercised is the empty-bucket `continue`, which prints
+      nothing by construction.
       With one, "the reason under this row" and "the first
       reason in this bucket" are indistinguishable, and a mutation printing one task's reason
       under every parked row passed green while silently misattributing it and dropping the
@@ -365,7 +368,7 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
       '    times_per_week: 5',
       '    minutes_each: 45',
       '    confirmed: twice',
-      '    hands_off: "Priya the estimator - she is the one waiting."',
+      '    hands_off: "Nobody - I just chase them until they answer."',
       '  - task: Portal uploads',
       '    words: "four portals, four ways to fail"',
       '    who: me',
@@ -432,9 +435,22 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
     assert.ok(noteRow !== -1, 'the once-only task should be listed as a note')
     assert.doesNotMatch(lines[noteRow + 1] ?? '', /MARKER-/)
 
-    // a task that WAS handed off must not acquire a reason it never had
+    // a Ready task must not acquire a reason it never had
     const readyRow = lines.findIndex((line) => line.includes('Chasing subcontractor quotes'))
     assert.doesNotMatch(lines[readyRow + 1] ?? '', /MARKER-/)
+
+    // The bucket loop is not the only per-task print loop. readyStartingWithNo has its own,
+    // and it was unreachable from this fixture while every Ready answer named somebody - so
+    // "every branch is covered" was true of the buckets and false of the file. This row's
+    // answer begins with a negative, which fires the flag block without parking the task
+    // (classify() parks on an EMPTY hands_off, not a negative one), and a park reason must
+    // not leak into it either. It is the state Lesson 15's flag exists for, and the state
+    // the employee persona actually reached.
+    const flagged = lines.findIndex((line) => line.startsWith('Ready, but the answer starts with'))
+    assert.ok(flagged !== -1, 'a Ready answer beginning with a negative should be flagged')
+    const flaggedRow = lines.findIndex((line, n) => n > flagged && line.includes('Chasing subcontractor'))
+    assert.ok(flaggedRow !== -1, 'the flagged task should be named in the flag block')
+    assert.doesNotMatch(lines[flaggedRow + 1] ?? '', /MARKER-/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
