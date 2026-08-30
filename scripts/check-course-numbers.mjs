@@ -12,7 +12,8 @@
 // claims. A lesson added, removed or re-timed fails this check until every dependent number
 // is updated with it.
 
-import { readFile, readdir, writeFile, rm } from 'node:fs/promises'
+import { readFile, readdir, writeFile, rm, mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
@@ -478,40 +479,31 @@ const SAMPLE_BLOCKS = [
   { lesson: /_THE_MATCH\.md$/, script: 'check-proposals.mjs', starts: /^\d+ proposals?, covering / }
 ]
 
-let refused = false
+// The sample blocks are graded by RUNNING the command and comparing what it prints. That needs
+// a ledger.yml and a proposals.yml to read, and this used to make them by copying the examples
+// INTO the repo root and deleting them afterwards - writing fixtures into the thing under test.
+// Two costs. A crash between the write and the delete strands a file that looks exactly like the
+// student's own work. And a repo where somebody had ACTUALLY done the work already had those
+// files, so the guard could not run there at all: it refused, said to move your ledger aside,
+// and graded nothing.
+//
+// Now the fixtures go in a temp directory and the commands are pointed at it. Both take a data
+// root as argv[2] - check-ledger.mjs always did, check-proposals.mjs now does too. The catalogue
+// still comes from THIS repo, because the agents and skills being matched against are this
+// repo's, not the fixture directory's. Nothing is written into the repo, so a real ledger.yml
+// is no longer anybody's problem.
 const withExamples = async (run) => {
   const copies = [['ledger.example.yml', 'ledger.yml'], ['proposals.example.yml', 'proposals.yml']]
-  const made = []
+  const dir = await mkdtemp(path.join(tmpdir(), 'check-course-'))
   try {
     for (const [src, dst] of copies) {
       const source = await readFile(path.join(templateRoot, src), 'utf8').catch(() => null)
       if (source === null) continue
-      const target = path.join(templateRoot, dst)
-      // A real file here is NOT something to quietly step around. This guard grades a lesson's
-      // sample block against what the command actually prints; if the student's own ledger is
-      // sitting in the repo it grades the lesson against THEIR week and reports the lesson
-      // wrong. That is a false FAIL on a correct lesson, and it is the same class of bug as
-      // writing a fixture into the repo under test - silently skipping is what made it silent.
-      // Loudly, but NOT with process.exit() - that sits inside this try and would skip the
-      // finally below, stranding a ledger.yml the guard itself wrote when proposals.yml is the
-      // file that blocked it. A guard against a stray file in the repo root must not leave one.
-      // fail() accumulates and the script exits 1 after cleanup has run.
-      if (await readFile(target, 'utf8').then(() => true).catch(() => false)) {
-        // Once. withExamples runs per sample block, so one misplaced file used to report itself
-        // as many separate problems and the tail counted them as that many drifts in the prose.
-        if (refused) return null
-        fail(`cannot grade sample blocks: a real ${dst} is in the repo root. This guard needs ` +
-             `${src} to be the file the command reads - move ${dst} aside and re-run. Grading a ` +
-             'lesson against your own data reports the lesson broken when it is not.')
-        refused = true
-        return null
-      }
-      await writeFile(target, source)
-      made.push(target)
+      await writeFile(path.join(dir, dst), source)
     }
-    return await run()
+    return await run(dir)
   } finally {
-    for (const file of made) await rm(file, { force: true })
+    await rm(dir, { recursive: true, force: true })
   }
 }
 
@@ -531,13 +523,11 @@ for (const spec of SAMPLE_BLOCKS) {
     continue
   }
 
-  const printed = await withExamples(async () => {
-    const result = await run(process.execPath, [path.join(templateRoot, 'scripts', spec.script)],
+  const printed = await withExamples(async (dataRoot) => {
+    const result = await run(process.execPath, [path.join(templateRoot, 'scripts', spec.script), dataRoot],
       { cwd: templateRoot }).catch((error) => ({ stdout: error.stdout ?? '' }))
     return (result.stdout ?? '').split(/\r?\n/).map((line) => line.trimEnd())
   })
-
-  if (printed === null) continue   // withExamples refused; the reason is already in problems
 
   const missing = []
   for (const raw of sample.split(/\r?\n/)) {

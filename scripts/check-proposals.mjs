@@ -29,8 +29,20 @@ async function loadOrExplain(load, missing) {
   }
 }
 
-const ledger = await loadOrExplain(loadLedger, 'No ledger.yml yet. Ask for one: /ledger')
-const written = await loadOrExplain(loadProposals, 'No proposals.yml yet. Ask for one: /match')
+// An optional root for the two DATA files, matching check-ledger.mjs's own argv[2]. The
+// catalogue still comes from this repo - the point is to read somebody's ledger from somewhere
+// else, not to pretend a different repo's agents exist. Without this, check-course-numbers.mjs
+// had to write its fixtures INTO the repo it was checking, which meant it could not run at all
+// once a student had a real ledger.yml sitting there.
+const dataRoot = process.argv[2]
+const ledger = await loadOrExplain(
+  () => loadLedger(dataRoot),
+  'No ledger.yml yet. Ask for one: /ledger'
+)
+const written = await loadOrExplain(
+  () => loadProposals(dataRoot),
+  'No proposals.yml yet. Ask for one: /match'
+)
 const catalogue = await loadCatalogue()
 
 const problems = validateProposals(written, ledger, catalogue)
