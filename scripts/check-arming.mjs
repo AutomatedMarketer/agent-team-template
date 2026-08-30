@@ -12,8 +12,10 @@
 // Until this existed, validateArming was imported by exactly one file: its own test. A rule only
 // the test suite can run is a rule students never see.
 
+import { readFile } from 'node:fs/promises'
 import { loadWorkflows } from './lib/workflows.mjs'
 import { loadRoutineSnapshot, reconcile } from './lib/arm.mjs'
+import { notInUse } from './lib/knowledge.mjs'
 
 const workflows = await loadWorkflows()
 const snapshot = await loadRoutineSnapshot()
@@ -101,6 +103,35 @@ if (result.problems.length) {
 // "check:arming exits clean for everyone" pass vacuously on a repo where nothing is known to
 // ring. With no snapshot there is nothing to be clean about, and saying so is the only ending
 // this command has earned.
+// A workflow owned by an agent the owner has switched off validates clean - validateWorkflow asks
+// whether the agent EXISTS, not whether it is in use - and then never runs. Two of the nine
+// shipped workflows are owned by sales and customer-service, which are exactly the two that
+// usually do not apply to someone who works for the business rather than owning it. So this is
+// not a hypothetical about files people write by hand; it is the state a fresh clone is already
+// in the moment they answer those two knowledge files honestly.
+const KNOWLEDGE = {
+  sales: 'agents/sales/knowledge/offer-sheet.md',
+  'customer-service': 'agents/customer-service/knowledge/faq.md'
+}
+const readOrNull = async (path) => readFile(path, 'utf8').catch(() => null)
+const offAgents = []
+for (const [slug, path] of Object.entries(KNOWLEDGE)) {
+  if (notInUse(await readOrNull(path))) offAgents.push(slug)
+}
+// loadWorkflows returns { slug, path, data } - the owner is on `data`, not the row. Writing
+// row.owner instead gave every workflow an owner of undefined, so this guard matched nothing and
+// printed nothing, which reads exactly like a clean repo. Caught by testing it against a repo
+// that should have failed it.
+const orphanedByOwner = workflows.filter((row) => offAgents.includes(row?.data?.owner))
+if (orphanedByOwner.length) {
+  console.log('\nOwned by an agent you are not using - these cannot run as written:')
+  for (const row of orphanedByOwner) {
+    console.log(`  ${row.data.name} - owner: ${row.data.owner}`)
+  }
+  console.log('  Give each one a different owner, or leave it off deliberately. The workflow')
+  console.log('  validator only checks the owner exists, so it will not tell you this.')
+}
+
 if (routinesKnown) {
   console.log(offWebhook.length
     ? '\nEvery job is either armed, fired by webhook, or off with a reason somebody wrote down.'
