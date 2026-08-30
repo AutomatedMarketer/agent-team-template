@@ -7,6 +7,7 @@ import {
   validateProposal,
   scoreMatch,
   stem,
+  meaningful,
   shortlist,
   proposalFrom,
   buildIndex,
@@ -571,4 +572,85 @@ test('the shipped workflow descriptions are descriptions, not engineering notes'
       `${item.id} has internal engineering prose in its user-facing description`
     )
   }
+})
+
+// A preposition says how two things relate, never what either thing IS. The scoring makes that
+// actively dangerous rather than merely useless: rarity IS the score, so a joining word that only
+// one item happens to use scores the ceiling. "against" appeared once — in "graded against the
+// content rubric" — and took the top slot for "close the books against last month". "behind",
+// "since", "don" (the half "don't" leaves behind) and "using" all had the identical flaw.
+//
+// This asserts on meaningful() rather than on a score, deliberately. A score is already zero for
+// any word the catalogue never happens to use, so scoring cannot tell a word that is FILTERED
+// from one that is merely ABSENT — an earlier version of this test listed "above", which was not
+// in the filter at all, and passed.
+test('words that carry no meaning of their own are filtered, not scored', () => {
+  const joiners = [
+    'above', 'across', 'against', 'along', 'alongside', 'amid', 'amidst', 'among', 'amongst', 'around',
+    'atop', 'behind', 'below', 'beneath', 'beside', 'besides', 'between', 'beyond', 'concerning',
+    'despite', 'during', 'except', 'inside', 'minus', 'near', 'onto', 'outside', 'plus',
+    'regarding', 'since', 'though', 'throughout', 'toward', 'towards', 'under', 'underneath',
+    'unless', 'until', 'upon', 'versus', 'via', 'whereas', 'whether', 'while', 'whilst',
+    'within', 'without'
+  ]
+  for (const word of joiners) {
+    assert.equal(meaningful(word), false, `"${word}" is treated as meaning — it only joins two things`)
+  }
+
+  // What a contraction leaves behind after the tokenizer splits on the apostrophe.
+  for (const half of [
+    'don', 'doesn', 'didn', 'isn', 'aren', 'wasn', 'weren', 'won', 'wouldn', 'couldn',
+    'shouldn', 'hasn', 'haven', 'hadn', 'mustn', 'needn', 'shan', 'ain'
+  ]) {
+    assert.equal(meaningful(half), false, `"${half}" is half a contraction, not a word`)
+  }
+
+  // 'using' cannot be reached by the stemmer: the -ing rule needs a root over five letters, so
+  // it never becomes 'use' and never meets the existing use/uses filler.
+  for (const adverb of [
+    'using', 'accordingly', 'exactly', 'instead', 'therefore', 'however', 'meanwhile',
+    // Adjectives and vague verbs that were each the rarest word in the catalogue, and so
+    // the entire reason for a proposal. 'look' is the same class as see/know/think above.
+    'ready', 'important', 'useful', 'proper', 'simple', 'quick', 'easy', 'hard',
+    'look', 'looks', 'looking',
+    // When a thing happens is not what it is — the same rule as monday/weekly above.
+    'overnight', 'past', 'recent', 'recently', 'current', 'currently'
+  ]) {
+    assert.equal(meaningful(adverb), false, `"${adverb}" carries no meaning of its own`)
+  }
+
+  // The other half of the bargain: real words must survive. A filter that eats these is worse
+  // than the defect it fixes.
+  // 'news' stems to 'new', so the generic adjective and the real noun share one entry. That
+  // is why 'new' is NOT filtered despite scoring the ceiling — doing so would strip the
+  // market scanner's own signal. Recorded as a stemmer collision, not fixed by a word list.
+  for (const real of [
+    'invoice', 'inbox', 'newsletter', 'chasing', 'closing', 'payroll', 'sales', 'news', 'new'
+  ]) {
+    assert.equal(meaningful(real), true, `"${real}" is a real word and must still score`)
+  }
+})
+
+// The regression that found it. The remaining candidates share "clos" with "Use as the closing
+// step", which is chain-position boilerplate rather than meaning — recorded, not fixed here,
+// because "close" is a real word a student writing "closing deals" means.
+test('closing the books is not answered by whatever else said "against"', async () => {
+  const catalogue = await loadCatalogue()
+  const index = buildIndex(catalogue)
+  const task = { task: 'Closing the books against last month', words: 'I close the books at month end' }
+  for (const candidate of shortlist(task, catalogue, index)) {
+    assert.ok(
+      !candidate.words.includes('against'),
+      `${candidate.id} was offered on the word "against": [${candidate.words.join(', ')}]`
+    )
+  }
+})
+
+// A confident wrong answer is worse than no answer. Before the filter, this task returned
+// customer-service as its ONLY candidate, on "using" alone.
+test('a task the catalogue cannot do comes back a gap, not a confident wrong answer', async () => {
+  const catalogue = await loadCatalogue()
+  const index = buildIndex(catalogue)
+  const shown = shortlist({ task: 'Using the spreadsheet every week', words: 'using the spreadsheet' }, catalogue, index)
+  assert.deepEqual(shown, [], `offered ${shown.map((c) => `${c.id} on [${c.words}]`).join('; ')}`)
 })

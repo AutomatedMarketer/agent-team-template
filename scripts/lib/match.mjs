@@ -43,7 +43,8 @@ const WHEN = [
   'september', 'october', 'november', 'december',
   'morning', 'afternoon', 'evening', 'night', 'today', 'tomorrow', 'yesterday',
   'daily', 'weekly', 'monthly', 'yearly', 'hourly', 'often', 'always', 'never',
-  'hour', 'hours', 'minute', 'minutes', 'day', 'days', 'month', 'months', 'year', 'years'
+  'hour', 'hours', 'minute', 'minutes', 'day', 'days', 'month', 'months', 'year', 'years',
+  'overnight', 'past', 'recent', 'recently', 'current', 'currently'
 ]
 
 // Auxiliaries and the handful of verbs that mean nothing on their own. 'did' alone was enough
@@ -52,13 +53,22 @@ const WHEN = [
 const AUXILIARY = [
   'did', 'done', 'doing', 'am', 'been', 'having', 'could', 'should', 'must', 'may', 'might',
   'shall', 'let', 'make', 'makes', 'made', 'give', 'gives', 'given', 'want', 'wants', 'like',
-  'know', 'knows', 'think', 'thinks', 'say', 'says', 'said', 'see', 'sees', 'seen', 'come',
+  'know', 'knows', 'think', 'thinks', 'say', 'says', 'said', 'see', 'sees', 'seen', 'look', 'looks', 'come',
   'comes', 'came', 'went', 'goes', 'going', 'actually', 'already', 'even', 'ever', 'here', 'how',
   // Interrogatives and vague nouns. 'where' survived as the stem "wher" and, being rare in the
   // catalogue, scored a perfect 1.00 - enough on its own to answer "prepping for meetings" with
   // the research agent. A word that means nothing should never be the rarest word in the room.
   'where', 'why', 'whose', 'whom', 'because', 'round', 'ages', 'stuff', 'somewhere', 'anywhere',
-  'everything', 'something', 'nothing', 'anyone', 'someone', 'everyone', 'else', 'etc'
+  'everything', 'something', 'nothing', 'anyone', 'someone', 'everyone', 'else', 'etc',
+  // 'using' is filler that the stemmer cannot reach: the -ing rule needs a root longer
+  // than five letters, so 'using' never becomes 'use' and the use/uses entries below
+  // never see it. It scored 2.89 and made customer-service the ONLY answer to
+  // "using the spreadsheet every week".
+  'using', 'accordingly', 'exactly', 'instead', 'therefore', 'however', 'meanwhile',
+  // Adjectives that say how a thing is, never what it is. Each was the RAREST word in the
+  // catalogue and so the whole reason for a proposal: 'ready' answered "getting the deck
+  // ready" with the content queue, alone, at the 2.89 ceiling.
+  'ready', 'important', 'useful', 'proper', 'simple', 'quick', 'easy', 'hard'
 ]
 
 // How many is not what it is, for the same reason the day of the week is not. "my three staff"
@@ -72,10 +82,39 @@ const QUANTITY = [
 
 // Filler carries no meaning and would otherwise let any task match any item. Kept deliberately
 // short and boring: this is not a stemmer, and it does not need to be.
+// Prepositions and the words that join clauses. They say how two things relate, never what
+// either thing IS — and the scoring makes that dangerous rather than merely useless. A word
+// nothing else in the catalogue happens to use scores the HIGHEST, so "against" appearing once
+// meant "close the books against last month" was answered by the draft queue, on "against", at
+// 2.89 — above every real word in the sentence. Same failure as "where" above: a word that means
+// nothing should never be the rarest word in the room.
+const CONNECTIVE = [
+  'above', 'across', 'against', 'along', 'alongside', 'amid', 'amidst', 'among', 'amongst',
+  'around',
+  'atop', 'behind', 'below', 'beneath', 'beside', 'besides', 'between', 'beyond', 'concerning',
+  'despite', 'during', 'except', 'inside', 'minus', 'near', 'onto', 'outside', 'plus',
+  'regarding', 'since', 'though', 'throughout', 'toward', 'towards', 'under', 'underneath',
+  'unless', 'until', 'upon', 'versus', 'via', 'whereas', 'whether', 'while', 'whilst',
+  'within', 'without'
+]
+
+// The tokenizer splits on anything that is not a letter or digit, so "don't" arrives as
+// don + t. The t is dropped for being short; "don" survives, means nothing, and — appearing
+// once in the catalogue, in customer-service's "says I don't know" — scored the 2.89 ceiling.
+// "I don't have time to write posts" put customer-service second on it. These are the halves
+// contractions leave behind, not words.
+const CONTRACTION = [
+  'don', 'doesn', 'didn', 'isn', 'aren', 'wasn', 'weren', 'won', 'wouldn', 'couldn',
+  'shouldn', 'hasn', 'haven', 'hadn', 'mustn', 'needn', 'shan', 'ain', 'ive', 'ill',
+  've', 're', 'll', 'im', 'id'
+]
+
 const FILLER = new Set([
   ...WHEN,
   ...QUANTITY,
   ...AUXILIARY,
+  ...CONNECTIVE,
+  ...CONTRACTION,
   'a', 'about', 'after', 'all', 'an', 'and', 'any', 'anything', 'are', 'as', 'at', 'back',
   'be', 'been', 'before', 'being', 'but', 'by', 'can', 'do', 'does', 'each', 'every', 'for',
   'from', 'get', 'gets', 'go', 'goes', 'got', 'had', 'has', 'have', 'i', 'if', 'in', 'into',
@@ -114,7 +153,7 @@ export function stem(word) {
 // Filler is checked on the stem as well as the raw word. Checking the raw word alone let "works"
 // and "weeks" through the filter and back into the score as work/week — filler leaking in by the
 // back door, inflating exactly the generic matches the floor exists to stop.
-function meaningful(word) {
+export function meaningful(word) {
   if (word.length <= 2 || FILLER.has(word)) return false
   return !FILLER.has(stem(word))
 }
