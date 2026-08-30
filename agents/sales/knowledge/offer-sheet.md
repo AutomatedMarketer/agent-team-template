@@ -1,5 +1,11 @@
 # Offer sheet
 
+**If you do not sell, say so here and stop.** Replace the first marker with something like
+*"I do not sell - I work for this business and the selling is <name>'s job"*, delete the rest of
+the file's markers, and you are done. That is a finished offer sheet, not an empty one: `/audit`
+reads it as **Not in use** rather than a gap, and the sales agent will not be pointed at
+prospects that were never yours. This is common and it is not a step you skipped.
+
 ## What I sell
 <!-- fill: sales-offer -->
 
