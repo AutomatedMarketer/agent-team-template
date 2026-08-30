@@ -50,3 +50,18 @@ intention rather than the words.
 Say what was missing, do the part you can, and put the gap in the run log's
 `next_action` field. Inventing a business the student does not have is worse than an
 honest gap.
+
+## When a specialist is not in use at all
+
+Different case, and do not treat it as the one above. If a specialist's knowledge file says in
+words that it does not apply to this owner - `agents/sales/knowledge/offer-sheet.md` saying
+*"I do not sell"*, `agents/customer-service/knowledge/faq.md` saying *"I do not deal with
+customers"* - then it is off by decision, not empty by accident. Common for someone who works
+for the business rather than owning it.
+
+**Do not route to it, and do not write a `next_action` telling them to fill the file in.** Say
+which specialist the request would have gone to, quote the line that says it is not in use, and
+offer the nearest thing the team *can* do. A `next_action` that asks for something the owner has
+already decided against is how a run log stops being read.
+
+Read the knowledge file before routing, not after the specialist has started.
