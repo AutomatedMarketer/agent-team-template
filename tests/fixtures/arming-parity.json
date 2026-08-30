@@ -1,0 +1,105 @@
+{
+  "_comment": [
+    "THE SHARED CONTRACT between agent-team-template's validateArming (scripts/lib/arm.mjs) and",
+    "agent-cockpit's armingProblems (api/state.js). The two are mirrored by hand, not imported -",
+    "there is no import path between a student's repo and a deployed web app - so drift is the",
+    "standing risk, and it has happened twice.",
+    "",
+    "This file is the same bytes in both repos. Each repo has a test that runs ITS implementation",
+    "over these cases and asserts the exact problem list. Change the logic on one side only and",
+    "that side's test fails on the next run.",
+    "",
+    "KEEP IN SYNC: tests/fixtures/arming-parity.json in agent-team-template and agent-cockpit."
+  ],
+  "name": "Monday Brief",
+  "cases": [
+    {
+      "label": "armed with a schedule - the ordinary working job",
+      "trigger": { "armed": true, "schedule": "0 7 * * 1" },
+      "expected": []
+    },
+    {
+      "label": "off, with a written reason",
+      "trigger": { "armed": false, "schedule": "0 7 * * 1", "reason": "waiting on the inbox connection" },
+      "expected": []
+    },
+    {
+      "label": "off, with no reason - the silence has to be a decision somebody made",
+      "trigger": { "armed": false, "schedule": "0 7 * * 1" },
+      "expected": ["Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"]
+    },
+    {
+      "label": "a reason of nothing but spaces is no reason",
+      "trigger": { "armed": false, "schedule": "0 7 * * 1", "reason": "   " },
+      "expected": ["Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"]
+    },
+    {
+      "label": "no trigger.armed field at all - never armed by default, and still owes a reason",
+      "trigger": { "schedule": "0 7 * * 1" },
+      "expected": ["Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"]
+    },
+    {
+      "label": "armed: \"yes\" - the wrong kind of true, which used to read as OFF in silence",
+      "trigger": { "armed": "yes", "schedule": "0 7 * * 1", "reason": "n/a" },
+      "expected": ["Monday Brief: trigger.armed must be true or false"]
+    },
+    {
+      "label": "armed: \"yes\" with nothing else - the type problem does not swallow the reason problem",
+      "trigger": { "armed": "yes", "schedule": "0 7 * * 1" },
+      "expected": [
+        "Monday Brief: trigger.armed must be true or false",
+        "Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"
+      ]
+    },
+    {
+      "label": "armed with no clock of any kind - a routine nobody could have created",
+      "trigger": { "armed": true },
+      "expected": ["Monday Brief: is armed but declares no schedule - there is nothing for a routine to fire on"]
+    },
+    {
+      "label": "a schedule of nothing but spaces is no schedule",
+      "trigger": { "armed": true, "schedule": "   " },
+      "expected": ["Monday Brief: is armed but declares no schedule - there is nothing for a routine to fire on"]
+    },
+    {
+      "label": "CLOCKLESS: an armed webhook has no schedule to declare - Lesson 10 builds exactly this",
+      "trigger": { "armed": true, "webhook": true },
+      "expected": []
+    },
+    {
+      "label": "CLOCKLESS: an armed dashboard button is the same object a webhook posts to",
+      "trigger": { "armed": true, "fire": true },
+      "expected": []
+    },
+    {
+      "label": "CLOCKLESS: an unarmed webhook is not off - it has nothing to be off from",
+      "trigger": { "armed": false, "webhook": true },
+      "expected": []
+    },
+    {
+      "label": "CLOCKLESS: an unarmed button job is not asked to justify a state it was never in",
+      "trigger": { "armed": false, "fire": true },
+      "expected": []
+    },
+    {
+      "label": "the exemption must NOT leak: a button job that also carries a schedule still owes a reason",
+      "trigger": { "armed": false, "fire": true, "schedule": "0 7 * * 1" },
+      "expected": ["Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"]
+    },
+    {
+      "label": "the exemption must NOT leak: a scheduled webhook job still owes a reason when off",
+      "trigger": { "armed": false, "webhook": true, "schedule": "0 7 * * 1" },
+      "expected": ["Monday Brief: is not armed and carries no reason - say what would have to change for it to be worth a run"]
+    },
+    {
+      "label": "a button job with a schedule, armed - both rules pass, neither is exempt",
+      "trigger": { "armed": true, "fire": true, "schedule": "0 7 * * 1" },
+      "expected": []
+    },
+    {
+      "label": "fire: false is not a button - it is a job with no clock at all",
+      "trigger": { "armed": true, "fire": false, "webhook": false },
+      "expected": ["Monday Brief: is armed but declares no schedule - there is nothing for a routine to fire on"]
+    }
+  ]
+}
