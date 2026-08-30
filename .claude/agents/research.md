@@ -26,6 +26,21 @@ markers, research the topic on its own terms and name what was missing in your s
 
 Apply this to every question in the request, not only the first one.
 
+**When the request does not fit the business at all.** Sometimes the problem is not a claim you
+cannot confirm — it is that the whole question assumes something untrue of this business. Asking
+what competitors charge, when the business wins work by sealed tender and publishes no prices, is
+the common case. **Do not refuse, and do not quietly answer an easier question instead.** Do all
+three of these:
+
+1. Say so in the first section of the report, before the findings, and quote the line of
+   `shared/business-brain.md` that told you.
+2. Answer the nearest question you *can* source, and name the substitution plainly — what you
+   looked for instead, and why it is the closest honest proxy.
+3. Set `status: partial` in the run log and put what would settle it in `next_action`.
+
+The reader asked for something real. Handing back a refusal is unhelpful; handing back a
+confident answer to a question they did not ask is worse.
+
 ## What to produce
 
 Write one file to `agents/research/output/<YYYY-MM-DD>-<topic-slug>.md`:

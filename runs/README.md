@@ -39,7 +39,7 @@ is no `:` anywhere.
 | `trigger` | string | `schedule`, `webhook`, or `manual`. |
 | `started_at` | string | ISO instant ending in `Z`. |
 | `finished_at` | string | ISO instant ending in `Z`. |
-| `status` | string | `ok`, `partial`, `blocked`, or `failed`. |
+| `status` | string | `ok`, `partial`, `blocked`, or `failed`. Defined below — the four are easy to confuse and the dashboard colours two of them as warnings. |
 | `summary` | string | Complete sentences, at least 40 characters, no arrow chains. Written for someone who saw none of the work. |
 | `artifacts` | string[] | Repo-relative paths the run produced. |
 | `evidence` | string[] | Things a tool actually returned. Not claims. |
@@ -47,6 +47,23 @@ is no `:` anywhere.
 | `quality` | object? | Only on a graded run. `{ rubric, score, total, verdict, retried }` - `verdict` is `passed` or `flagged`. The weekly quality review counts acceptance from these. |
 | `session_id` | string or null | `CLAUDE_CODE_REMOTE_SESSION_ID`. Null only on a local manual run. |
 | `session_url` | string or null | `https://claude.ai/code/session_<session_id>`. Null only on a local manual run. |
+
+## Which `status` to write
+
+The four were listed here for a long time without being defined, which meant the same run could
+honestly be logged three different ways. Use this:
+
+| Status | Use it when | Test |
+|---|---|---|
+| `ok` | The run did what was asked and you would be content for nobody to read the log. | Would you be happy if this ran unattended at 6am and nobody looked? |
+| `partial` | It produced something useful, but **not the thing that was asked for** — a substituted question, a subset of the sources, half the list. The output stands on its own; something is missing and you can name it. | Can you write one sentence in `next_action` saying what would complete it? If yes, this is `partial`. |
+| `blocked` | It could not proceed and **a person has to do something** — grant access, supply a file, answer a question. Nothing useful was produced. | Is the next move somebody else's? |
+| `failed` | It broke. A tool errored, a write failed, the run died. | Would you call this a bug rather than a limitation? |
+
+**`partial` is not a softer `failed`.** A run that answered a near-miss question well, said so, and
+named what would settle it is a good run — it just is not `ok`. And **`ok` with a non-null
+`next_action` is usually really `partial`**: if something still has to happen, the run did not
+finish the job.
 
 ## Checking a file
 
