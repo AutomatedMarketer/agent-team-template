@@ -473,6 +473,7 @@ const SAMPLE_BLOCKS = [
   { lesson: /_THE_MATCH\.md$/, script: 'check-proposals.mjs', starts: /^\d+ proposals?, covering / }
 ]
 
+let refused = false
 const withExamples = async (run) => {
   const copies = [['ledger.example.yml', 'ledger.yml'], ['proposals.example.yml', 'proposals.yml']]
   const made = []
@@ -491,9 +492,13 @@ const withExamples = async (run) => {
       // file that blocked it. A guard against a stray file in the repo root must not leave one.
       // fail() accumulates and the script exits 1 after cleanup has run.
       if (await readFile(target, 'utf8').then(() => true).catch(() => false)) {
+        // Once. withExamples runs per sample block, so one misplaced file used to report itself
+        // as many separate problems and the tail counted them as that many drifts in the prose.
+        if (refused) return null
         fail(`cannot grade sample blocks: a real ${dst} is in the repo root. This guard needs ` +
              `${src} to be the file the command reads - move ${dst} aside and re-run. Grading a ` +
              'lesson against your own data reports the lesson broken when it is not.')
+        refused = true
         return null
       }
       await writeFile(target, source)
@@ -635,7 +640,7 @@ for (const note of notes) console.log(`ok   ${note}`)
 if (problems.length) {
   console.log('')
   for (const p of problems) console.log(`FAIL ${p}`)
-  console.log(`\n${problems.length} number(s) in the course prose no longer match the files`)
+  console.log(`\n${problems.length} problem(s) - the course prose no longer matches the files`)
   process.exit(1)
 }
 console.log('\nevery stated course number matches what the files actually contain')

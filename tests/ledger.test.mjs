@@ -345,7 +345,8 @@ test('a parked task can say why, and saying why does not unpark it', () => {
       dumping every reason at the top passed that check while the parked row displayed bare -
       the exact defect. The reason has to be ON the line under its task.
 
-   3. The fixture needs THREE parked tasks: two with distinct reasons, one with none.
+   3. The fixture must cover every bucket the printer has. Three parked tasks - two with
+      distinct reasons, one with none - plus a handed-off row and a note.
       With one, "the reason under this row" and "the first
       reason in this bucket" are indistinguishable, and a mutation printing one task's reason
       under every parked row passed green while silently misattributing it and dropping the
@@ -385,6 +386,12 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
       '    times_per_week: 1',
       '    minutes_each: 30',
       '    confirmed: twice',
+      '  - task: Reading the trade press',
+      '    words: "I skim it when a job is quiet"',
+      '    who: me',
+      '    times_per_week: 1',
+      '    minutes_each: 15',
+      '    confirmed: once',
       ''
     ].join('\n'))
 
@@ -415,6 +422,15 @@ test('each parked task is printed with its own reason, not the bucket\'s', async
     // field is optional by design, so a mix of reasoned and unreasoned parked rows is the
     // normal ledger - and it was the one arrangement the fixture did not contain.
     assert.doesNotMatch(lines[rowFor('Tidying the shared drive') + 1] ?? '', /MARKER-/)
+
+    // The printer has THREE buckets and the fixture exercised two. A note is not parked, so
+    // it has no reason of its own - and a leak into Notes is the exact twin of the Ready leak
+    // guarded below, which I closed while leaving its sibling open. With Ready, Parked
+    // (own / another's / none) and Notes all covered, the print loop has no untested branch
+    // left for a mutation to hide in.
+    const noteRow = lines.findIndex((line) => line.includes('Reading the trade press'))
+    assert.ok(noteRow !== -1, 'the once-only task should be listed as a note')
+    assert.doesNotMatch(lines[noteRow + 1] ?? '', /MARKER-/)
 
     // a task that WAS handed off must not acquire a reason it never had
     const readyRow = lines.findIndex((line) => line.includes('Chasing subcontractor quotes'))
