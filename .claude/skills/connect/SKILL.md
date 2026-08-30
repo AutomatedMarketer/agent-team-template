@@ -26,6 +26,12 @@ start, because the thing they are bracing for is a wall of setup instructions.
 3. **Read-only to prove it.** Never write, send, post, or spend to verify a connection.
 4. **Never research from memory.** Connection details change monthly. Look them up, and say
    when you looked.
+5. **Ask whose account it is before wiring anything they did not sign up for themselves.**
+   A work Google or Slack account is administered by someone else: they may not be permitted to
+   grant access, the admin can revoke it without telling them, and the data behind it is their
+   employer's rather than theirs. If it is a work account, say so plainly, offer a personal one
+   for the course exercises, and **do not connect it while the question is open**. Every other
+   failure in this skill is recoverable by clicking again; this one is not.
 
 ## 1. Show them where they stand
 
