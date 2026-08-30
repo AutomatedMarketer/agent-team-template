@@ -1,8 +1,9 @@
 import test from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { writeFile, rm } from 'node:fs/promises'
+import { writeFile, rm, mkdtemp } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const run = promisify(execFile)
@@ -329,39 +330,63 @@ test('a parked task can say why, and saying why does not unpark it', () => {
 })
 
 /* The USER-VISIBLE half of parked_because had no test: the data model was proven, the printed
-   line was not, and a verifier deleted the console.log with the suite still green. The commit
-   message said "mutation-proven" while the half a reader actually sees was the untested half -
-   the same class this project keeps rediscovering, one layer down.
+   line was not, and a verifier deleted the console.log with the suite still green.
 
-   This runs the real command against a scratch ledger rather than asserting on a string. */
-test('the parked reason is actually printed, not just stored', async (t) => {
-  const scratch = join(repoRoot, 'ledger.yml')
-  const { existsSync } = await import('node:fs')
-  if (existsSync(scratch)) {
-    t.skip('a real ledger.yml is present - not overwriting it')
-    return
-  }
-  await writeFile(scratch, [
-    'owner_type: job',
-    'tasks:',
-    '  - task: Portal uploads',
-    '    words: "four portals, four ways to fail"',
-    '    who: me',
-    '    times_per_week: 3',
-    '    minutes_each: 25',
-    '    confirmed: twice',
-    '    parked_because: "ZZ-MARKER the upload IS the submission"',
-    ''
-  ].join('\n'))
+   Two things this test must not do, both learned the hard way:
+
+   1. It must not write a ledger.yml into the repo. The first version did, and skipped itself
+      whenever one already existed - which is every student repo past Lesson 15, including the
+      one this course tells them to build. A skipped test is not a passing one and
+      readme.test.mjs asserts the pass count, so it reproduced the Lesson 15 defect in a worse
+      form: it fired on the repos that had done the work. The fixture lives in a temp dir and
+      the real binary is pointed at it.
+
+   2. It must not just grep stdout for the reason. Moving the print out of the per-task loop and
+      dumping every reason at the top of the report passed that check while the parked row
+      displayed with no reason - the exact defect. The reason has to be ON the line under its
+      task. */
+test('the parked reason is printed under the task it belongs to', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ledger-parked-'))
   try {
-    const { stdout } = await run(process.execPath, ['scripts/check-ledger.mjs'], { cwd: repoRoot })
-    assert.match(stdout, /Parked:/, 'the task should be parked')
+    await writeFile(join(dir, 'ledger.yml'), [
+      'owner_type: job',
+      'tasks:',
+      '  - task: Chasing subcontractor quotes',
+      '    words: "the same six subbies, every morning"',
+      '    who: me',
+      '    times_per_week: 5',
+      '    minutes_each: 45',
+      '    confirmed: twice',
+      '    hands_off: "Priya the estimator - she is the one waiting."',
+      '  - task: Portal uploads',
+      '    words: "four portals, four ways to fail"',
+      '    who: me',
+      '    times_per_week: 3',
+      '    minutes_each: 25',
+      '    confirmed: twice',
+      '    parked_because: "ZZ-MARKER the upload IS the submission"',
+      ''
+    ].join('\n'))
+
+    const { stdout } = await run(process.execPath, ['scripts/check-ledger.mjs', dir], { cwd: repoRoot })
+    const lines = stdout.split('\n').map((line) => line.trimEnd())
+
+    const parkedHeading = lines.findIndex((line) => line.startsWith('Parked:'))
+    assert.ok(parkedHeading !== -1, 'the task with no handover should be parked')
+
+    const taskRow = lines.findIndex((line, i) => i > parkedHeading && line.includes('Portal uploads'))
+    assert.ok(taskRow !== -1, 'the parked task should be listed under Parked')
+
     assert.match(
-      stdout,
+      lines[taskRow + 1] ?? '',
       /ZZ-MARKER the upload IS the submission/,
-      'the park reason must reach the screen - storing it and never printing it is the defect this fixes'
+      'the reason must sit directly under its own task row - printing it anywhere else leaves the parked row bare, which is the defect'
     )
+
+    // and the task that WAS handed off must not acquire a reason it never had
+    const readyRow = lines.findIndex((line) => line.includes('Chasing subcontractor quotes'))
+    assert.doesNotMatch(lines[readyRow + 1] ?? '', /ZZ-MARKER/)
   } finally {
-    await rm(scratch, { force: true })
+    await rm(dir, { recursive: true, force: true })
   }
 })

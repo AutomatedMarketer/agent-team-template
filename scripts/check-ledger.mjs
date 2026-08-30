@@ -11,9 +11,16 @@ import { loadLedger, validateLedger, summarize, deriveTask } from './lib/ledger.
 const hours = (value) => `${value.toFixed(1)} hours a week`
 const money = (value) => `$${Math.round(value).toLocaleString('en-US')} a week`
 
+// Optional directory to read ledger.yml from. Students never pass it - `npm run check:ledger`
+// reads the repo's own ledger, as it always has. It exists so a test can run THIS binary against
+// a fixture without writing a ledger.yml into the repo being tested: a stray ledger.yml makes
+// tests skip, a skipped test is not a passing one, and readme.test.mjs asserts the pass count.
+// That is the Lesson 15 defect, and the first version of this test walked straight back into it.
+const root = process.argv[2]
+
 let ledger
 try {
-  ledger = await loadLedger()
+  ledger = root ? await loadLedger(root) : await loadLedger()
 } catch (error) {
   if (error.code === 'ENOENT') {
     console.error('No ledger.yml yet. Ask for one: /ledger')
