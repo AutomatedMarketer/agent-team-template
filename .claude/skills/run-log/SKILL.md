@@ -11,22 +11,35 @@ asleep while you worked.
 
 ## 1. Collect the facts
 
-```bash
-date -u +%Y-%m-%dT%H:%M:%SZ             # for started_at and finished_at
-echo "$CLAUDE_CODE_REMOTE_SESSION_ID"   # empty on a local run
-echo "$CLAUDE_CODE_REMOTE"              # "true" only in a routine
+```
+node scripts/run-facts.mjs <agent> [workflow]
 ```
 
-- `session_id` is `CLAUDE_CODE_REMOTE_SESSION_ID`. On a local run it is empty; write `null`.
-- `session_url` is `https://claude.ai/code/session_<session_id>`, or `null` locally.
-- `trigger` is `schedule` or `webhook` when `CLAUDE_CODE_REMOTE` is `true`, otherwise `manual`.
+One command, every fact below, and the path to write to. It runs the same in PowerShell,
+Terminal and bash, so it does not matter which machine you are on.
+
+```
+started_at   2026-08-30T14:27:44Z
+trigger      manual
+session_id   null
+session_url  null
+run_id       2026-08-30T1427Z-research-morning-intel
+path         runs/2026-08/2026-08-30T1427Z-research-morning-intel.json
+```
+
+- `session_id` is `CLAUDE_CODE_REMOTE_SESSION_ID`. On a local run it is empty and the command
+  prints `null`; write `null`.
+- `trigger` reads `CLAUDE_CODE_REMOTE`. The command prints `schedule` for every remote run — if a
+  webhook fired this one rather than the clock, write `webhook` instead.
+- `finished_at` is the same command run again once the work is done.
 
 ## 2. Write the file
 
 Path: `runs/<YYYY-MM>/<run_id>.json`, where `run_id` is `<YYYY-MM-DD>T<HHMM>Z-<agent>`.
 If the run executed a workflow, append its slug — `<...>Z-<agent>-<workflow>` — so two
 jobs owned by one agent in the same minute never collide. No colon anywhere in the name —
-these files are read on Windows.
+these files are read on Windows. Step 1 builds this name for you and prints it as
+`path`, colon-free and with the workflow slug already appended.
 
 If this run executed a workflow (a file in `workflows/`), record which one in a
 `workflow` field — its slug, exactly as the filename. The dashboard's Workflows board

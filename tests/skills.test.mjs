@@ -32,3 +32,24 @@ test('every skill passes the prompt audit', async () => {
     assert.deepEqual(findings, [], `${skill}: ${JSON.stringify(findings)}`)
   }
 })
+
+test('no skill hands a student a shell-specific command', async () => {
+  // Most students are on Windows, where PowerShell is the default shell. `date -u`,
+  // `echo "$VAR"` and friends fail there. Three walkthrough logs hit this.
+  const bashOnly = [
+    /^\s*date\s+-u\b/m,
+    /^\s*echo\s+"\$[A-Z_]+"/m,
+    /^\s*export\s+[A-Z_]+=/m
+  ]
+  for (const skill of await skillNames()) {
+    const body = await read(`.claude/skills/${skill}/SKILL.md`)
+    for (const pattern of bashOnly) {
+      assert.doesNotMatch(body, pattern, `${skill}/SKILL.md uses a command that fails in PowerShell`)
+    }
+  }
+})
+
+test('the run-log skill points at the cross-platform facts command', async () => {
+  const skill = await read('.claude/skills/run-log/SKILL.md')
+  assert.match(skill, /node scripts\/run-facts\.mjs/)
+})
