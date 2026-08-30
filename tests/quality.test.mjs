@@ -128,3 +128,107 @@ test('a specialist never grades its own work', async () => {
   const skill = await read('.claude/skills/review-draft/SKILL.md')
   assert.match(skill, /editor/, 'the grading step must delegate to the editor')
 })
+
+/* ---------- the verdict was the one artifact with no checker -------------------------------
+
+   runs/ has validate:runs, ledger.yml has check:ledger, proposals.yml has check:proposals,
+   workflows/ has check:arming. quality/verdicts/ had nothing - and it is the file the entire
+   improvement stage is computed from.
+
+   The failure is not that a bad verdict is counted badly. It is that it is not counted at all:
+   an unrecognised value leaves BOTH halves of shipped/(shipped+edited+rejected), so dropping a
+   rejection RAISES the acceptance rate. The lesson taught that as the design - "anything else
+   cannot be counted, so the review silently drops it". */
+
+const verdictFile = (over = {}) => ({
+  path: 'quality/verdicts/2026-08-30-a-piece.md',
+  source: [
+    '---',
+    `run_id: ${over.run_id ?? '2026-08-30T0546Z-content'}`,
+    `artifact: ${over.artifact ?? 'agents/content/output/a-piece.md'}`,
+    `rubric: ${over.rubric ?? 'content'}`,
+    `verdict: ${over.verdict ?? 'edited'}`,
+    ...(over.graded === null ? [] : [`graded: ${over.graded ?? '11/12'}`]),
+    '---',
+    '',
+    '# A piece',
+    '',
+    '## What changed',
+    'Opening was X. Replaced with Y.',
+    ...(over.rule === null ? [] : ['', '## The rule this becomes', 'Open on something that happened to me.'])
+  ].join('\n')
+})
+
+const KNOWN = {
+  runIds: ['2026-08-30T0546Z-content'],
+  artifacts: ['agents/content/output/a-piece.md'],
+  rubrics: ['content']
+}
+
+test('a well-formed verdict passes', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.deepEqual(validateVerdict(verdictFile(), KNOWN), [])
+})
+
+test('a verdict value outside the three is refused, not dropped', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  const problems = validateVerdict(verdictFile({ verdict: 'partial' }), KNOWN)
+  assert.equal(problems.length, 1, problems.join('\n'))
+  assert.match(problems[0], /not one of shipped, edited, rejected/)
+})
+
+test('a verdict about a piece that does not exist is refused', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  const problems = validateVerdict(verdictFile({ artifact: 'agents/content/output/never-written.md' }), KNOWN)
+  assert.match(problems.join('\n'), /which is not in this repo/)
+})
+
+test('a verdict citing a run that never happened is refused', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.match(
+    validateVerdict(verdictFile({ run_id: '2026-08-30T9999Z-does-not-exist' }), KNOWN).join('\n'),
+    /which has no run log/
+  )
+})
+
+test('a score cannot beat its own total - the same rule run logs already enforce', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.match(validateVerdict(verdictFile({ graded: '47/12' }), KNOWN).join('\n'), /cannot beat its own total/)
+})
+
+test('an ungraded piece is fine - review-draft does not run on every output', async () => {
+  // Marcus's content run was invoked directly and carries no quality block, so there is no
+  // score to cite. Demanding one would make the common case unfileable.
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.deepEqual(validateVerdict(verdictFile({ graded: null }), KNOWN), [])
+  assert.deepEqual(validateVerdict(verdictFile({ graded: 'none - review-draft did not run' }), KNOWN), [])
+})
+
+test('a verdict with no rule is a diary entry and is refused', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.match(validateVerdict(verdictFile({ rule: null }), KNOWN).join('\n'), /diary entry/)
+})
+
+test('an unknown list is skipped, not failed - absence is not evidence', async () => {
+  // Called with no `known` at all, the cross-checks have nothing to compare against. A caller
+  // without a list must not turn every verdict into a problem.
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.deepEqual(validateVerdict(verdictFile({ artifact: 'anything/at/all.md', rubric: 'whatever' })), [])
+})
+
+test('a dropped verdict raises the acceptance rate, which is why it must be counted', async () => {
+  const { acceptance } = await import('../scripts/lib/verdicts.mjs')
+  const week = [
+    verdictFile({ verdict: 'shipped' }),
+    verdictFile({ verdict: 'rejected' }),
+    verdictFile({ verdict: 'rejected' })
+  ]
+  assert.equal(acceptance(week).rate, 1 / 3)
+
+  // The same week with one rejection mistyped. Silently dropping it does not report a worse
+  // week - it reports a better one.
+  const mistyped = [week[0], week[1], verdictFile({ verdict: 'binned' })]
+  const got = acceptance(mistyped)
+  assert.equal(got.rate, 1 / 2, 'a dropped rejection moves the rate from 33% to 50%')
+  assert.equal(got.uncountable, 1, 'and the only thing that makes it visible is counting it apart')
+})

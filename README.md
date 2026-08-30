@@ -145,7 +145,7 @@ npm test
 `node --version` must say 20 or higher. `npm test` ends with these two lines:
 
 ```
-ℹ pass 402
+ℹ pass 411
 ℹ fail 0
 ```
 
@@ -167,13 +167,14 @@ that decides whether everything else is any good.
 Four commands, in this order. Each tells you something different.
 
 ```bash
-npm test                 # ends with "pass 402 / fail 0". If this fails, the clone is broken
+npm test                 # ends with "pass 411 / fail 0". If this fails, the clone is broken
 npm run check:ledger     # your week, measured
 npm run check:proposals  # what your numbers say your team should be
 npm run check:arming     # which jobs actually ring
+npm run check:verdicts   # what you did with the work, and whether it can be counted
 ```
 
-On a fresh clone the last three **tell you what is missing** rather than failing mysteriously.
+On a fresh clone the last four **tell you what is missing** rather than failing mysteriously.
 `No ledger.yml yet. Ask for one: /ledger` is the correct answer before you have run `/ledger`.
 
 Two of them also **exit non-zero** while they are saying it, which is right for anything automated

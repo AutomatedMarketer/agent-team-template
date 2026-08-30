@@ -36,6 +36,17 @@ year and got two of them wrong."
 Open on something that happened to me, never on a category statement about the industry.
 ```
 
+## Check it
+
+```bash
+npm run check:verdicts
+```
+
+Every other artifact here has a checker - `runs/` has `validate:runs`, `ledger.yml` has
+`check:ledger`, `workflows/` has `check:arming`. This one had none, and it is the file the
+acceptance rate is computed from. A verdict whose value is not one of the three is not counted as
+a bad week; it leaves the fraction entirely, so a mistyped rejection **raises** the rate.
+
 ## The rule is the point
 
 A verdict that does not change a file is a diary entry. Every `edited` or `rejected` verdict

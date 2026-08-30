@@ -61,6 +61,16 @@ graded: 11/12
 | `edited` | Used, but changed first. Say what changed |
 | `rejected` | Not used |
 
+**Anything else is refused, not counted badly.** `npm run check:verdicts` rejects a value outside
+the three, a piece or run that does not exist, a score above its own total, and a verdict with no
+rule. Run it before you say the verdict is filed. A value the weekly review cannot bucket leaves
+both halves of `shipped / (shipped + edited + rejected)`, so a mistyped rejection raises the
+acceptance rate instead of lowering it.
+
+**`graded:` is optional.** It is there when `review-draft` graded the piece. When the owner asked
+an agent for something directly there is no score - write what you know, or leave the field out.
+Never invent one.
+
 **Watch for the gap that matters:** a piece the editor passed and the owner rejected. That
 is the rubric being wrong, not the writer, and it is the most valuable signal in the folder.
 Say so plainly when you see it.
