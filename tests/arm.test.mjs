@@ -368,3 +368,63 @@ test('names match through unicode composition - Cafe and Café are the same name
     'a decomposed name would report declared AND leave an orphan for one correctly armed job'
   )
 })
+
+/* ---------- arming what nobody approved ------------------------------------------------------
+
+   `arm/SKILL.md` carries the hardest rule in the chain - "Never arm anything their ledger did not
+   ask for" - and until these tests existed it was enforced nowhere. check:arming had no reference
+   to proposals at all. Every other link is re-derived and compared; the one that spends money was
+   taken on the model's word.
+
+   Both repos in this walkthrough ship every workflow `armed: false`, so a guard added here is
+   silent in both. That is exactly the shape of the check:arming bug found in lesson 14, which
+   matched nothing and printed nothing and read like a clean repo. So these fixtures assert it
+   FIRES, not just that the suite stays green. */
+
+const armedJob = (over = {}) => ({
+  slug: 'inbox-triage',
+  path: 'workflows/inbox-triage.yml',
+  data: {
+    name: 'Inbox Triage',
+    owner: 'email',
+    steps: ['triage-inbox', 'draft-replies'],
+    trigger: { schedule: 'weekdays 08:00', armed: true },
+    ...over
+  }
+})
+
+test('an armed job that traces back to nothing in proposals.yml is refused', async () => {
+  const { armedWithoutApproval } = await import('../scripts/lib/arm.mjs')
+  const problems = armedWithoutApproval([armedJob()], { proposals: [] })
+  assert.equal(problems.length, 1, 'an armed job nobody approved has to be named')
+  assert.match(problems[0], /is armed, but nothing in proposals\.yml approves it/)
+})
+
+test('an empty proposals file approves nothing - the employee case', async () => {
+  // A week where every task correctly declined leaves `proposals:` empty, which is a valid file
+  // (lesson 16). It is not, however, approval for anything.
+  const { armedWithoutApproval } = await import('../scripts/lib/arm.mjs')
+  assert.equal(armedWithoutApproval([armedJob()], { proposals: {} }).length, 1)
+  assert.equal(armedWithoutApproval([armedJob()], {}).length, 1)
+})
+
+test('approval traces three ways: the workflow, any one step, or the owner', async () => {
+  const { armedWithoutApproval } = await import('../scripts/lib/arm.mjs')
+  const approves = (item) => ({ proposals: [{ task: 'x', item }] })
+
+  assert.deepEqual(armedWithoutApproval([armedJob()], approves('workflow:inbox-triage')), [])
+  assert.deepEqual(armedWithoutApproval([armedJob()], approves('agent:email')), [])
+  // ANY step, not all: the skill's own example approves one skill and chains it into a job whose
+  // other steps were never proposed on.
+  assert.deepEqual(armedWithoutApproval([armedJob()], approves('skill:triage-inbox')), [])
+  assert.deepEqual(armedWithoutApproval([armedJob()], approves('skill:draft-replies')), [])
+  // A near miss is still a miss - the kind is part of the id.
+  assert.equal(armedWithoutApproval([armedJob()], approves('skill:inbox-triage')).length, 1)
+  assert.equal(armedWithoutApproval([armedJob()], approves('agent:research')).length, 1)
+})
+
+test('a job left off is never asked to be approved - only arming spends', async () => {
+  const { armedWithoutApproval } = await import('../scripts/lib/arm.mjs')
+  const off = armedJob({ trigger: { schedule: 'weekdays 08:00', armed: false, reason: 'no inbox yet' } })
+  assert.deepEqual(armedWithoutApproval([off], { proposals: [] }), [])
+})

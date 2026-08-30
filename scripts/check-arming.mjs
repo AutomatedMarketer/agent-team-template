@@ -13,7 +13,8 @@
 // the test suite can run is a rule students never see.
 
 import { loadWorkflows } from './lib/workflows.mjs'
-import { loadRoutineSnapshot, reconcile } from './lib/arm.mjs'
+import { loadRoutineSnapshot, reconcile, armedWithoutApproval, isArmed } from './lib/arm.mjs'
+import { loadProposals } from './lib/proposals.mjs'
 import { notInUseAgents } from './lib/knowledge.mjs'
 
 const workflows = await loadWorkflows()
@@ -89,6 +90,28 @@ if (result.orphans.length) {
   console.log('\nRoutines with no workflow file behind them:')
   for (const orphan of result.orphans) console.log(`  ${orphan.name}`)
   console.log('  Reported, not adopted. Something was renamed or removed after it was armed.')
+}
+
+// APPROVAL, checked rather than trusted. The /arm skill says never to arm anything the ledger did
+// not ask for; nothing enforced it, on the single step in the chain that spends money.
+//
+// A missing proposals.yml is NOT a failure here - somebody may not have reached lesson 16 yet -
+// but it is not silence either. Saying "I cannot tell" is the same discipline the snapshot gets a
+// few lines up, and for the same reason: an absent file is not evidence of approval.
+// `result.armed` is the wrong predicate here and was wrong on the first attempt: without a
+// snapshot nothing is CALLED armed, everything lands in `unknown`, and the message was suppressed
+// in exactly the state a fresh repo is in. Approval is a fact about the FILE - it does not depend
+// on knowing what rings - so both branches below read the file, the same way armedWithoutApproval
+// does. Caught by an end-to-end test rather than by the unit tests, which never touch the wiring.
+const armedInFiles = workflows.filter((row) => isArmed(row))
+const proposals = await loadProposals().catch(() => null)
+if (proposals === null) {
+  if (armedInFiles.length) {
+    console.log('')
+    console.log(`${plural(armedInFiles, 'job')} armed, and no proposals.yml - whether they were approved is UNKNOWN. Run /match.`)
+  }
+} else {
+  for (const problem of armedWithoutApproval(workflows, proposals)) result.problems.push(problem)
 }
 
 if (result.problems.length) {

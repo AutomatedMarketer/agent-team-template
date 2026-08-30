@@ -29,6 +29,12 @@ async function armingOutput(extraWorkflow, options = {}) {
   if (extraWorkflow) {
     await writeFile(join(scratch, 'workflows', 'scratch-job.yml'), extraWorkflow)
   }
+  // proposals.yml is not one of the copied directories, so a scratch repo has none unless a test
+  // asks for one. That is itself a case worth running: no proposals file means approval is
+  // UNKNOWN, not granted.
+  if (options.proposals !== undefined) {
+    await writeFile(join(scratch, 'proposals.yml'), options.proposals)
+  }
   // The summary goes to stdout and the fix list goes to stderr. Reading only one of them is how
   // you convince yourself a contradiction between the two does not exist.
   try {
@@ -204,4 +210,53 @@ test('with no snapshot, the closing line does not claim to know what it just sai
   assert.match(run.stdout, /UNKNOWN/, 'the fixture should have produced an unknown state')
   assert.ok(!/Every job is either armed, or off with a reason/.test(run.stdout),
     'it claimed every job is armed or off, in the same output as saying it cannot tell which')
+})
+
+/* ---------- the approval gate, through the real script ---------------------------------------
+
+   arm.test.mjs proves the function. This proves the WIRING, which is where the lesson-14 bug
+   actually lived: a guard whose predicate was right and whose plumbing matched nothing, printing
+   nothing, reading exactly like a clean repo. */
+
+const ARMED_UNAPPROVED = [
+  'name: Scratch Job',
+  'owner: research',
+  'steps: [scan-market]',
+  'trigger:',
+  '  schedule: "daily 06:00"',
+  '  armed: true',
+  'output: inbox/scratch.md',
+  ''
+].join('\n')
+
+test('check:arming refuses an armed job that proposals.yml does not approve', async () => {
+  const result = await armingOutput(ARMED_UNAPPROVED, { proposals: 'proposals:\n\ngaps:\n' })
+  await rm(result.scratch, { recursive: true, force: true })
+  assert.notEqual(result.code, 0, `an unapproved armed job must not exit clean:\n${result.stdout}`)
+  assert.match(result.stdout, /Scratch Job: is armed, but nothing in proposals\.yml approves it/)
+})
+
+test('check:arming accepts the same job once its owner is approved', async () => {
+  const approved = [
+    'proposals:',
+    '  - task: Keeping an eye on the market',
+    '    item: agent:research',
+    '    why: "it is the agent that does the looking up"',
+    '    words: "I read the trade press every morning"',
+    '    number: "1 hour a week"',
+    ''
+  ].join('\n')
+  const result = await armingOutput(ARMED_UNAPPROVED, { proposals: approved })
+  await rm(result.scratch, { recursive: true, force: true })
+  assert.doesNotMatch(result.stdout, /nothing in proposals\.yml approves it/,
+    `approving agent:research should have covered a job it owns:\n${result.stdout}`)
+})
+
+test('with no proposals.yml at all, approval is reported UNKNOWN rather than assumed', async () => {
+  const result = await armingOutput(ARMED_UNAPPROVED)
+  await rm(result.scratch, { recursive: true, force: true })
+  assert.match(result.stdout, /whether they were approved is UNKNOWN/,
+    `an absent file is not evidence of approval:\n${result.stdout}`)
+  assert.doesNotMatch(result.stdout, /nothing in proposals\.yml approves it/,
+    'a missing file must not be reported as a refusal - those are different claims')
 })

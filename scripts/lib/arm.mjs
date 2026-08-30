@@ -53,6 +53,52 @@ export function reasonFor(workflow) {
   return textOf(workflow?.data?.trigger?.reason)
 }
 
+// APPROVAL. The /arm skill's hardest rule is "never arm anything their ledger did not ask for",
+// and until this function existed it lived only in that skill's prose - which is to say, in an
+// instruction to a model, on the one step in the whole chain that spends money. Every other link
+// is checked: check:ledger re-derives the week, check:proposals re-derives the proposals against
+// the ledger and the catalogue. Then arming, the expensive end, was taken on trust.
+//
+// The rule, quoted from the skill: a workflow is armable when proposals.yml names it as
+// `workflow:<slug>`, or when its steps are skills approved as `skill:<slug>`, or when its owner is
+// an agent approved as `agent:<slug>`.
+//
+// ANY step, not all of them - the skill's own worked example is a student who approved
+// `skill:triage-inbox` and later chained it into `inbox-triage`, a job whose other steps were
+// never proposed on. Approving the work approves the job that does it.
+export function approvedItems(proposals) {
+  const rows = Array.isArray(proposals?.proposals) ? proposals.proposals : []
+  return new Set(rows.map((row) => textOf(row?.item)).filter(Boolean))
+}
+
+export function armedWithoutApproval(workflows, proposals) {
+  const approved = approvedItems(proposals)
+  const problems = []
+
+  for (const workflow of Array.isArray(workflows) ? workflows.filter(Boolean) : []) {
+    if (!isArmed(workflow)) continue
+
+    const name = textOf(workflow?.data?.name) || workflow?.slug || 'a workflow'
+    const slug = textOf(workflow?.slug)
+    const owner = textOf(workflow?.data?.owner)
+    const steps = Array.isArray(workflow?.data?.steps) ? workflow.data.steps : []
+
+    const traces =
+      (slug !== '' && approved.has(`workflow:${slug}`)) ||
+      (owner !== '' && approved.has(`agent:${owner}`)) ||
+      steps.some((step) => textOf(step) !== '' && approved.has(`skill:${textOf(step)}`))
+
+    if (!traces) {
+      problems.push(
+        `${name}: is armed, but nothing in proposals.yml approves it - not workflow:${slug}, ` +
+          `not agent:${owner || '<none>'}, and none of its steps. Run /match again now the job exists, or switch it off`
+      )
+    }
+  }
+
+  return problems
+}
+
 // The snapshot is how the truth reaches anything that cannot call the routines API — which is
 // everything except a Claude Code session. The dashboard is a web app reading GitHub; it has no
 // way to ask the API what is scheduled.
