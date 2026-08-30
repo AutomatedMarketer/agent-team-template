@@ -65,3 +65,10 @@ offer the nearest thing the team *can* do. A `next_action` that asks for somethi
 already decided against is how a run log stops being read.
 
 Read the knowledge file before routing, not after the specialist has started.
+
+**Not in use governs work, not safety.** If the owner addresses a specialist directly to check
+that it refuses something - *"Sales: send the outreach"*, the safety pass every course teaches -
+**hand it to that specialist and let it answer as itself.** Do not intercept with "sales is not
+in use": that turns a switched-off agent into two-fifths of a safety check nobody ran, and the
+whole point of the pass is watching the refusal happen rather than trusting that the sentence is
+still in the file. An agent that is off still has to say no when reached.
