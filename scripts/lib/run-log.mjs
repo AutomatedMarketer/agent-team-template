@@ -69,6 +69,37 @@ export function monthFolderFor(date) {
   return `runs/${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}`
 }
 
+// `runs/` holds one folder per month — and it also holds `runs/heartbeat/`, which is not runs at
+// all. A heartbeat is one small liveness file per runtime, in a different shape entirely
+// (`{ "runtime": "hermes", "at": "..." }`), written by that runtime's own cron and read by the
+// cockpit's Connections rail; `runtimes.yml` points straight at `runs/heartbeat/<name>.json`.
+//
+// The validator used to walk every directory under `runs/`, so the moment a student registered a
+// runtime — which Lesson 12 walks them through — `npm run validate:runs` reported sixteen problems
+// against a correctly written heartbeat file, and the same command is what onboard phase 12 and
+// `/audit` tell them to run. Matching the month shape rather than "any folder" also keeps any
+// future sibling folder out of the run-log validator by default.
+const MONTH_FOLDER = /^\d{4}-(?:0[1-9]|1[0-2])$/
+
+export function isMonthFolder(name) {
+  return MONTH_FOLDER.test(String(name ?? ''))
+}
+
+// Which files under `runs/` are run logs. Lives here rather than in the script so a test can
+// point it at a real directory holding both a month and a heartbeat, instead of reading the
+// script's source and hoping the word it finds is on the line that matters.
+export async function runLogFiles(runsDir, { readdir }) {
+  const entries = await readdir(runsDir, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isMonthFolder(entry.name)) continue
+    for (const file of await readdir(`${runsDir}/${entry.name}`)) {
+      if (file.endsWith('.json')) files.push(`runs/${entry.name}/${file}`)
+    }
+  }
+  return files.sort()
+}
+
 export function validateRunLog(entry, { filename } = {}) {
   const problems = []
   const expect = (condition, message) => {

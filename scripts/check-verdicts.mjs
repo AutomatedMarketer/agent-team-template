@@ -13,6 +13,7 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { loadVerdicts, validateVerdict, acceptance } from './lib/verdicts.mjs'
+import { runLogFiles } from './lib/run-log.mjs'
 
 const files = await loadVerdicts()
 
@@ -35,7 +36,13 @@ const listOrNull = async (dir, map = (x) => x) => {
   }
 }
 
-const runFiles = await listOrNull('runs', (entry) => (entry.endsWith('.json') ? [`runs/${entry}`] : []))
+// `runs/` holds month folders AND `runs/heartbeat/`, which is a different shape of file
+// entirely. Sweeping every .json under runs/ is the same assumption that had validate:runs
+// reporting sixteen problems against a correctly written heartbeat, so this walks with the
+// SAME function rather than keeping a second copy of the sweep. Today a heartbeat happens to
+// survive this harmlessly - it has no run_id, so it filters out - but that is an accident of
+// what heartbeats currently contain, not a guard, and it is exactly how the first one hid.
+const runFiles = await runLogFiles('runs', { readdir }).catch(() => null)
 const runIds = runFiles === null
   ? null
   : (await Promise.all(runFiles.map(async (file) => {

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fromRoot, read } from './helpers/repo.mjs'
-import { validateRunLog, runIdFor, monthFolderFor, SCHEMA_ID } from '../scripts/lib/run-log.mjs'
+import { validateRunLog, runIdFor, monthFolderFor, isMonthFolder, runLogFiles, SCHEMA_ID } from '../scripts/lib/run-log.mjs'
 
 const fixture = async (name) => JSON.parse(await readFile(fromRoot('tests/fixtures/runs', name), 'utf8'))
 
@@ -128,5 +128,81 @@ test('the check does not fire on any field the schema really has', async () => {
     validateRunLog(entry, { filename: `${entry.run_id}.json` }),
     [],
     'a valid run log gained a problem - the allowlist is missing a real field'
+  )
+})
+
+/* `runs/` holds a month folder per month AND `runs/heartbeat/`, which holds a completely different
+   kind of file - one liveness ping per runtime, `{ "runtime": ..., "at": ... }`, read by the
+   cockpit's Connections rail and pointed at from runtimes.yml.
+
+   The validator walked every directory under runs/, so a correctly written heartbeat was read as a
+   run log and reported sixteen problems. It fired the moment a student registered a runtime, which
+   Lesson 12 walks them through, against the very command onboard phase 12 and /audit tell them to
+   run. It never fired in this repo because the shipped runs/heartbeat/ holds only a README. */
+
+test('a heartbeat folder is not mistaken for a month of runs', () => {
+  assert.equal(isMonthFolder('heartbeat'), false, 'runs/heartbeat/ would be validated as run logs')
+  assert.equal(isMonthFolder('2026-08'), true, 'a real month folder was skipped')
+})
+
+test('only a real month is a month', () => {
+  for (const name of ['2026-08', '1999-01', '2026-12']) {
+    assert.equal(isMonthFolder(name), true, `${name} should be a month folder`)
+  }
+  for (const name of [
+    'heartbeat',
+    'archive',
+    '2026-13',
+    '2026-00',
+    '2026-8',
+    '2026-08-07',
+    'runs',
+    '',
+    undefined
+  ]) {
+    assert.equal(isMonthFolder(name), false, `${name} was treated as a month folder`)
+  }
+})
+
+test('the file walk skips the heartbeat folder against a real directory', async () => {
+  const { mkdtemp, mkdir, writeFile, readdir } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const runs = join(await mkdtemp(join(tmpdir(), 'runs-')), 'runs')
+  await mkdir(join(runs, '2026-08'), { recursive: true })
+  await mkdir(join(runs, 'heartbeat'), { recursive: true })
+  await writeFile(join(runs, '2026-08', '2026-08-07T0600Z-research.json'), '{}')
+  await writeFile(join(runs, 'heartbeat', 'hermes.json'), '{"runtime":"hermes","at":"x"}')
+  await writeFile(join(runs, 'README.md'), '# runs')
+
+  assert.deepEqual(
+    await runLogFiles(runs, { readdir }),
+    ['runs/2026-08/2026-08-07T0600Z-research.json'],
+    'the walk picked up something that is not a run log - a heartbeat validates as sixteen problems'
+  )
+})
+
+/* The same bug had a second home. `scripts/check-verdicts.mjs` kept its own recursive sweep of
+   runs/ to collect run ids, which descended into runs/heartbeat/ exactly like the walk above used
+   to. It survives a heartbeat today only because a heartbeat has no `run_id` and so filters out -
+   an accident of what heartbeats currently hold, not a guard, and precisely how the first one hid.
+
+   This is a source-shape guard rather than a behavioural one, and that is worth saying out loud:
+   check-verdicts reads verdicts from the repo root but runs/ from the working directory, so it
+   cannot be pointed at a temp repo - with no verdicts in the real repo it exits before the sweep
+   is ever reached. The walk itself IS covered behaviourally, by the temp-directory test above.
+   What this adds is that check-verdicts keeps using that walk instead of growing another one. */
+
+test('check-verdicts does not keep its own sweep of runs/', async () => {
+  const source = await read('scripts/check-verdicts.mjs')
+
+  assert.ok(
+    /runLogFiles\(\s*'runs'/.test(source),
+    'check-verdicts no longer collects run ids through the shared month-aware walk'
+  )
+  assert.ok(
+    !/listOrNull\(\s*'runs'/.test(source),
+    'check-verdicts has grown back its own recursive sweep of runs/, which reads heartbeats as runs'
   )
 })
