@@ -1,0 +1,109 @@
+{
+  "$comment": "The shared contract for notInUse(). agent-cockpit's api/lib.js and agent-team-template's scripts/lib/knowledge.mjs make this judgement twice, mirrored by hand because there is no import path between a student's repo and a deployed web app. arming-parity.json exists for the same reason and for the same pair of files; this one covers the other mirrored judgement, which did not have it, and was wrong in both copies at once. Same bytes in both repos, run by both sides: change one implementation alone and that side fails.",
+  "guidance": {
+    "$comment": "The paragraph both knowledge files ship, trimmed to the part that matters. It QUOTES the refusal as an example, which is what made a fully answered file read as a refusal. Note the <name> placeholder: that, not the punctuation, is what marks this as text nobody has answered.",
+    "sales": "**If you do not sell, say so here and stop.** Replace the first marker with something like\n*\"I do not sell - I work for this business and the selling is <name>'s job\"*, delete the rest of\nthe file's markers, and you are done.\n\n",
+    "customerService": "**If the customers are not yours, say so here and stop.** Replace the first marker with\nsomething like *\"I do not deal with customers - I work for this business and support is\n<name>'s\"*, delete the rest of the file's markers, and you are done.\n\n"
+  },
+  "cases": [
+    {
+      "label": "an owner who answered every question is in use",
+      "guidance": "sales",
+      "body": "## What I sell\nCommercial landscape design for developers and hotel groups.\n\n## Price and terms\nConcept from 4,800; full delivery is 6-9% of the build cost.\n",
+      "notInUse": false
+    },
+    {
+      "label": "an owner who demoted the headings to ### is still in use",
+      "guidance": "sales",
+      "body": "### What I sell\nCommercial landscape design for developers and hotel groups.\n\n### Price and terms\nConcept from 4,800.\n",
+      "notInUse": false
+    },
+    {
+      "label": "an owner whose heading is indented by a space is still in use",
+      "guidance": "sales",
+      "body": " ## What I sell\nCommercial landscape design for developers and hotel groups.\n",
+      "notInUse": false
+    },
+    {
+      "label": "an owner with a fenced block before the first heading is still in use",
+      "guidance": "sales",
+      "body": "Here is the wording we use on the site:\n\n```\n## Our approach\nWe design it and we stay on site.\n```\n\n## What I sell\nCommercial landscape design.\n",
+      "notInUse": false
+    },
+    {
+      "label": "an owner with no headings at all is still in use",
+      "guidance": "sales",
+      "body": "We sell commercial landscape design to developers and hotel groups, priced as a percentage of the build cost.\n",
+      "notInUse": false
+    },
+    {
+      "label": "a refusal written under the first heading is not in use",
+      "guidance": "sales",
+      "body": "## What I sell\nI do not sell - I work for this business and the selling is Ray's job.\n",
+      "notInUse": true
+    },
+    {
+      "label": "a refusal written above the first heading is not in use",
+      "guidance": "sales",
+      "body": "I do not sell - I work for this business and the selling is Ray's job.\n\n## What I sell\n\n## Price and terms\n",
+      "notInUse": true
+    },
+    {
+      "label": "an owner's own refusal, punctuated the way the guidance shows it, is still a refusal",
+      "$comment": "The guidance prints the sentence as an italic quote and calls it 'something like' what to write, so copying that punctuation and changing the words is a fair reading of it. An earlier rule stripped every such span and threw a real refusal away. What marks the shipped example is not its punctuation, it is the <name> placeholder still inside it.",
+      "guidance": "sales",
+      "body": "## What I sell\n*\"I do not sell - Ray handles all sales here\"*\n",
+      "notInUse": true
+    },
+    {
+      "label": "the example pasted verbatim, placeholder and all, is not an answer yet",
+      "$comment": "<name> is an unfilled placeholder in the same family as a fill marker, and this function already declines to judge a file that still carries one of those. Somebody who pasted the example without putting a real name in it has not finished, and we do not guess on their behalf.",
+      "guidance": "",
+      "body": "# Offer sheet\n\n## What I sell\n*\"I do not sell - I work for this business and the selling is <name>'s job\"*\n",
+      "notInUse": false
+    },
+    {
+      "label": "a refusal in a file rewritten wholesale is not in use",
+      "guidance": "",
+      "body": "# Offer sheet\n\nI do not sell - I work for this business and the selling is Ray's job.\n",
+      "notInUse": true
+    },
+    {
+      "label": "a fresh file still carrying its markers is never a decision",
+      "guidance": "sales",
+      "body": "## What I sell\n<!-- fill: sales-offer -->\n\n## Price and terms\n<!-- fill: sales-price -->\n",
+      "notInUse": false
+    },
+    {
+      "label": "the guidance alone, with every marker cleared, is not a refusal",
+      "$comment": "Somebody who deleted the markers and wrote nothing. That is an empty file, not a decision, and the difference is the whole point of this function.",
+      "guidance": "sales",
+      "body": "## What I sell\n\n## Price and terms\n",
+      "notInUse": false
+    },
+    {
+      "label": "an owner with customers who answered the FAQ is in use",
+      "guidance": "customerService",
+      "body": "## What do you sell, and what does it cost?\nLandscape design, from 4,800.\n\n## Where are you based?\nManchester.\n",
+      "notInUse": false
+    },
+    {
+      "label": "someone whose customers are not theirs is not in use",
+      "guidance": "customerService",
+      "body": "## What do you sell, and what does it cost?\nI do not deal with customers - enquiries go to Ray.\n",
+      "notInUse": true
+    },
+    {
+      "label": "we, not I, is the same decision",
+      "guidance": "",
+      "body": "# Offer sheet\n\nWe do not sell - this is a service department.\n",
+      "notInUse": true
+    },
+    {
+      "label": "an empty file is not a decision",
+      "guidance": "",
+      "body": "",
+      "notInUse": false
+    }
+  ]
+}
