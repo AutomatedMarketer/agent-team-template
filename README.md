@@ -142,12 +142,19 @@ node --version
 npm test
 ```
 
-`node --version` must say 20 or higher. `npm test` ends with these two lines:
+`node --version` must say 20 or higher. `npm test` ends with a summary. These are the two lines
+that matter:
 
 ```
-ℹ pass 473
+ℹ tests 476
 ℹ fail 0
 ```
+
+**`fail 0` is the one to read.** Just above it you will see a `pass` line and a `skipped` line,
+and how those two split is not something to worry about. One test in the suite compares a contract
+this repo shares with the dashboard repo, and it stands itself down unless you happen to have that
+repo checked out in the same folder — so on most machines it shows as skipped, and on a few it
+runs. Either way the total is the same and nothing failed.
 
 Nothing is downloaded and nothing is installed.
 
@@ -167,7 +174,7 @@ that decides whether everything else is any good.
 Five commands, in this order. Each tells you something different.
 
 ```bash
-npm test                 # ends with "pass 473 / fail 0". If this fails, the clone is broken
+npm test                 # ends with "fail 0". If anything fails, the clone is broken
 npm run check:ledger     # your week, measured
 npm run check:proposals  # what your numbers say your team should be
 npm run check:arming     # which jobs actually ring

@@ -55,13 +55,23 @@ test('the README quotes the number of tests the suite actually reports', () => {
     encoding: 'utf8',
     env
   })
-  const reported = /^\s*(?:ℹ|#)\s*pass\s+(\d+)\s*$/m.exec(run.stdout ?? '')
-  assert.ok(reported, `could not read a pass count out of the suite's own output`)
+  // Quote the TOTAL, not the pass count. One test in this suite stands itself down unless
+  // agent-cockpit happens to be checked out in the same folder - it compares a contract the two
+  // repos share. That is true on the machine this was built on and false in every student's copy,
+  // so `pass` reads 475 here and 474 there. The README block is the thing a beginner compares to
+  // their own screen by eye, and it was showing a number none of them would ever see, under a
+  // line reading "if this fails, the clone is broken". The total is the same everywhere.
+  const reported = /^\s*(?:ℹ|#)\s*tests\s+(\d+)\s*$/m.exec(run.stdout ?? '')
+  assert.ok(reported, `could not read a test count out of the suite's own output`)
 
-  const claimed = /pass (\d+)/.exec(readme)
-  assert.ok(claimed, 'the README no longer quotes a pass count for `npm test`')
-  assert.equal(claimed[1], reported[1],
-    `the README tells a beginner to expect ${claimed[1]} passing tests and the suite reports ${reported[1]}`)
+  const claimed = /^\s*(?:ℹ|#)\s*tests\s+(\d+)\s*$/m.exec(readme)
+  assert.ok(claimed, 'the README no longer quotes a test count for `npm test`')
+  assert.equal(Number(claimed[1]), Number(reported[1]),
+    `the README shows a beginner "tests ${claimed[1]}" and the suite reports ${reported[1]}`)
+
+  // And the line that actually decides whether it worked has to be the one shown.
+  assert.match(readme, /^\s*(?:ℹ|#)\s*fail\s+0\s*$/m,
+    'the README no longer shows `fail 0`, which is the line that says the clone is good')
 })
 
 /* Every command in the install block is typed by somebody who has never used a terminal, on
