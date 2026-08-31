@@ -5,6 +5,7 @@ import {
   MIN_SHARED_WORDS,
   SHORTLIST_LIMIT,
   validateProposal,
+  numberCitation,
   scoreMatch,
   stem,
   meaningful,
@@ -653,4 +654,28 @@ test('a task the catalogue cannot do comes back a gap, not a confident wrong ans
   const index = buildIndex(catalogue)
   const shown = shortlist({ task: 'Using the spreadsheet every week', words: 'using the spreadsheet' }, catalogue, index)
   assert.deepEqual(shown, [], `offered ${shown.map((c) => `${c.id} on [${c.words}]`).join('; ')}`)
+})
+
+/* The citation is quoted back to the owner on the dashboard and written verbatim into
+   proposals.yml, where check:proposals compares it character for character. It said "1 hours a
+   week". Every other figure in a real ledger rounds to a plural - 0.5, 2.9, 3.5 - so exactly one
+   hour was the only case that showed it, and nothing had landed on it until a test repo did. */
+
+test('the citation counts one hour as one hour', () => {
+  assert.equal(numberCitation({ hoursPerWeek: 1, costPerWeek: 165 }), '1 hour a week, 165 a week')
+  assert.equal(numberCitation({ hoursPerWeek: 1, costPerWeek: null }), '1 hour a week')
+  assert.equal(numberCitation({ hoursPerWeek: 1.04, costPerWeek: null }), '1 hour a week',
+    'rounding to 1.0 is still one hour')
+})
+
+test('everything that is not exactly one hour stays plural', () => {
+  for (const [hours, expected] of [
+    [0, '0 hours a week'],
+    [0.5, '0.5 hours a week'],
+    [1.5, '1.5 hours a week'],
+    [2, '2 hours a week'],
+    [2.9166666, '2.9 hours a week']
+  ]) {
+    assert.equal(numberCitation({ hoursPerWeek: hours, costPerWeek: null }), expected)
+  }
 })

@@ -281,7 +281,10 @@ export function validateProposal(proposal) {
 // then enforcing a specific rendering of it is how you get a file nobody can write by hand.
 export function numberCitation({ hoursPerWeek, costPerWeek }) {
   const hours = Math.round(hoursPerWeek * 10) / 10
-  const time = `${hours} hours a week`
+  // "1 hours a week" went into proposals.yml and onto the owner's dashboard, in the one line on
+  // that screen that is quoting their own figure back to them. Everything else rounds to a plural
+  // (0.5, 2.9, 3.5), so exactly one hour was the only case and nothing had hit it.
+  const time = `${hours} hour${hours === 1 ? '' : 's'} a week`
   return costPerWeek === null ? time : `${time}, ${Math.round(costPerWeek)} a week`
 }
 
