@@ -108,6 +108,11 @@ node scripts/validate-run-log.mjs runs/2026-08/2026-08-07T0600Z-research.json
 
 Fix anything it reports, then run it again.
 
+**It refuses a field the schema does not have**, rather than dropping it in silence, and for the
+names people reach for it says which one you meant - `session_link` for `session_url`, `output`
+for `artifacts`, `next_steps` for `next_action`. Do not invent a field to carry extra detail:
+nothing reads it, so the detail is lost, and `summary` and `evidence` are where detail belongs.
+
 ## 5. Commit the artifact and the log together
 
 ```bash

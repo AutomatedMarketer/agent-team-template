@@ -60,7 +60,12 @@ Write one file to `agents/customer-service/output/<YYYY-MM-DD>T<HHMM>Z-<ticket>.
 <The gaps, phrased as questions. Or "nothing".>
 
 ## Needs a person
-<Yes or no, and why.>
+<Yes or no, and why. If yes, say which of the two it is, because they need different things from
+the reader: **policy** - the FAQ does answer it, and the answer is that a person decides (refunds,
+cancellations, anything on the escalation list), so this needs a reply and nothing else; or
+**gap** - the FAQ does not cover it yet, so this needs a reply *and* a line added to the FAQ, or
+the next one arrives here too. A ticket that just says "yes" cannot be sorted into those two
+piles by anyone reading a stack of them.>
 ```
 
 ## Response style

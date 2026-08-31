@@ -82,7 +82,17 @@ export function validateVerdict(file, known = {}) {
 
   // The loop closes when a correction becomes a rule. A verdict with no rule section is the diary
   // entry the capture-verdict skill exists to stop somebody writing.
-  if (!/^##\s+The rule this becomes\s*$/m.test(body)) {
+  //
+  // Only where there WAS a correction. `capture-verdict` says it in as many words - *"it was
+  // fine" - that is a `shipped` verdict, and it needs nothing else* - and this check demanded a
+  // rule from every verdict anyway, clean ones included. So an owner whose week was genuinely
+  // good could not get `check:verdicts` to exit clean, and Lesson 18's checklist had three more
+  // items they could not reach, without either manufacturing a criticism or filing a dishonest
+  // `edited`. Both of those put an invented rule into a file the whole team reads, on the
+  // strength of nothing - which is a worse outcome than a shorter checklist.
+  //
+  // `edited` and `rejected` still owe a rule. That is where the information is.
+  if (verdict !== 'shipped' && !/^##\s+The rule this becomes\s*$/m.test(body)) {
     at('has no "## The rule this becomes" section - a verdict that does not become a rule is a diary entry')
   }
 

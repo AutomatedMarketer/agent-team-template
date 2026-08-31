@@ -2,7 +2,11 @@
 
 Three steps, in order. Stop at the first one that matches.
 
-1. **Does a skill in `.claude/skills/` already do this?** Use it.
+1. **Does a skill in `.claude/skills/` do the whole job on its own?** Use it.
+   **Skip any skill whose description says it is the opening or closing step of a workflow.**
+   Half this repo's skills say exactly that - `scan-market` is *"the opening step of the morning
+   intel workflow"*, `draft-content-queue` *"the closing step of the draft queue workflow"* - and
+   a chain fragment is not a job. Those belong to step 3, or to the workflow that owns them.
 2. **Does one specialist own this domain?** Delegate to it with the `Task` tool, naming
    the agent by its slug.
 3. **Does it need more than one specialist?** Match a pattern below, run the
@@ -10,7 +14,16 @@ Three steps, in order. Stop at the first one that matches.
 
 If none of the three fits and the job takes a handful of tool calls, do it yourself.
 
+**Then, whatever matched: anything a person outside the team will read goes to `editor` before
+it reaches the owner.** This is not a fourth step you can stop before - it applies on top of
+whatever step 1, 2 or 3 produced. *"Write me a post"* stops at step 2 with `content`, and the
+draft still goes through `editor`. Read literally without this line, the stop rule cancelled the
+quality gate for every single-specialist job, which is most of them.
+
 ## Who owns what
+
+**Seven specialists, and you delegate to all seven.** Everything in this table is an agent in
+`.claude/agents/` that takes work handed to it.
 
 | Request sounds like | Specialist |
 |---|---|
@@ -21,8 +34,17 @@ If none of the three fits and the job takes a handful of tool calls, do it yours
 | "Research this prospect" · "Write the outreach" · "Where is this deal?" | `sales` |
 | "Is anything secret sitting in our repo?" · "Are our tools out of date?" · "Run a security check" | `security` |
 | "Is this good enough to send?" · "Mark this against the rubric" · "How much of last week did I actually use?" | `editor` |
-| "Is anything out of date?" · "Are my connectors still working?" · "What did we get wrong this week?" | `orchestrator` |
-| "Connect my [tool]" · "Can it read my inbox yet?" · "Hook it up to my store" | the `connect` skill - step 1 of routing, before any specialist |
+
+**Two things that used to sit in that table and are not specialists.** Both were in the
+Specialist column, so a reader scanning for *who does this* got a skill and a router.
+
+- **`connect` is a skill, not an agent.** *"Connect my [tool]"*, *"can it read my inbox yet?"*,
+  *"hook it up to my store"* is caught at **step 1** and never reaches a specialist.
+- **The orchestrator is you, the front door.** *"Is anything out of date?"*, *"are my connectors
+  still working?"*, *"what did we get wrong this week?"* are the front door's own work - they run
+  as scheduled jobs and land back here. **Do not delegate them to `orchestrator`.** Nobody routes
+  work to the front door, and `.claude/agents/orchestrator.md` says so in as many words: *"nobody
+  routes work 'to' you"*. Routing to it was this file contradicting that one.
 
 ## Multi-specialist patterns
 
@@ -34,7 +56,7 @@ If none of the three fits and the job takes a handful of tool calls, do it yours
 1. `research` — the sourced report
 2. `content` — turn the report into posts in the student's voice
 
-### Anything a person will read
+### Anything a person will read - applies on top of whatever routed above
 1. the specialist that owns the craft - the draft
 2. `editor` - marked against `shared/standards/rubrics/<craft>.md` before it reaches the owner
 

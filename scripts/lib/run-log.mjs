@@ -7,6 +7,50 @@ export const STATUSES = ['ok', 'partial', 'blocked', 'failed']
 // these, so a grade that is not recorded is a grade that never happened.
 export const QUALITY_VERDICTS = ['passed', 'flagged']
 
+// Every field this schema reads. A run log is written by an agent at the very end of a run, which
+// is the worst moment to lose something quietly: nobody re-reads it, and the dashboard, the weekly
+// review and the quality count all read this file rather than the session it came from.
+//
+// Until this existed an invented field passed clean. `session_link` instead of `session_url`
+// validated, and the run appeared on the board with no transcript to open - the one link the
+// board exists to give you. Same defect as the ledger's `hours:`, one file along: a number or a
+// name that nothing reads, accepted in silence.
+export const RUN_LOG_FIELDS = [
+  'schema', 'run_id', 'agent', 'workflow', 'quality', 'model', 'trigger', 'status',
+  'started_at', 'finished_at', 'summary', 'artifacts', 'evidence', 'next_action',
+  'session_id', 'session_url'
+]
+
+// Names a writer plausibly reaches for. These get told what they meant, because "not a field"
+// on its own sends someone hunting through a schema for a word they already had.
+const NEAR_MISSES = new Map([
+  ['session_link', 'session_url'],
+  ['sessionurl', 'session_url'],
+  ['url', 'session_url'],
+  ['session', 'session_id'],
+  ['workflow_slug', 'workflow'],
+  ['output', 'artifacts'],
+  ['outputs', 'artifacts'],
+  ['files', 'artifacts'],
+  ['proof', 'evidence'],
+  ['notes', 'summary'],
+  ['description', 'summary'],
+  ['next', 'next_action'],
+  ['next_steps', 'next_action'],
+  ['started', 'started_at'],
+  ['finished', 'finished_at'],
+  ['ended_at', 'finished_at'],
+  ['duration', 'started_at and finished_at, which the reader subtracts']
+])
+
+export function unknownRunLogField(field) {
+  const meant = NEAR_MISSES.get(String(field).toLowerCase())
+  if (meant) {
+    return `"${field}" is not a field in ${SCHEMA_ID} - you mean ${meant}. Nothing reads "${field}", so what you wrote there is lost`
+  }
+  return `"${field}" is not a field in ${SCHEMA_ID}, so nothing reads it and whatever you put there is lost. Check it against a run log already in runs/, or remove it`
+}
+
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
 const RUN_ID = /^\d{4}-\d{2}-\d{2}T\d{4}Z-[a-z-]+$/
 
@@ -124,6 +168,11 @@ export function validateRunLog(entry, { filename } = {}) {
       typeof artifact === 'string' && !artifact.startsWith('/') && !/^[A-Za-z]:/.test(artifact),
       `artifact "${artifact}" must be a repo-relative path`
     )
+  }
+
+  // Last, so a misspelled field never buries the structural problems above it.
+  for (const field of Object.keys(entry ?? {})) {
+    if (!RUN_LOG_FIELDS.includes(field)) problems.push(unknownRunLogField(field))
   }
 
   return problems

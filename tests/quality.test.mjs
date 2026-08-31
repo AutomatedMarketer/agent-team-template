@@ -232,3 +232,46 @@ test('a dropped verdict raises the acceptance rate, which is why it must be coun
   assert.equal(got.rate, 1 / 2, 'a dropped rejection moves the rate from 33% to 50%')
   assert.equal(got.uncountable, 1, 'and the only thing that makes it visible is counting it apart')
 })
+
+/* ---------- a clean week has to be a legal week -------------------------------------------------
+
+   `capture-verdict` says it in as many words: *"it was fine" - that is a `shipped` verdict, and
+   it needs nothing else*. `validateVerdict` demanded a "## The rule this becomes" section from
+   every verdict anyway, clean ones included.
+
+   So an owner whose team did good work could not get `check:verdicts` to exit clean, and three
+   of Lesson 18's checklist items - the rule line, the file that gains a line, the one-commit
+   pairing - were unreachable for them. The only ways through were manufacturing a criticism or
+   filing a dishonest `edited`, and both put an invented rule into a file the whole team reads.
+
+   The lesson's troubleshooting row made it worse rather than better: it told the reader to
+   distrust a clean week instead of telling them they were already finished. */
+
+test('a shipped verdict with nothing to correct is legal', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.deepEqual(
+    validateVerdict(verdictFile({ verdict: 'shipped', rule: null }), KNOWN),
+    [],
+    'an honest clean week could not pass its own check, so the reader had to invent a criticism'
+  )
+})
+
+test('a correction still owes a rule - that is where the information is', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  for (const verdict of ['edited', 'rejected']) {
+    const problems = validateVerdict(verdictFile({ verdict, rule: null }), KNOWN)
+    assert.ok(
+      problems.some((problem) => problem.includes('The rule this becomes')),
+      `a ${verdict} verdict with no rule passed - the loop stops closing`
+    )
+  }
+})
+
+test('a shipped verdict may still carry a rule if the owner wants one', async () => {
+  const { validateVerdict } = await import('../scripts/lib/verdicts.mjs')
+  assert.deepEqual(
+    validateVerdict(verdictFile({ verdict: 'shipped' }), KNOWN),
+    [],
+    'the exemption became a prohibition'
+  )
+})

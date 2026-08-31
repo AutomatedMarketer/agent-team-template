@@ -83,3 +83,50 @@ test('runs/README.md documents the schema id and every field', async () => {
     assert.match(doc, new RegExp(`\`${field}\``), `runs/README.md never documents ${field}`)
   }
 })
+
+/* ---------- a field nothing reads ---------------------------------------------------------------
+   A run log is written by an agent at the end of a run, and nobody re-reads it. The dashboard,
+   the weekly review and the quality count all read this file rather than the session, so a name
+   the schema does not know is silently lost work.
+
+   `session_link` for `session_url` is the one that costs something visible: the run appears on
+   the board with no transcript to open, which is the single link the board exists to give you.
+   This is the same defect as the ledger's `hours:` - a value accepted, read by nothing - one
+   file along, and it was recorded as such by the walkthrough before it was fixed. */
+
+test('a field the schema does not know is refused, not ignored', async () => {
+  const entry = await fixture('valid-schedule.json')
+  const problems = validateRunLog({ ...entry, wibble: 1 }, { filename: `${entry.run_id}.json` })
+  assert.ok(
+    problems.some((problem) => problem.includes('"wibble"')),
+    `an invented field passed clean: ${problems.join('; ') || 'no problems at all'}`
+  )
+})
+
+test('a near miss is told which field it meant', async () => {
+  const entry = await fixture('valid-schedule.json')
+  for (const [wrong, right] of [
+    ['session_link', 'session_url'],
+    ['workflow_slug', 'workflow'],
+    ['output', 'artifacts'],
+    ['next_steps', 'next_action']
+  ]) {
+    const problems = validateRunLog({ ...entry, [wrong]: 'x' }, { filename: `${entry.run_id}.json` })
+    const named = problems.find((problem) => problem.includes(`"${wrong}"`))
+    assert.ok(named, `${wrong} was accepted`)
+    assert.ok(
+      named.includes(right),
+      `"${wrong}" was refused without saying it meant ${right}, which sends someone hunting ` +
+        `through the schema for a word they already had: ${named}`
+    )
+  }
+})
+
+test('the check does not fire on any field the schema really has', async () => {
+  const entry = await fixture('valid-schedule.json')
+  assert.deepEqual(
+    validateRunLog(entry, { filename: `${entry.run_id}.json` }),
+    [],
+    'a valid run log gained a problem - the allowlist is missing a real field'
+  )
+})

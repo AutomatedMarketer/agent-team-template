@@ -597,6 +597,49 @@ if (armLesson) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Lesson 10 is the one place in the course that shows what check:arming prints BEFORE a snapshot
+// exists - a webhook is the one job /arm cannot make, so it is the one job where nobody has run
+// /routines on the reader's behalf. That transcript is real output and nothing checked it, while
+// the two lessons either side of it both have their sample blocks graded.
+//
+// It cannot join SAMPLE_BLOCKS above: that guard runs the command and compares, and this block
+// opens with the `$ npm run check:arming` prompt line, which is not output. Reproducing the
+// no-snapshot state also means taking a file away rather than supplying one. So it is pinned by
+// sentence instead - every distinctive line has to exist on both sides, and the failure says
+// which side moved.
+const noSnapshotLines = [
+  'No usable snapshot of your routines',
+  'Run /routines first. Until then this can only report what your FILES claim,',
+  'and a file claiming a schedule is exactly what this command exists to check.',
+  'the file says should run - whether anything rings is UNKNOWN',
+  'The file says these should run - nothing here can tell you whether they do'
+]
+
+const webhookLesson = all.find((file) => /_CUSTOMER_SERVICE\.md$/.test(file))
+if (webhookLesson) {
+  const armingSource = await readFile(path.join(templateRoot, 'scripts', 'check-arming.mjs'), 'utf8')
+    .catch(() => null)
+  if (armingSource === null) {
+    fail(`${webhookLesson}: scripts/check-arming.mjs could not be read, so its no-snapshot transcript cannot be checked`)
+  } else {
+    const flat = (text) => text.replace(/^[ \t]*>[ \t]?/gm, ' ').replace(/\s+/g, ' ')
+    const lessonBody = flat(await read(webhookLesson))
+    const scriptBody = flat(armingSource)
+    const goneFromScript = noSnapshotLines.filter((line) => !scriptBody.includes(flat(line)))
+    const goneFromLesson = noSnapshotLines.filter((line) => !lessonBody.includes(flat(line)))
+    if (goneFromScript.length) {
+      fail(`${webhookLesson}: check:arming no longer prints ${goneFromScript.length} line(s) the ` +
+        `lesson quotes. First: "${goneFromScript[0].slice(0, 70)}". The command was reworded and the lesson was not.`)
+    } else if (goneFromLesson.length) {
+      fail(`${webhookLesson}: its transcript has lost ${goneFromLesson.length} line(s) the command ` +
+        `still prints. First: "${goneFromLesson[0].slice(0, 70)}". The lesson was reworded and the command was not.`)
+    } else {
+      ok(`${webhookLesson}: every line of its no-snapshot check:arming transcript is real output`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // A slash command the course tells somebody to type has to exist. The pairing runs across three
 // repos - the lessons here, the plugin's skills in agent-team-os, and this template's own skills -
 // and nothing checked it. Renaming a skill in the plugin would break 41 references to /arm and no

@@ -24,6 +24,10 @@ compliance response set, a policy desk. Same file, different questions.
 <!-- fill: faq-refunds -->
 
 ## How do I get support?
+
+*Write the actual address or link — the whole thing, not "email me" or "the usual address". The
+agent can only put into a reply what is written here, so a half-written contact becomes a reply
+that tells a customer to get in touch and does not say where.*
 <!-- fill: faq-support-channel -->
 
 ## Where are you based, and what hours do you work?

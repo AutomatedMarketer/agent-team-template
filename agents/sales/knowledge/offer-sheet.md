@@ -13,6 +13,12 @@ prospects that were never yours. This is common and it is not a step you skipped
 <!-- fill: sales-price -->
 
 ## Who it is for
+
+*Say who it is **not** for as well, and key that on something an agent can actually see — headcount,
+the kind of premises, who owns it, what they already run, whether they have someone in-house doing
+this. Revenue is the usual answer and the worst one: it is the hardest fact to verify about a
+private company, so a disqualifier built on it never fires and the agent researches a prospect it
+should have dropped in the first minute.*
 <!-- fill: sales-icp -->
 
 ## The three reasons people buy
