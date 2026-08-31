@@ -58,6 +58,10 @@ The workflow's `output` path. One page. The owner reads this on a phone on a Sun
 **Quality:** n/a — this is the tune-up itself
 **Confidence:** high | medium | low — <one sentence, lower it when a lane could not be checked>
 **Sources:** runs/ (<n> logs), quality/verdicts/ (<n>), tasks/ (<n> open), <lanes checked>
+
+When you count `tasks/`, **skip `README.md`** — it explains the folder and is not somebody's
+card. `work-the-tasks` skips it and so does the dashboard; counting it here would report one
+more open task than either of them shows, every single week.
 **Needs you:** <the single most important card, or "nothing">
 
 ## Did last week's proposals get done?
