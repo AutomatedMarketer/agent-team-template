@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import { writeFile, rm, mkdtemp } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const run = promisify(execFile)
@@ -519,4 +520,41 @@ test('the known-field list covers every field the shipped example uses', async (
   for (const field of Object.keys(example)) {
     assert.ok(LEDGER_FIELDS.includes(field), `ledger.example.yml uses "${field}" and LEDGER_FIELDS does not list it`)
   }
+})
+
+/* ---------- which rows are parked must not drift from the board -------------------------------
+
+   classify() here and isParked() in agent-cockpit's api/state.js decide the same thing twice,
+   mirrored by hand because there is no import path between a student's repo and a deployed web
+   app. This is the third such mirror in this pair of repos, and both of the other two - arming and
+   the switched-off rule - exist as fixtures BECAUSE the two sides had already drifted.
+
+   They drifted here too: the board's first version keyed on `parked_because` having text, which is
+   narrower than this rule. The format lets an owner park a row without typing a reason and this
+   still calls it parked, so those rows showed on the board as live work.
+
+   tests/fixtures/parked-parity.json is the shared contract - the same bytes in both repos. */
+
+const parkedFixtureUrl = new URL('./fixtures/parked-parity.json', import.meta.url)
+const parkedFixture = JSON.parse(readFileSync(parkedFixtureUrl, 'utf8'))
+
+for (const testCase of parkedFixture.cases) {
+  test(`parked parity: ${testCase.label}`, () => {
+    assert.equal(classify(testCase.row) === 'parked', testCase.parked)
+  })
+}
+
+test('the two repos hold the same parked contract, byte for byte', (t) => {
+  const sibling = fileURLToPath(
+    new URL('../../agent-cockpit/tests/fixtures/parked-parity.json', import.meta.url)
+  )
+  if (!existsSync(sibling)) {
+    t.skip('agent-cockpit is not checked out beside this repo')
+    return
+  }
+  assert.equal(
+    readFileSync(sibling, 'utf8'),
+    readFileSync(parkedFixtureUrl, 'utf8'),
+    'the shared contract has been edited on one side only - that is the drift, one level up'
+  )
 })

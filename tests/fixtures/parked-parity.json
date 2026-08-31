@@ -1,0 +1,68 @@
+{
+  "$comment": "The shared contract for which ledger rows are PARKED. agent-team-template's classify() in scripts/lib/ledger.mjs and agent-cockpit's isParked() in api/state.js make this judgement twice, mirrored by hand because there is no import path between a student's repo and a deployed web app. This is the third such mirror in this pair of repos; the other two are arming-parity.json and knowledge-parity.json, and both of them exist because the two sides drifted. Same bytes in both repos, run by both sides: change one implementation alone and that side fails.",
+  "rule": "Rule 5, decision-readiness. A row confirmed twice with nobody named to act on its output is parked, not buildable. A fill marker left in the answer counts as no answer. The REASON is not the signal - the format lets an owner park a row without typing one.",
+  "cases": [
+    {
+      "label": "confirmed twice with somebody named to act on it is not parked",
+      "row": { "confirmed": "twice", "hands_off": "I read each one and send it myself." },
+      "parked": false
+    },
+    {
+      "label": "confirmed twice with nobody named is parked",
+      "row": { "confirmed": "twice", "hands_off": "" },
+      "parked": true
+    },
+    {
+      "label": "parked with no reason typed is still parked",
+      "$comment": "The case that made the board and the check disagree. The board keyed on the reason having text, which is a narrower rule than check:ledger's, so these rows rendered as live work.",
+      "row": { "confirmed": "twice", "hands_off": "" },
+      "parked": true
+    },
+    {
+      "label": "parked with a reason typed is parked",
+      "row": {
+        "confirmed": "twice",
+        "hands_off": "",
+        "parked_because": "Nobody reads the numbers I send round on Monday."
+      },
+      "parked": true
+    },
+    {
+      "label": "hands_off missing entirely is parked",
+      "row": { "confirmed": "twice" },
+      "parked": true
+    },
+    {
+      "label": "hands_off that is only whitespace is parked",
+      "row": { "confirmed": "twice", "hands_off": "   " },
+      "parked": true
+    },
+    {
+      "label": "hands_off still carrying a fill marker is no answer, so parked",
+      "row": { "confirmed": "twice", "hands_off": "<!-- fill: hands-off -->" },
+      "parked": true
+    },
+    {
+      "label": "said once is a note, never parked, whatever hands_off says",
+      "$comment": "classify() returns note before it ever looks at hands_off. A note is not a decision the owner declined to make - it is something mentioned once, and twice-or-it-is-not-a-pattern is a different rule from decision-readiness.",
+      "row": { "confirmed": "once", "hands_off": "" },
+      "parked": false
+    },
+    {
+      "label": "said once with somebody named is still just a note",
+      "row": { "confirmed": "once", "hands_off": "Rosa reads it." },
+      "parked": false
+    },
+    {
+      "label": "no confirmed field at all is not parked",
+      "row": { "hands_off": "" },
+      "parked": false
+    },
+    {
+      "label": "an honest negative answer is NOT parked",
+      "$comment": "check:ledger flags this separately - the answer begins with a negative - but it is a candidate as far as classify() is concerned, because somebody did answer. The board must not quietly reclassify it.",
+      "row": { "confirmed": "twice", "hands_off": "Nobody - it is my core work." },
+      "parked": false
+    }
+  ]
+}
