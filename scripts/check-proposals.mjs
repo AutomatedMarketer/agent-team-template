@@ -10,12 +10,11 @@
 // its own remit: it may only answer tasks you named twice, only pick from what the engine offered,
 // only quote your words character for character, and only use the number your ledger produces.
 
-import { loadLedger } from './lib/ledger.mjs'
+import { loadLedger, formatMoney } from './lib/ledger.mjs'
 import { loadCatalogue } from './lib/catalogue.mjs'
 import { loadProposals, validateProposals, summarizeProposals, listOrEmpty } from './lib/proposals.mjs'
 
 const hours = (value) => `${value.toFixed(1)} hours a week`
-const money = (value) => `$${Math.round(value).toLocaleString('en-US')} a week`
 
 async function loadOrExplain(load, missing) {
   try {
@@ -57,7 +56,7 @@ const summary = summarizeProposals(written, ledger, catalogue)
 
 console.log(
   `${summary.proposed} proposal${summary.proposed === 1 ? '' : 's'}, covering ${hours(summary.hoursPerWeek)}` +
-    (summary.unpriced ? '' : ` - ${money(summary.costPerWeek)}`)
+    (summary.unpriced ? '' : ` - ${formatMoney(summary.costPerWeek, summary.currency)}`)
 )
 // The rate note explains a missing money column. With nothing proposed there is no column and
 // nothing to explain, so it reads as a second thing that went wrong.

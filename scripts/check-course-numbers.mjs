@@ -405,13 +405,15 @@ if (realSkills.size === 0) {
 // to this script and absent on a student's machine. The first version was a test that skipped when
 // the folder was missing - and a skipped test is not a passing one, so `npm test` reported
 // `pass 381 / fail 1` on every machine but the author's, against a README that names the count.
-const { summarize } = await import('../scripts/lib/ledger.mjs')
+const { summarize, formatMoney } = await import('../scripts/lib/ledger.mjs')
 const { parseSimpleYaml } = await import('../scripts/lib/yaml-lite.mjs')
 const exampleSource = await readFile(path.join(templateRoot, 'ledger.example.yml'), 'utf8').catch(() => null)
 const ledgerLesson = all.find((file) => /_YOUR_LEDGER\.md$/.test(file))
 if (exampleSource && ledgerLesson) {
   const summary = summarize(parseSimpleYaml(exampleSource))
-  const line = `Your week: ${summary.hoursPerWeek.toFixed(1)} hours a week - $${Math.round(summary.costPerWeek).toLocaleString('en-US')} a week`
+  // Printed through the same formatter check-ledger.mjs uses, so this guard cannot agree with a
+  // lesson that the command itself disagrees with. It used to carry its own "$" - a fourth copy.
+  const line = `Your week: ${summary.hoursPerWeek.toFixed(1)} hours a week - ${formatMoney(summary.costPerWeek, summary.currency)}`
   const body = await read(ledgerLesson)
   if (!body.includes(line)) {
     fail(`${ledgerLesson}: its sample run does not match ledger.example.yml, which prints "${line}". ` +
@@ -455,7 +457,10 @@ if (ledgerLesson && PAIRED_LINES.length) {
   // Was 3. The lesson gained a second sample block showing the hours-only branch - the output
   // someone with a job actually gets - which quotes one more of the reporter's lines,
   // "No rate recorded, so this is counted in hours only." Updated together, as intended.
-  const QUOTED_IN_LESSON = 4
+  // Was 4. The reporter gained the currency line ("No currency recorded, so the money is printed
+  // bare...") on 2026-09-02 and the lesson's troubleshooting table quotes it whole. Updated
+  // together again.
+  const QUOTED_IN_LESSON = 5
   if (quotedish.length !== QUOTED_IN_LESSON) {
     fail(`${ledgerLesson}: quotes ${quotedish.length} of the check's output lines, expected ${QUOTED_IN_LESSON}. A line was reworded on one side only, or the block changed shape.`)
   } else {

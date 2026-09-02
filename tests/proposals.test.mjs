@@ -276,6 +276,12 @@ test('with no rate the summary reports hours and leaves money blank', () => {
   assert.equal(summary.hoursPerWeek, 3)
   assert.equal(summary.costPerWeek, null)
   assert.equal(summary.unpriced, true)
+  assert.equal(summary.currency, null)
+})
+
+test('the summary carries the ledger currency out, so check:proposals prints the same label as check:ledger', () => {
+  assert.equal(summarizeProposals(soundFile, ledgerOf([newsletter], { currency: 'GBP' }), catalogue).currency, 'GBP')
+  assert.equal(summarizeProposals(soundFile, ledgerOf([newsletter]), catalogue).currency, null)
 })
 
 /* ---------- declining ----------------------------------------------------------------------- */

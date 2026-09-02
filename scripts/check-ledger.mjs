@@ -6,10 +6,9 @@
 // Windows as often as Mac, and a node -e incantation with nested quotes does not survive
 // PowerShell. It is also the step that catches a units mistake before it gets costed.
 
-import { loadLedger, validateLedger, summarize, deriveTask } from './lib/ledger.mjs'
+import { loadLedger, validateLedger, summarize, deriveTask, formatMoney } from './lib/ledger.mjs'
 
 const hours = (value) => `${value.toFixed(1)} hours a week`
-const money = (value) => `$${Math.round(value).toLocaleString('en-US')} a week`
 
 // Optional directory to read ledger.yml from. Students never pass it - `npm run check:ledger`
 // reads the repo's own ledger, as it always has. It exists so a test can run THIS binary against
@@ -39,9 +38,13 @@ if (problems.length) {
 
 const summary = summarize(ledger)
 
-console.log(`Your week: ${hours(summary.hoursPerWeek)}${summary.unpriced ? '' : ` - ${money(summary.costPerWeek)}`}`)
+console.log(`Your week: ${hours(summary.hoursPerWeek)}${summary.unpriced ? '' : ` - ${formatMoney(summary.costPerWeek, summary.currency)}`}`)
 if (summary.unpriced) {
   console.log('No rate recorded, so this is counted in hours only.')
+} else if (!summary.currency) {
+  // A rate with no currency is every ledger written before the field existed. The number is
+  // still theirs; only the label is missing, so say that rather than guess a symbol.
+  console.log('No currency recorded, so the money is printed bare. Add currency: to ledger.yml, or ask /ledger.')
 }
 console.log('')
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`

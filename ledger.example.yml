@@ -19,6 +19,11 @@ owner_type: business
 # it is better than a made-up rate that makes every later number wrong.
 hourly_value: 150
 
+# The currency that number is in - a short code such as USD, GBP or EUR. Everything that prints
+# money prints this code after the number. Leave it out if you left the rate out; if you gave a
+# rate and no currency, the number is printed bare and the check says so.
+currency: USD
+
 tasks:
   # task          what you call it
   # words         YOUR words about it, quoted, on one line. Not a summary, not tidied up.

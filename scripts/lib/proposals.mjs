@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { parseSimpleYaml } from './yaml-lite.mjs'
-import { validateLedger, classify, deriveTask } from './ledger.mjs'
+import { validateLedger, classify, deriveTask, currencyOf } from './ledger.mjs'
 import { validateCatalogue } from './catalogue.mjs'
 import { match, proposalFrom, validateProposal } from './match.mjs'
 
@@ -323,6 +323,7 @@ export function summarizeProposals(written, ledger, catalogue) {
     parked: derived.parked.length,
     hoursPerWeek,
     costPerWeek: priced ? hoursPerWeek * hourlyValue : null,
-    unpriced: !priced
+    unpriced: !priced,
+    currency: currencyOf(ledger)
   }
 }

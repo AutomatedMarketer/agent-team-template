@@ -92,9 +92,12 @@ test('the course check grades against the example, not against the student ledge
   // What check-ledger.mjs and check-proposals.mjs print for the EXAMPLE files. The scratch repo
   // below gets a different ledger (prints 'Your week: 0.0 hours a week') and empty proposals
   // (prints '0 proposals, ...'), so neither line can be found unless the fixtures were read.
+  // Printed through formatMoney with the example's `currency: USD`, so the code follows the
+  // number and there is no symbol. If this line ever disagrees with what the command prints,
+  // the course check fails against the real lesson first - this copy is only what the stub quotes.
   const lessons = await stubCourse(
-    'Your week: 16.3 hours a week - $2,438 a week',
-    '2 proposals, covering 6.3 hours a week - $950 a week'
+    'Your week: 16.3 hours a week - 2,438 USD a week',
+    '2 proposals, covering 6.3 hours a week - 950 USD a week'
   )
   const studentLedger = join(scratch, 'ledger.yml')
   const ledgerText = 'owner_type: job\ntasks: []\n'

@@ -42,7 +42,33 @@ export const TASK_FIELDS = [
   'parked_because'
 ]
 
-export const LEDGER_FIELDS = ['owner_type', 'hourly_value', 'tasks']
+export const LEDGER_FIELDS = ['owner_type', 'hourly_value', 'currency', 'tasks']
+
+// A short code such as USD, GBP or EUR. Not validated against a list: the number is theirs and so
+// is the label, and a list would be wrong the first time somebody wrote "CHF" or "R$". The only
+// claims are that it is short and carries no whitespace, so it cannot be a sentence typed into the
+// wrong field.
+const CURRENCY_SHAPE = /^\S{1,8}$/
+
+export function isCurrencyCode(value) {
+  return typeof value === 'string' && CURRENCY_SHAPE.test(value.trim())
+}
+
+// null when the ledger did not say. Callers print the number bare in that case and say so,
+// rather than guessing a symbol - the dashboard printed "$" for every student in every country
+// for months before anyone asked what currency they used.
+export function currencyOf(ledger) {
+  const value = ledger?.currency
+  return isCurrencyCode(value) ? value.trim() : null
+}
+
+// The one place money is turned into words. check-ledger, check-proposals and the course check
+// all print through this, so a student in Manchester and the lesson's sample block cannot drift
+// apart. Bare when no currency was recorded, never a symbol.
+export function formatMoney(value, currency) {
+  const number = Math.round(value).toLocaleString('en-US')
+  return currency ? `${number} ${currency} a week` : `${number} a week`
+}
 
 // Numbers this file WORKS OUT. Typing one is not a spelling mistake, it is a misunderstanding of
 // where the number comes from, so it gets its own sentence rather than the generic one.
@@ -140,6 +166,7 @@ export function summarize(ledger) {
     hoursPerWeek,
     costPerWeek: priced ? hoursPerWeek * hourlyValue : null,
     unpriced: !priced,
+    currency: currencyOf(ledger),
     candidates: buckets.candidate,
     notes: buckets.note,
     parked: buckets.parked,
@@ -163,6 +190,14 @@ export function validateLedger(ledger) {
   // Absent is fine and expected - it is the employee case. Present but nonsense is not.
   if (hourlyValue !== undefined && hourlyValue !== null && !isPositiveNumber(hourlyValue)) {
     problems.push('hourly_value must be a positive number, or left out entirely')
+  }
+
+  const currency = ledger?.currency
+  // Absent is allowed even beside a rate - every ledger written before this field existed is in
+  // that state, and a check that turned them all red would stop the installer finishing. Present
+  // but not a code is a mistake worth naming.
+  if (currency !== undefined && currency !== null && !isCurrencyCode(currency)) {
+    problems.push('currency must be a short code such as USD, GBP or EUR, or left out entirely')
   }
 
   for (const field of Object.keys(ledger ?? {})) {

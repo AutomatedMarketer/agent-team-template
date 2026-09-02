@@ -16,7 +16,9 @@ import {
   validateLedger,
   classify,
   MAX_HOURS_IN_A_WEEK,
-  beginsWithNegative
+  beginsWithNegative,
+  currencyOf,
+  formatMoney
 } from '../scripts/lib/ledger.mjs'
 
 /* The ledger is the one file the whole team gets derived from. Every rule below is a rule that
@@ -178,6 +180,41 @@ test('a rate that is not a positive number is refused', () => {
 
 test('no rate at all is fine - that is the employee case, not an error', () => {
   assert.deepEqual(validateLedger(ledgerOf([chasing], { hourly_value: null })), [])
+})
+
+/* ---------- currency ---------------------------------------------------------------------- */
+
+// The board printed "$" for every student in every country and never asked. The fix is a field
+// the interview asks for once, and one formatter everything prints through.
+
+test('a currency that is not a short code is refused, and the problem names the field', () => {
+  assert.match(validateLedger(ledgerOf([chasing], { currency: 'pounds sterling' })).join(' '), /currency/)
+  assert.match(validateLedger(ledgerOf([chasing], { currency: 42 })).join(' '), /currency/)
+  assert.match(validateLedger(ledgerOf([chasing], { currency: '' })).join(' '), /currency/)
+})
+
+test('no currency is allowed even beside a rate - every ledger written before the field existed is in that state', () => {
+  assert.deepEqual(validateLedger(ledgerOf([chasing])), [])
+  assert.deepEqual(validateLedger(ledgerOf([chasing], { currency: null })), [])
+})
+
+test('a currency is carried out of the summary as written, trimmed, and null when absent', () => {
+  assert.equal(summarize(ledgerOf([chasing], { currency: ' GBP ' })).currency, 'GBP')
+  assert.equal(summarize(ledgerOf([chasing], { currency: 'R$' })).currency, 'R$')
+  assert.equal(summarize(ledgerOf([chasing])).currency, null)
+  assert.equal(currencyOf({ currency: 'pounds sterling' }), null)
+})
+
+test('money is printed with the code after the number, and bare - never with a guessed symbol - when there is none', () => {
+  assert.equal(formatMoney(2437.5, 'USD'), '2,438 USD a week')
+  assert.equal(formatMoney(950, 'GBP'), '950 GBP a week')
+  assert.equal(formatMoney(2437.5, null), '2,438 a week')
+  assert.ok(!formatMoney(100, null).includes('$'), 'a missing currency must not fall back to a dollar sign')
+})
+
+test('the shipped example ledger names its currency, so the lesson sample shows the field in use', () => {
+  const example = readFileSync(join(repoRoot, 'ledger.example.yml'), 'utf8')
+  assert.match(example, /^currency: [A-Z]{3}$/m)
 })
 
 test('confirmed must be once or twice, so rule 4 cannot be fudged', () => {
@@ -493,8 +530,9 @@ test('a field nothing reads is refused rather than silently dropped', () => {
 })
 
 test('an unknown field at the top of the file is refused too', () => {
-  const problems = validateLedger(ledgerWith(soundTask, { currency: 'GBP' }))
-  assert.ok(problems.some((problem) => problem.includes('`currency`')), JSON.stringify(problems))
+  // This used `currency` as its example of a field the file does not have. It has one now.
+  const problems = validateLedger(ledgerWith(soundTask, { timezone: 'Europe/London' }))
+  assert.ok(problems.some((problem) => problem.includes('`timezone`')), JSON.stringify(problems))
 })
 
 // The other half of the bargain: refusing unknown fields must not refuse the template's own.
