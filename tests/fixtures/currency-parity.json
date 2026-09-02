@@ -1,0 +1,21 @@
+{
+  "$comment": "The shared contract for the ledger's CURRENCY. agent-team-template's currencyOf()/formatMoney() in scripts/lib/ledger.mjs and agent-cockpit's currencyOf()/formatMoney() in api/state.js make this judgement twice, mirrored by hand because there is no import path between a student's repo and a deployed web app. This is the fourth such mirror in this pair of repos, and the first about how money is printed: before it, three separate formatters printed a dollar sign for every student in every country and nothing could go red. Same bytes in both repos, run by both sides: change one implementation alone and that side fails.",
+  "rule": "A currency is a short code with no whitespace, as the owner wrote it, trimmed. Anything else - a sentence, a number, a blank - is no currency at all. Money is the rounded number with thousands separators, then the code after it when there is one, and bare when there is not. Never a symbol, because the board is not allowed to guess.",
+  "codes": [
+    { "label": "a plain three-letter code", "parsed": { "currency": "USD" }, "currency": "USD" },
+    { "label": "trimmed, but otherwise as written", "parsed": { "currency": " GBP " }, "currency": "GBP" },
+    { "label": "a symbol the owner chose to write is still a short code", "parsed": { "currency": "R$" }, "currency": "R$" },
+    { "label": "absent is null, not a default", "parsed": {}, "currency": null },
+    { "label": "null is null", "parsed": { "currency": null }, "currency": null },
+    { "label": "a blank is no currency", "parsed": { "currency": "" }, "currency": null },
+    { "label": "a sentence is not a code", "parsed": { "currency": "pounds sterling" }, "currency": null },
+    { "label": "a number is not a code", "parsed": { "currency": 42 }, "currency": null },
+    { "label": "nine characters is too long to be a code", "parsed": { "currency": "ABCDEFGHI" }, "currency": null }
+  ],
+  "money": [
+    { "label": "code after the number, thousands separated", "value": 2437.5, "currency": "USD", "text": "2,438 USD" },
+    { "label": "a different code is printed as given", "value": 950, "currency": "GBP", "text": "950 GBP" },
+    { "label": "no currency prints the number bare, with no symbol", "value": 2437.5, "currency": null, "text": "2,438" },
+    { "label": "rounding is to the nearest whole unit", "value": 0.4, "currency": "EUR", "text": "0 EUR" }
+  ]
+}

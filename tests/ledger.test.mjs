@@ -217,6 +217,40 @@ test('the shipped example ledger names its currency, so the lesson sample shows 
   assert.match(example, /^currency: [A-Z]{3}$/m)
 })
 
+/* tests/fixtures/currency-parity.json is the shared contract with agent-cockpit - the same bytes in
+   both repos, run by both sides. The board mirrors currencyOf() and formatMoney() by hand, because
+   there is no import path between a student's repo and a deployed web app. Change one
+   implementation alone and that side fails here. The template's formatter says "a week" itself;
+   the fixture holds the number-and-code, which is the part the two sides have to agree on. */
+
+const currencyFixturePath = join(repoRoot, 'tests', 'fixtures', 'currency-parity.json')
+const currencyFixture = JSON.parse(readFileSync(currencyFixturePath, 'utf8'))
+
+for (const testCase of currencyFixture.codes) {
+  test(`currency parity, code: ${testCase.label}`, () => {
+    assert.equal(currencyOf(testCase.parsed), testCase.currency)
+  })
+}
+
+for (const testCase of currencyFixture.money) {
+  test(`currency parity, money: ${testCase.label}`, () => {
+    assert.equal(formatMoney(testCase.value, testCase.currency), `${testCase.text} a week`)
+  })
+}
+
+test('the two repos hold the same currency contract, byte for byte', (t) => {
+  const sibling = join(repoRoot, '..', 'agent-cockpit', 'tests', 'fixtures', 'currency-parity.json')
+  if (!existsSync(sibling)) {
+    t.skip('agent-cockpit is not checked out beside this repo')
+    return
+  }
+  assert.equal(
+    readFileSync(sibling, 'utf8'),
+    readFileSync(currencyFixturePath, 'utf8'),
+    'the shared contract has been edited on one side only - that is the drift, one level up'
+  )
+})
+
 test('confirmed must be once or twice, so rule 4 cannot be fudged', () => {
   assert.match(validateLedger(ledgerOf([{ ...chasing, confirmed: 'maybe' }])).join(' '), /confirmed/)
 })
