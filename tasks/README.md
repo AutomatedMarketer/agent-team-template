@@ -31,6 +31,13 @@ note it in the pipeline.
 |---|---|---|
 | `status` | `todo`, `doing`, `done` | `todo` gets picked up by the sweep. `doing` means a run is on it. `done` means finished. |
 | `for` | an agent slug, optional | Who should do it. Leave it out and the orchestrator decides. |
+| `done_at` | `YYYY-MM-DD`, set when the card is closed | The day the work was finished. Your dashboard shows finished tasks for **seven days** and then keeps them behind a link, and this is the date it counts from. |
+
+**Why `done_at` and not the filename.** The date in the filename is the day the card was
+*written*. A card raised in March and finished in June would otherwise read as three months
+stale the moment it was done. Whoever marks a card done writes the date they marked it: the
+sweep does it, and so does the Done button on your dashboard. A done card without one is not a
+problem — it simply is not dated, so it sits behind the link rather than in this week's column.
 
 The body is the ask, in plain words. Write it the way you would say it to a person.
 

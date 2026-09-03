@@ -29,6 +29,27 @@ test('the contract says tasks are made by talking and done cards keep their file
   assert.match(contract, /file stays|history/i, 'contract must say done cards are kept')
 })
 
+/* A card recorded WHETHER it was finished and never WHEN. The dashboard shows finished tasks
+   for seven days and then hides them behind a link, and it had nothing to measure those seven
+   days against - the filename's date prefix is when the card was written, not when the work was
+   done. So a done card carries the day it was closed. */
+
+test('the contract carries done_at, and says what writes it and what it is for', async () => {
+  const contract = await read('tasks/README.md')
+  assert.match(contract, /done_at/, 'the contract never mentions done_at')
+  assert.match(contract, /YYYY-MM-DD/, 'the contract must say what shape the date takes')
+  assert.match(contract, /seven days|7 days/i, 'the contract must say what the date is used for')
+})
+
+test('the sweep records the day it closed a card, not just that it closed it', async () => {
+  const skill = await read('.claude/skills/work-the-tasks/SKILL.md')
+  assert.match(skill, /done_at/, 'the sweep marks cards done without dating them')
+  // Dated when it is closed, not when the run started - a sweep that begins before midnight
+  // and finishes after it would otherwise file the card on the wrong day.
+  assert.match(skill, /today's date|the date you (?:close|finish)/i,
+    'the sweep does not say which date to write')
+})
+
 test('the work-the-tasks skill exists and carries the sweep rules', async () => {
   const skills = await listDir('.claude/skills')
   assert.ok(skills.includes('work-the-tasks'), 'the work-the-tasks skill is missing')

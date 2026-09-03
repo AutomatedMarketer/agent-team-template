@@ -43,7 +43,12 @@ reason in the digest. It does not count toward the three.
 
 When a card's work is done:
 
-1. Flip its frontmatter to `status: done`.
+1. Flip its frontmatter to `status: done`, and add `done_at:` with **today's date** in
+   `YYYY-MM-DD` — the date you close the card, not the date in its filename, which is the day
+   it was written. The owner's dashboard shows finished tasks for seven days and counts from
+   this field; without it a finished card is undated and drops behind the link straight away.
+   Use the date at the moment you close it: a sweep that starts before midnight and finishes
+   after it must not file the card on the day it began.
 2. Append a `## Result` section to the card: one or two sentences on what was done, and
    the path of the artifact it produced. The card stays in `tasks/` — done cards are the
    owner's history.
