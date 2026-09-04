@@ -293,7 +293,8 @@ if (!deniesSend) {
 // Any course file that mentions FIRE_TRIGGERS must name `task-intake` or defer to the lesson that
 // does.
 //
-// Four buttons on the cockpit - Add task, New workflow, Arm, Approve - dispatch to one dedicated
+// Eight buttons on the cockpit - Add task, New workflow, Start, Done, Add agent, Add skill, Arm,
+// Approve - dispatch to one dedicated
 // routine, `task-intake`, not to the job beside them. Lesson 12 described FIRE_TRIGGERS as "each
 // workflow's slug", so a reader wired all nine workflows and got 404 from all four. Reproduced
 // against the real endpoint before this check was written.

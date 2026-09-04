@@ -26,18 +26,40 @@ const countFiles = async (path, extension) => {
   return entries.filter((entry) => entry.isFile() && entry.name.endsWith(extension)).length
 }
 
+/* The word map here used to know three numbers: 8, 9 and 25. So the twenty-sixth skill anyone
+   added failed this test no matter how well it was written - the map had no word for it, the
+   README could not be made to match, and an unattended Add-skill tap from the dashboard could
+   never pass the checks it is told to run. Found by simulating exactly that tap on 2026-09-04.
+   A count the repo derives has to have a word for whatever it derives. */
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+export function countWord(count) {
+  if (!Number.isInteger(count) || count < 1 || count > 99) return String(count)
+  if (count < 20) return ONES[count]
+  const rest = count % 10
+  return TENS[Math.floor(count / 10)] + (rest ? `-${ONES[rest].toLowerCase()}` : '')
+}
+
+test('the count has a word for every number a repo can reach, not just the three it shipped with', () => {
+  assert.equal(countWord(25), 'Twenty-five')
+  assert.equal(countWord(26), 'Twenty-six', 'the twenty-sixth skill was the one nobody could add')
+  assert.equal(countWord(30), 'Thirty')
+  assert.equal(countWord(9), 'Nine')
+  assert.equal(countWord(41), 'Forty-one')
+})
+
 test('the README names the real number of agents, jobs and skills', async () => {
   const counts = {
     agents: await countFiles('.claude/agents/', '.md'),
     jobs: await countFiles('workflows/', '.yml'),
     skills: await countDirs('.claude/skills/')
   }
-  const words = { 8: 'Eight', 9: 'Nine', 25: 'Twenty-five' }
-  assert.ok(readme.includes(`**${words[counts.agents]} agents.**`),
+  assert.ok(readme.includes(`**${countWord(counts.agents)} agents.**`),
     `the README does not say there are ${counts.agents} agents`)
-  assert.ok(readme.includes(`**${words[counts.jobs]} jobs.**`),
+  assert.ok(readme.includes(`**${countWord(counts.jobs)} jobs.**`),
     `the README does not say there are ${counts.jobs} jobs`)
-  assert.ok(readme.includes(`**${words[counts.skills]} skills.**`),
+  assert.ok(readme.includes(`**${countWord(counts.skills)} skills.**`),
     `the README does not say there are ${counts.skills} skills`)
 })
 
