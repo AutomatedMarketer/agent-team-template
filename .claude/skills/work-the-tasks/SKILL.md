@@ -19,16 +19,19 @@ across runs, not crammed into one blown time budget. Anything left waiting gets 
 the digest so the owner knows it is queued, not lost.
 
 No `todo` cards is a fine outcome — write a one-line digest saying the column was clear
-and stop.
+and stop. A sweep that worked nothing still writes one run log, with the digest as its
+artifact and `orchestrator` as the agent, because the board counts runs by their logs and
+nothing else: without one, a sweep that ran this morning shows as never having run.
 
 ## 2. Route each card
 
 For each card, in order:
 
-1. Set `status: doing` in the card's frontmatter.
-2. Decide who does it. A `for:` field naming a real agent in `.claude/agents/` wins.
+1. Decide who does it. A `for:` field naming a real agent in `.claude/agents/` wins.
    Without one, choose per `CLAUDE.md` and `.claude/rules/routing.md` — the same routing
-   the front door uses, because the sweep is the front door running on a schedule.
+   the front door uses, because the sweep is the front door running on a schedule. A card
+   nobody here can do — see below — is handed back now, before anything is written to it.
+2. Set `status: doing` in the card's frontmatter.
 3. Do the work **as that agent**: read its definition in `.claude/agents/<slug>.md` and
    follow it — the shared files it reads, the output format it produces, the boundaries
    it keeps. The deliverable lands in `agents/<slug>/output/` with a dated filename.

@@ -50,6 +50,35 @@ test('the sweep records the day it closed a card, not just that it closed it', a
     'the sweep does not say which date to write')
 })
 
+/* Two things a simulated sweep found on 2026-09-04, run against a review card that opens "This
+   one needs you, not an agent". It handed the card back - good - but noted that step 2 said to
+   set `status: doing` BEFORE deciding who does it, and then to hand a stuck card back
+   "untouched". A card that was already edited is not untouched. Decide first.
+
+   And it wrote no run log, because "one log per swept task" with zero swept tasks is zero logs -
+   so the board showed a sweep that had just run as never run. The board counts runs by run logs
+   and nothing else. A sweep that worked nothing is still a run. */
+
+test('the sweep decides who does a card before it marks the card as being done', async () => {
+  const skill = await read('.claude/skills/work-the-tasks/SKILL.md')
+  const route = skill.split('## 2. Route each card')[1]?.split('\n## ')[0] ?? ''
+  assert.ok(route, 'the routing section is gone')
+  const decide = route.search(/Decide who does it/)
+  const doing = route.search(/Set `status: doing`/)
+  assert.ok(decide !== -1 && doing !== -1, 'the routing section lost one of its two first steps')
+  assert.ok(decide < doing,
+    'the sweep marks a card doing before it has decided whether it can do it - a card it then hands back "untouched" has already been edited')
+})
+
+test('a sweep that worked nothing still leaves a run log, or the board says it never ran', async () => {
+  const skill = await read('.claude/skills/work-the-tasks/SKILL.md')
+  const sentence = /[^.]*(worked nothing|no cards|nothing to work|column was clear|zero)[^.]*run log[^.]*\./i.exec(skill)?.[0]
+    ?? /[^.]*run log[^.]*(worked nothing|no cards|nothing to work|column was clear|zero)[^.]*\./i.exec(skill)?.[0] ?? ''
+  assert.ok(sentence, 'nothing says an empty sweep writes a run log, so "one log per swept task" means zero and the board shows it as never run')
+  assert.doesNotMatch(sentence, /\bno run log|\bnot\b[^.]*run log|skip/i, 'it says the opposite - that an empty sweep writes none')
+  assert.match(sentence, /digest/i, 'it never says what the artifact of an empty sweep is - the digest is the only thing it produced')
+})
+
 test('the work-the-tasks skill exists and carries the sweep rules', async () => {
   const skills = await listDir('.claude/skills')
   assert.ok(skills.includes('work-the-tasks'), 'the work-the-tasks skill is missing')
