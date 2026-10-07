@@ -721,6 +721,27 @@ test('without --commit too, a linked usage folder is refused and nothing is writ
   }
 })
 
+// Every exit after the claim leaves a final record. A write that fails for an ordinary reason - a
+// file where the folder should be, a full disk - used to throw straight past it, leaving a claim
+// with no outcome that the task policy says not to replay blindly.
+test('a write that fails after the claim still leaves a final record saying failed', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await mkdir(join(repo.work, '.agent-team', 'status'), { recursive: true })
+    await writeFile(join(repo.work, '.agent-team', 'status', 'usage'), 'a file, not a folder\n')
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /could not be written/i)
+    assert.equal((await finalRecord(stateDir)).outcome, 'failed')
+    assert.ok(!existsSync(join(stateDir, 'lock')), 'the lock was not released')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
 test('the collector never writes into the template repo itself during these tests', () => {
   assert.equal(existsSync(join(repoRoot, '.agent-team', 'status', 'usage')), false)
 })

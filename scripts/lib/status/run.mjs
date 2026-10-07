@@ -241,113 +241,126 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         : 'This occurrence was already claimed by an earlier run. Skipped, not repeated.')
       return 0
     }
+
+    let finished = false
     const finish = async (outcome, commit) => {
+      finished = true
       const record = { schema: FINAL_SCHEMA, finishedAt: isoSeconds(Date.now()), outcome }
       if (commit) record.commit = commit
       if (checkAgainst(record, FINAL_SHAPE, identity).length === 0) await writeRecord(claim, 'final.json', record)
     }
 
-    if (mode === 'clone') {
-      let reason
-      try {
-        reason = await prepareClone({ git: deps.git, cloneDir: target, relativePath })
-      } catch (error) {
-        if (error instanceof RemoteUnreachable) {
-          complain('Could not reach the team repo to bring the dedicated clone up to date, so nothing was collected or written.')
-          complain('Check the network and that this computer can still pull from the team repo. The next run tries again.')
-        } else {
-          complain('Getting the dedicated clone ready failed, so nothing was collected or written.')
-          complain('Nothing git printed is shown, because git messages can include the remote address.')
+    // Every exit after the claim leaves a final record, including one nobody planned for: a claim
+    // with no outcome is one the task policy says not to replay blindly. The error itself is not
+    // shown - it can carry a folder path.
+    try {
+      if (mode === 'clone') {
+        let reason
+        try {
+          reason = await prepareClone({ git: deps.git, cloneDir: target, relativePath })
+        } catch (error) {
+          if (error instanceof RemoteUnreachable) {
+            complain('Could not reach the team repo to bring the dedicated clone up to date, so nothing was collected or written.')
+            complain('Check the network and that this computer can still pull from the team repo. The next run tries again.')
+          } else {
+            complain('Getting the dedicated clone ready failed, so nothing was collected or written.')
+            complain('Nothing git printed is shown, because git messages can include the remote address.')
+          }
+          await finish('failed')
+          return 1
         }
+        if (reason) {
+          complain(`Refused: that folder is not a dedicated clone - ${reason}. Nothing was changed in it.`)
+          await finish('not a dedicated clone')
+          return 2
+        }
+      }
+
+      // Checked before anything is read, and again by every write.
+      try {
+        await assertNoLinks(target, relativePath, { git: deps.git })
+      } catch (error) {
+        if (!(error instanceof LinkedPath)) throw error
+        LINK_REFUSAL.forEach(complain)
         await finish('failed')
         return 1
       }
-      if (reason) {
-        complain(`Refused: that folder is not a dedicated clone - ${reason}. Nothing was changed in it.`)
-        await finish('not a dedicated clone')
-        return 2
+
+      const doc = await collectUsage(deps, computer)
+      const problems = checkUsage(doc, identity)
+      if (problems.length) {
+        complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
+        await finish('refused by the safety check')
+        return 1
       }
-    }
+      const text = `${JSON.stringify(doc, null, 2)}\n`
+      const write = () => writeSnapshot(target, relativePath, text, { git: deps.git })
+      try {
+        await write()
+      } catch (error) {
+        if (!(error instanceof LinkedPath)) throw error
+        LINK_REFUSAL.forEach(complain)
+        await finish('failed')
+        return 1
+      }
 
-    // Checked before anything is read, and again by every write.
-    try {
-      await assertNoLinks(target, relativePath, { git: deps.git })
-    } catch (error) {
-      if (!(error instanceof LinkedPath)) throw error
-      LINK_REFUSAL.forEach(complain)
-      await finish('failed')
-      return 1
-    }
+      const receipt = {
+        schema: RECEIPT_SCHEMA,
+        claimedAt: isoSeconds(deps.now),
+        computer,
+        file: relativePath,
+        sha256: createHash('sha256').update(text).digest('hex'),
+        sources: sourceStatuses(doc)
+      }
+      const receiptProblems = checkAgainst(receipt, RECEIPT_SHAPE, identity)
+      if (receiptProblems.length) {
+        complain(`The receipt was refused by the safety check: ${receiptProblems.join('; ')}`)
+        await finish('refused by the safety check')
+        return 1
+      }
+      await writeRecord(claim, 'receipt.json', receipt)
+      say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
+      summarize(doc).forEach(say)
 
-    const doc = await collectUsage(deps, computer)
-    const problems = checkUsage(doc, identity)
-    if (problems.length) {
-      complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
-      await finish('refused by the safety check')
+      let result
+      try {
+        result = await commitAndPush({
+          git: deps.git,
+          dir: target,
+          relativePath,
+          message: `${SNAPSHOT_SUBJECT}${computer}`,
+          mode,
+          rewrite: write
+        })
+      } catch {
+        complain('The commit failed. Nothing git printed is shown, because git messages can include the remote address.')
+        complain('Check that git has a name and email set in that folder, and that the folder is a clone.')
+        await finish('failed')
+        return 1
+      }
+      await finish(result.outcome, result.commit)
+      if (result.outcome === 'committed, not pushed') {
+        say(`The snapshot is committed here but was not pushed, because ${result.why}.`)
+        say('Nothing else was changed. Push it yourself when you are ready.')
+        return 0
+      }
+      if (OUTCOME_LINES[result.outcome]) {
+        say(OUTCOME_LINES[result.outcome].line)
+        return OUTCOME_LINES[result.outcome].code
+      }
+      if (mode === 'clone') {
+        complain('The push was refused twice. The dedicated clone holds the commit; the next run catches up.')
+      } else {
+        complain('The push was refused - the remote has commits this copy does not.')
+        complain('The snapshot is committed here and your working copy was left as it is. Pull, then push when ready.')
+      }
       return 1
-    }
-    const text = `${JSON.stringify(doc, null, 2)}\n`
-    const write = () => writeSnapshot(target, relativePath, text, { git: deps.git })
-    try {
-      await write()
-    } catch (error) {
-      if (!(error instanceof LinkedPath)) throw error
-      LINK_REFUSAL.forEach(complain)
-      await finish('failed')
-      return 1
-    }
-
-    const receipt = {
-      schema: RECEIPT_SCHEMA,
-      claimedAt: isoSeconds(deps.now),
-      computer,
-      file: relativePath,
-      sha256: createHash('sha256').update(text).digest('hex'),
-      sources: sourceStatuses(doc)
-    }
-    const receiptProblems = checkAgainst(receipt, RECEIPT_SHAPE, identity)
-    if (receiptProblems.length) {
-      complain(`The receipt was refused by the safety check: ${receiptProblems.join('; ')}`)
-      await finish('refused by the safety check')
-      return 1
-    }
-    await writeRecord(claim, 'receipt.json', receipt)
-    say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
-    summarize(doc).forEach(say)
-
-    let result
-    try {
-      result = await commitAndPush({
-        git: deps.git,
-        dir: target,
-        relativePath,
-        message: `${SNAPSHOT_SUBJECT}${computer}`,
-        mode,
-        rewrite: write
-      })
     } catch {
-      complain('The commit failed. Nothing git printed is shown, because git messages can include the remote address.')
-      complain('Check that git has a name and email set in that folder, and that the folder is a clone.')
-      await finish('failed')
+      complain('The run stopped: the snapshot could not be written, or a step after it failed.')
+      complain('The error is not shown, because it can include a folder path. The claim records the run as failed.')
+      if (!finished) await finish('failed')
       return 1
     }
-    await finish(result.outcome, result.commit)
-    if (result.outcome === 'committed, not pushed') {
-      say(`The snapshot is committed here but was not pushed, because ${result.why}.`)
-      say('Nothing else was changed. Push it yourself when you are ready.')
-      return 0
-    }
-    if (OUTCOME_LINES[result.outcome]) {
-      say(OUTCOME_LINES[result.outcome].line)
-      return OUTCOME_LINES[result.outcome].code
-    }
-    if (mode === 'clone') {
-      complain('The push was refused twice. The dedicated clone holds the commit; the next run catches up.')
-    } else {
-      complain('The push was refused - the remote has commits this copy does not.')
-      complain('The snapshot is committed here and your working copy was left as it is. Pull, then push when ready.')
-    }
-    return 1
   } finally {
     await releaseLock(lock)
   }
