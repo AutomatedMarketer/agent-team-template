@@ -227,7 +227,12 @@ export async function collectClaudeLimits(deps) {
   let live = null
   if (credentials.status === 'found' && credentials.token) {
     const expired = credentials.expiresAt !== null && credentials.expiresAt <= deps.now
-    live = expired ? unavailable('sign-in expired') : await readLive(deps, credentials.token)
+    // With certificate checks off, anything between here and the address could read the token.
+    // A meter is not worth that, so the token stays home and the saved reading is tried instead.
+    const unchecked = deps.env?.NODE_TLS_REJECT_UNAUTHORIZED === '0'
+    if (expired) live = unavailable('sign-in expired')
+    else if (unchecked) live = unavailable('certificate checks are switched off')
+    else live = await readLive(deps, credentials.token)
     if (live.status === 'found') return { limits: live, account }
   }
 

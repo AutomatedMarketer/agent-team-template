@@ -183,6 +183,32 @@ test('an expired token with no saved reading is unavailable, and says why', asyn
   }
 })
 
+// Found on the first real dry run: the shell it ran in had NODE_TLS_REJECT_UNAUTHORIZED=0, so
+// the token went out over a connection whose certificate nobody checked. Anything between this
+// machine and the address could have read it. With checks off, the token is not sent at all.
+test('with certificate checks switched off, the token is never sent', async () => {
+  const fake = await makeFakeHome({
+    '.claude/.credentials.json': credentials(),
+    '.claude.json': savedReading(NOW - HOUR)
+  })
+  try {
+    const deps = depsFor(fake, { env: { NODE_TLS_REJECT_UNAUTHORIZED: '0' } })
+    const { limits } = await collectClaudeLimits(deps)
+    assert.equal(deps.fetch.calls.length, 0, 'the token was sent with certificate checks off')
+    assert.equal(limits.source, 'claude-code-saved')
+
+    await fake.write('.claude.json', {})
+    const alone = await collectClaudeLimits(depsFor(fake, { env: { NODE_TLS_REJECT_UNAUTHORIZED: '0' } }))
+    assert.deepEqual(alone.limits, { status: 'unavailable', why: 'certificate checks are switched off' })
+
+    const on = depsFor(fake, { env: { NODE_TLS_REJECT_UNAUTHORIZED: '1' } })
+    await collectClaudeLimits(on)
+    assert.equal(on.fetch.calls.length, 1)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
 test('a refused live call falls back to the saved reading, then to unavailable', async () => {
   const fake = await makeFakeHome({
     '.claude/.credentials.json': credentials(),
