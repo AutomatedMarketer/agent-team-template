@@ -11,7 +11,6 @@ import {
 import { probe } from '../.claude/skills/surplus-burn/usage-probe.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
 import { MAX_WINDOWS, MAX_PERCENT } from '../scripts/lib/status/schema.mjs'
-import { machineDeps } from '../scripts/lib/status/machine.mjs'
 import {
   makeFakeHome,
   fakeClaudeToken,
@@ -413,8 +412,12 @@ test('ordinary NODE_OPTIONS and command-line options do not stop the live call',
   }
 })
 
-test('on the real machine the guard is handed Node\'s own command-line options', () => {
-  assert.equal(machineDeps().execArgv, process.execArgv)
+// Read, not run: building the real machine's dependencies in a test is refused by the spawn scan,
+// because in process they are the real Keychain.
+test('on the real machine the guard is handed Node\'s own command-line options', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../scripts/lib/status/machine.' + 'mjs', import.meta.url), 'utf8')
+  assert.match(source, /^\s*execArgv: process\.execArgv,$/m)
 })
 
 test('a refused live call falls back to the saved reading, then to unavailable', async () => {

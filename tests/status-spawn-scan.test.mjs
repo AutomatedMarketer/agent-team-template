@@ -30,6 +30,11 @@ export function spawnScanProblems(path, text) {
     if (/collect-status|collect:status/.test(line) && !isComment && !line.includes(MARK) && !/['"`]--help['"`]/.test(line)) {
       problems.push(`${where} names the real collector`)
     }
+    // The real machine's dependencies, in process, are the real Keychain and the real network.
+    // No exceptions and no marker: a test that needs dependencies builds fake ones.
+    if (/\bmachineDeps\b|machine\.mjs/.test(line) && !isComment) {
+      problems.push(`${where} uses the real machine's dependencies`)
+    }
   })
   const importsMain = [...text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*cli\.mjs['"]/g)].some((match) =>
     match[1].split(',').map((name) => name.trim().split(/\s+as\s+/)[0]).includes('main')
@@ -74,6 +79,12 @@ test('SPAWN SAFETY: the scan catches the ways a test could run the real collecto
   assert.ok(caught("import { main } from '../scripts/lib/status/cli.mjs'"))
   assert.ok(caught("import { seamsFrom, main as run } from '../scripts/lib/status/cli.mjs'"))
   assert.ok(caught("const cli = await import('../scripts/lib/status/cli.mjs')"))
+  // The real machine's dependencies, used in process, reach the real Keychain just the same.
+  assert.ok(caught("import { machineDeps } from '../scripts/lib/status/machine.mjs'"))
+  assert.ok(caught("import { machineDeps as real } from '../../scripts/lib/status/machine.mjs'"))
+  assert.ok(caught("const { machineDeps } = await import('../scripts/lib/status/machine.mjs')"))
+  assert.ok(caught("import * as machine from '../scripts/lib/status/machine.mjs'"))
+  assert.ok(caught("await runCollector({ argv, deps: machineDeps(), repoRoot })"))
   assert.ok(caught('process.exitCode = await main()', HARNESS))
   // And lets through what is not a run.
   assert.ok(!caught("await run(process.execPath, ['scripts/collect-status.mjs', '--help'])"))
