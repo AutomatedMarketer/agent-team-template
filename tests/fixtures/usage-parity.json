@@ -1,0 +1,23 @@
+{
+  "about": "Shared contract for the usage snapshot. The same bytes live in agent-team-template and agent-cockpit; a test in each repo checks they match.",
+  "schema": "agent-status/usage/v1",
+  "folder": ".agent-team/status/usage",
+  "computerSlug": "^[a-z0-9-]{1,32}$",
+  "defaultComputer": "this computer",
+  "maxStringLength": 60,
+  "staleAfterHours": 8,
+  "maxFilesRead": 5,
+  "statuses": ["found", "not found", "unavailable"],
+  "sources": ["unofficial-live", "claude-code-saved", "codex-session-log"],
+  "windows": {
+    "five_hour": "5-hour",
+    "weekly_all": "Weekly",
+    "weekly_model": "Weekly, {model} only",
+    "weekly": "Weekly"
+  },
+  "rules": [
+    "usedPercent appears only inside a limits block whose status is found",
+    "a missing source is { status: not found }, never a zero",
+    "a window whose resetsAt has passed shows no percentage"
+  ]
+}
