@@ -61,6 +61,11 @@ export async function writeSnapshot(root, relativePath, text, { git } = {}) {
   // A link made between the check and the mkdir, or one the check could not see.
   await assertNoLinks(root, relativePath, { git })
   if (!(await isInsideFolder(dirname(path), root))) throw new LinkedPath()
+  // A small gap is left on purpose between this last check and the write below: swapping a
+  // folder for a link inside it takes a program already running on this computer as this user.
+  // A push cannot do that - git only changes the clone when the collector runs git, and nothing
+  // runs git between here and the rename. Closing it fully would need openat-style calls Node
+  // does not offer.
   const temporary = `${path}.${process.pid}.tmp`
   try {
     // Anything already at the temporary name - a leftover, or a link someone committed there - is
