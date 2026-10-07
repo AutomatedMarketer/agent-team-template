@@ -300,9 +300,11 @@ test('on a Mac the Keychain is asked first, with exactly these arguments, and no
     const exec = execStub(() => JSON.stringify(credentials()) + '\n')
     const deps = depsFor(fake, { platform: 'darwin', exec })
     const { printed, result } = await captureConsole(() => collectClaudeLimits(deps))
-    assert.deepEqual(KEYCHAIN_COMMAND, ['security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w']])
+    // The full path: a bare name is looked up on PATH, and anything earlier on PATH named
+    // 'security' would be handed the sign-in instead.
+    assert.deepEqual(KEYCHAIN_COMMAND, ['/usr/bin/security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w']])
     assert.equal(exec.calls.length, 1)
-    assert.equal(exec.calls[0].file, 'security')
+    assert.equal(exec.calls[0].file, '/usr/bin/security')
     assert.deepEqual(exec.calls[0].args, ['find-generic-password', '-s', 'Claude Code-credentials', '-w'])
     assert.equal(result.limits.source, 'unofficial-live')
     assert.equal(deps.fetch.calls[0].init.headers.Authorization, `Bearer ${fakeClaudeToken()}`)

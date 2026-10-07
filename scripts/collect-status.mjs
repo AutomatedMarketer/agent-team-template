@@ -8,22 +8,6 @@
 // or printed. If it refuses, nothing is written and the exit code is not zero. The format, the
 // sources and the Mac schedule are documented in .agent-team/status/README.md.
 
-import { fileURLToPath } from 'node:url'
-import { runCollector } from './lib/status/run.mjs'
-import { machineDeps } from './lib/status/machine.mjs'
+import { main } from './lib/status/cli.mjs'
 
-const repoRoot = fileURLToPath(new URL('../', import.meta.url))
-
-try {
-  process.exitCode = await runCollector({
-    argv: process.argv.slice(2),
-    deps: machineDeps(),
-    repoRoot,
-    out: (line) => console.log(line),
-    err: (line) => console.error(line)
-  })
-} catch {
-  // Deliberately no error message: an unexpected error can carry a path or a value.
-  console.error('The collector stopped on an unexpected error. Nothing was printed from it on purpose.')
-  process.exitCode = 1
-}
+process.exitCode = await main()

@@ -1,12 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, mkdtemp, rm } from 'node:fs/promises'
+import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { runCollector, collectUsage } from '../scripts/lib/status/run.mjs'
+import { seamsFrom } from '../scripts/lib/status/cli.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
 import { makeFakeHome, fakeClaudeToken, fetchStub, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME } from './helpers/fake-home.mjs'
 import { hostileHome, echoingAnswer, FORBIDDEN, depsFor, runIn, filesUnder } from './helpers/hostile-home.mjs'
@@ -219,21 +220,107 @@ test('options it does not know, and --only for anything but usage, are refused',
   }
 })
 
-// --- the real command line, against an empty home ---------------------------------------------------------
+// --- the real command line, against a fake home -----------------------------------------------------------
+//
+// A spawned collector is a real process on the real machine. Overriding HOME is not enough: on a
+// Mac, `security find-generic-password` ignores HOME and answers from the login Keychain, so a
+// plain spawn from `npm test` would read the real sign-in and send it to the real address. So no
+// test spawns scripts/collect-status.mjs to collect anything. They spawn tests/helpers/collector-cli.mjs,
+// which runs the same main() with the Keychain command and the network shut, and with PATH
+// pointing at an empty folder so no other program can be found either.
 
-test('the command runs as a script, with a dry run that writes nothing into this repo', async () => {
+const HARNESS = join('tests', 'helpers', 'collector-cli.mjs')
+
+async function minimalEnv(fake) {
+  const emptyPath = await mkdtemp(join(tmpdir(), 'agent-status-path-'))
+  // Built from nothing rather than copied from this process, so no CLAUDE_CONFIG_DIR, CODEX_HOME,
+  // NODE_OPTIONS or token in the test runner's own environment reaches the child.
+  const env = { HOME: fake.home, USERPROFILE: fake.home, PATH: emptyPath }
+  if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot
+  return { env, cleanup: () => rm(emptyPath, { recursive: true, force: true }) }
+}
+
+async function spawnCollector(fake, args, { platform } = {}) {
+  const { env, cleanup } = await minimalEnv(fake)
+  if (platform) env.COLLECTOR_TEST_PLATFORM = platform
+  try {
+    const result = await run(process.execPath, [HARNESS, ...args], { cwd: repoRoot, env }).catch((error) => error)
+    return { code: typeof result.code === 'number' ? result.code : 0, stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
+  } finally {
+    await cleanup()
+  }
+}
+
+test('the command line runs end to end, with a dry run that writes nothing into this repo', async () => {
   const fake = await makeFakeHome()
   try {
-    const env = { ...process.env, HOME: fake.home, USERPROFILE: fake.home }
-    delete env.CLAUDE_CONFIG_DIR
-    delete env.CODEX_HOME
-    const { stdout } = await run(process.execPath, ['scripts/collect-status.mjs', '--dry-run', '--computer', 'Script Test'], { cwd: repoRoot, env })
-    assert.match(stdout, /"schema": "agent-status\/usage\/v1"/)
-    assert.match(stdout, /Claude limits not found/)
+    const result = await spawnCollector(fake, ['--dry-run', '--computer', 'Script Test'])
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /"schema": "agent-status\/usage\/v1"/)
+    assert.match(result.stdout, /Claude limits not found/)
     assert.equal(existsSync(join(repoRoot, '.agent-team', 'status', 'usage', 'script-test.json')), false)
   } finally {
     await fake.cleanup()
   }
+})
+
+test('SPAWN SAFETY: a spawned collector on a "Mac" reaches the shut Keychain door, never /usr/bin/security', async () => {
+  const fake = await hostileHome()
+  try {
+    const result = await spawnCollector(fake, ['--dry-run', '--computer', 'Script Test'], { platform: 'darwin' })
+    assert.equal(result.code, 0, result.stderr)
+    // The collector did try the Keychain - with the full path - and the harness's stand-in took
+    // the call. The live address was tried too, and also stopped at the door.
+    assert.match(result.stderr, /TEST HARNESS: refused to run \/usr\/bin\/security/)
+    assert.match(result.stderr, /TEST HARNESS: refused a network call/)
+    // With both doors shut it fell back to the reading Claude Code saved in the fake home.
+    assert.match(result.stdout, /Claude limits found \(claude-code-saved\)/)
+    for (const needle of FORBIDDEN()) {
+      assert.ok(!(result.stdout + result.stderr).includes(needle), `the spawned run printed a forbidden string (${needle.slice(0, 6)}...)`)
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('SPAWN SAFETY: no test spawns the real collector script to collect anything', async () => {
+  const testsDir = join(repoRoot, 'tests')
+  const offenders = []
+  for (const name of await readdir(testsDir)) {
+    if (!name.endsWith('.mjs')) continue
+    const text = await readFile(join(testsDir, name), 'utf8')
+    // Only --help may go to the real script: it answers before any source is read.
+    for (const match of text.matchAll(/['"`]scripts\/collect-status\.mjs['"`]\s*,\s*([^\]\n]*)/g)) {
+      if (!/^['"`]--help['"`]$/.test(match[1].trim())) offenders.push(name)
+    }
+  }
+  assert.deepEqual(offenders, [], 'spawn tests/helpers/collector-cli.mjs instead')
+})
+
+test('the real script still answers --help with nothing on PATH', async () => {
+  const fake = await makeFakeHome()
+  const { env, cleanup } = await minimalEnv(fake)
+  try {
+    const { stdout } = await run(process.execPath, ['scripts/collect-status.mjs', '--help'], { cwd: repoRoot, env })
+    assert.match(stdout, /^Usage: node scripts\/collect-status\.mjs/)
+  } finally {
+    await cleanup()
+    await fake.cleanup()
+  }
+})
+
+test('the test harness can replace only the Keychain command, the network and the platform', async () => {
+  // main() is the one way in that takes replacements, and it takes only these three. The gate,
+  // the identity it checks against and the sources cannot be swapped from outside.
+  const cli = await readFile(join(repoRoot, 'scripts', 'lib', 'status', 'cli.mjs'), 'utf8')
+  const allowed = /const SEAMS = \[([^\]]*)\]/.exec(cli)?.[1]
+  assert.ok(allowed, 'cli.mjs no longer lists what a caller may replace')
+  assert.deepEqual(allowed.split(',').map((item) => item.trim().replace(/'/g, '')), ['exec', 'fetch', 'platform'])
+  const exec = async () => {}
+  const picked = seamsFrom({ exec, identity: {}, sources: {}, home: '/elsewhere', git: exec, now: 0 })
+  assert.deepEqual(Object.keys(picked), ['exec'])
+  const entry = await readFile(join(repoRoot, 'scripts', 'collect-status.mjs'), 'utf8')
+  assert.match(entry, /await main\(\)/, 'the real script must call main with nothing replaced')
 })
 
 test('package.json runs the collector as collect:status', async () => {
