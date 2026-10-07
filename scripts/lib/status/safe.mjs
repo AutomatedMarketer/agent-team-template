@@ -259,11 +259,27 @@ export function assertSafeLine(text, identity) {
 // the hostname is often the person's name. It also lands in commit messages and console lines,
 // so no control character: a newline could forge a log line, an escape could repaint a terminal.
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
+// Characters that reorder text or break lines without looking like it: right-to-left overrides
+// and isolates, the direction marks, and the Unicode line and paragraph separators.
+const DIRECTION_OR_LINE_CONTROL = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/
+
+// The board's own name rule (agent-cockpit api/state.js, NAME_CHARACTERS and NOT_A_NAME). A label
+// it would refuse shows up on the dashboard as no name at all, so the collector refuses it first.
+// tests/status-safe.test.mjs compares these with the board's when agent-cockpit is beside this repo.
+export const LABEL_CHARACTERS = /^[\p{L}\p{N} .,'’()+&:_-]+$/u
+const LOOKS_LIKE_AN_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i
+const LONG_UNBROKEN_RUN = /\S{24,}/
 
 export function checkComputerLabel(label, identity) {
   if (typeof label !== 'string' || !label.trim()) return ['computer: is empty']
   const problems = stringProblems(label, 'computer', identity)
   if (CONTROL_CHARACTER.test(label)) problems.push('computer: contains a control character')
+  if (DIRECTION_OR_LINE_CONTROL.test(label)) problems.push('computer: contains a direction or line control character')
+  if (!LABEL_CHARACTERS.test(label.trim())) {
+    problems.push("computer: has a character the dashboard does not show (letters, numbers, spaces and . , ' ’ ( ) + & : _ - only)")
+  }
+  if (LONG_UNBROKEN_RUN.test(label)) problems.push('computer: has 24 or more characters without a space')
+  if (LOOKS_LIKE_AN_ID.test(label)) problems.push('computer: looks like an id')
   if (!computerSlug(label)) problems.push('computer: has no letters or numbers to name a file after')
   const hostSlug = computerSlug(identity?.hostname ?? '')
   if (hostSlug && computerSlug(label) === hostSlug) problems.push('computer: is the computer name')

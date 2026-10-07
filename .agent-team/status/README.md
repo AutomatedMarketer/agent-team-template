@@ -26,7 +26,7 @@ npm run collect:status -- --computer "Mac Mini" --commit  # write it, commit onl
 
 | Option | What it does |
 |---|---|
-| `--computer "<label>"` | The name shown on the dashboard. Letters, numbers and spaces; up to 60 characters |
+| `--computer "<label>"` | The name shown on the dashboard. Up to 60 characters: letters, numbers, spaces and `. , ' ’ ( ) + & : _ -` only, no stretch of 24 or more without a space, and not this computer's own name |
 | `--dry-run` | Prints the file it would write. Writes nothing, commits nothing |
 | `--commit` | Writes, commits only the snapshot file (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |

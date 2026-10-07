@@ -128,3 +128,19 @@ test('the status README says percentages over 100 are written as they are', asyn
   assert.match(doc, /from 0 to 1000/)
   assert.match(doc, /never clipped/i)
 })
+
+test('the status README states exactly the label rule the collector enforces', async () => {
+  const doc = await statusReadme()
+  const row = doc.split('\n').find((line) => line.startsWith('| `--computer'))
+  assert.ok(row, 'no --computer row')
+  assert.ok(row.includes("`. , ' ’ ( ) + & : _ -`"), 'the row does not list the allowed punctuation')
+  assert.match(row, /letters, numbers, spaces/)
+  assert.match(row, /up to 60 characters/i)
+  assert.match(row, /24 or more without a space/)
+  // Every punctuation mark the row lists is one the rule allows, and vice versa.
+  const { LABEL_CHARACTERS } = await import('../scripts/lib/status/safe.mjs')
+  const listed = /`([^`]*)`/.exec(row.slice(row.indexOf('spaces and')))[1].split(' ').filter(Boolean)
+  for (const mark of listed) assert.ok(LABEL_CHARACTERS.test(`a${mark}b`), `the README allows ${mark} but the collector does not`)
+  const allowedPunctuation = LABEL_CHARACTERS.source.replace(/^\^\[\\p\{L\}\\p\{N\} /, '').replace(/\]\+\$$/, '')
+  assert.deepEqual([...allowedPunctuation].sort(), [...listed.join('')].sort())
+})

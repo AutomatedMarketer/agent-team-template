@@ -6,7 +6,8 @@ import {
   checkComputerLabel,
   assertSafeUsage,
   checkAgainst,
-  GateError
+  GateError,
+  LABEL_CHARACTERS
 } from '../scripts/lib/status/safe.mjs'
 import { RECEIPT_SHAPE, FINAL_SHAPE } from '../scripts/lib/status/schema.mjs'
 
@@ -312,4 +313,48 @@ test('a computer label with a control character is refused', () => {
     assert.ok(problems.some((problem) => /control character/.test(problem)), `accepted ${JSON.stringify(label)}`)
   }
   assert.deepEqual(checkComputerLabel('Büro Mac 2', identity), [])
+})
+
+// The board prints the label only if it passes its own name rule (agent-cockpit api/state.js,
+// cleanUsageName). A label the collector accepts but the board refuses shows up as no name at
+// all, so the collector holds the label to the same rule before reading anything.
+test('a computer label is held to the board\'s name rule', () => {
+  for (const good of ['Mac Mini', 'Büro Mac 2', "Nuno's Mac (2)", 'Studio + Office', 'Desk: left', 'Work_PC-3', 'Mac, upstairs', 'x'.repeat(23)]) {
+    assert.deepEqual(checkComputerLabel(good, identity), [], `refused ${JSON.stringify(good)}`)
+  }
+  for (const [label, why] of [
+    ['Mac#1', /character the dashboard does not show/],
+    ['Mac!', /character the dashboard does not show/],
+    ['Mac\u{1F600}', /character the dashboard does not show/],
+    ['x'.repeat(24), /24 or more characters without a space/],
+    ['0f0e0d0c-1111-2222 box', /looks like an id/],
+    ['Mac‮iniM', /direction or line control/],
+    ['Mac⁦Mini', /direction or line control/],
+    ['Mac‏Mini', /direction or line control/],
+    ['Mac Mini', /direction or line control/],
+    ['Mac Mini', /direction or line control/]
+  ]) {
+    const problems = checkComputerLabel(label, identity)
+    assert.ok(problems.some((problem) => why.test(problem)), `${JSON.stringify(label)}: ${problems.join(' | ') || 'accepted'}`)
+  }
+})
+
+test('the label rule is the board\'s own, when agent-cockpit is beside this repo', async (t) => {
+  const { readFile } = await import('node:fs/promises')
+  const { existsSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { repoRoot } = await import('./helpers/repo.mjs')
+  const board = join(repoRoot, '..', 'agent-cockpit', 'api', 'state.js')
+  if (!existsSync(board)) {
+    t.skip('SKIPPED, not passed: agent-cockpit is not checked out beside this repo, so the board\'s name rule could not be compared. The test above still checks the collector\'s copy.')
+    return
+  }
+  const text = await readFile(board, 'utf8')
+  const boardCharacters = /const NAME_CHARACTERS = (\/.*\/[a-z]*)\n/.exec(text)?.[1]
+  const boardRefusals = /const NOT_A_NAME = (\/.*\/[a-z]*)\n/.exec(text)?.[1]
+  assert.ok(boardCharacters && boardRefusals, 'the board no longer defines NAME_CHARACTERS and NOT_A_NAME the way this test reads them')
+  assert.equal(`/${LABEL_CHARACTERS.source}/${LABEL_CHARACTERS.flags}`, boardCharacters)
+  for (const piece of ['[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}', '\S{24,}']) {
+    assert.ok(boardRefusals.includes(piece), `the board no longer refuses ${piece}`)
+  }
 })
