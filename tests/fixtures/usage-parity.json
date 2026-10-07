@@ -7,17 +7,37 @@
   "maxStringLength": 60,
   "staleAfterHours": 8,
   "maxFilesRead": 5,
-  "statuses": ["found", "not found", "unavailable"],
-  "sources": ["unofficial-live", "claude-code-saved", "codex-session-log"],
+  "statuses": [
+    "found",
+    "not found",
+    "unavailable"
+  ],
+  "sources": [
+    "unofficial-live",
+    "claude-code-saved",
+    "codex-session-log"
+  ],
   "windows": {
     "five_hour": "5-hour",
     "weekly_all": "Weekly",
     "weekly_model": "Weekly, {model} only",
     "weekly": "Weekly"
   },
+  "maxWindows": 8,
+  "windowRequired": [
+    "kind",
+    "usedPercent"
+  ],
+  "windowOptional": [
+    "model",
+    "resetsAt"
+  ],
+  "maxActivityDays": 17,
   "rules": [
     "usedPercent appears only inside a limits block whose status is found",
     "a missing source is { status: not found }, never a zero",
-    "a window whose resetsAt has passed shows no percentage"
+    "a window whose resetsAt has passed shows no percentage",
+    "resetsAt may be missing or null; the board then says the reset time is unknown",
+    "the freshness shown is the reading time (limits.readAt), not only the file time (takenAt)"
   ]
 }
