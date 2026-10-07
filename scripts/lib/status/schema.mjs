@@ -16,7 +16,14 @@ export const MAX_FILES_READ = 5
 // the spring clock change or the few minutes of drift allowed past "now".
 export const MAX_ACTIVITY_DAYS = 17
 export const STATUSES = ['found', 'not found', 'unavailable']
-export const SOURCES = ['unofficial-live', 'claude-code-saved', 'codex-session-log']
+export const CLAUDE_LIMIT_SOURCES = ['unofficial-live', 'claude-code-saved']
+export const CODEX_LIMIT_SOURCES = ['codex-session-log']
+export const SOURCES = [...CLAUDE_LIMIT_SOURCES, ...CODEX_LIMIT_SOURCES]
+export const MAX_WINDOWS = 8
+// A window always has a kind and a number. A reset time may be missing (the board then says it
+// is unknown), and only the model-scoped weekly window names a model.
+export const WINDOW_REQUIRED = ['kind', 'usedPercent']
+export const WINDOW_OPTIONAL = ['model', 'resetsAt']
 export const WINDOW_LABELS = {
   five_hour: '5-hour',
   weekly_all: 'Weekly',
@@ -62,15 +69,23 @@ export function usagePath(label) {
 const text = { type: 'text' }
 const count = { type: 'count' }
 
+const WINDOW_KEYS = {
+  kind: { type: 'enum', values: WINDOW_KINDS },
+  model: text,
+  usedPercent: { type: 'percent' },
+  resetsAt: { type: 'iso' }
+}
+
+// Exactly the contract's keys, and every one of them given a rule - checked once, when this loads.
+const contractKeys = [...WINDOW_REQUIRED, ...WINDOW_OPTIONAL].sort()
+if (JSON.stringify(Object.keys(WINDOW_KEYS).sort()) !== JSON.stringify(contractKeys)) {
+  throw new Error('schema.mjs: the window keys do not match WINDOW_REQUIRED and WINDOW_OPTIONAL')
+}
+
 const windowShape = {
   type: 'object',
-  keys: {
-    kind: { type: 'enum', values: WINDOW_KINDS },
-    model: text,
-    usedPercent: { type: 'percent' },
-    resetsAt: { type: 'iso' }
-  },
-  required: ['kind', 'usedPercent'],
+  keys: WINDOW_KEYS,
+  required: WINDOW_REQUIRED,
   // Only the model-scoped weekly window names a model, and it always does.
   modelWindow: true
 }
@@ -86,7 +101,7 @@ const limitsShape = (sources) => ({
   found: {
     source: { type: 'enum', values: sources },
     readAt: { type: 'iso' },
-    windows: { type: 'array', of: windowShape, min: 1, max: 8 }
+    windows: { type: 'array', of: windowShape, min: 1, max: MAX_WINDOWS }
   },
   foundRequired: ['source', 'readAt', 'windows']
 })
@@ -131,7 +146,7 @@ export const USAGE_SHAPE = {
       type: 'object',
       keys: {
         plan: planShape,
-        limits: limitsShape(['unofficial-live', 'claude-code-saved']),
+        limits: limitsShape(CLAUDE_LIMIT_SOURCES),
         activity: activityShape
       },
       required: ['plan', 'limits', 'activity']
@@ -140,7 +155,7 @@ export const USAGE_SHAPE = {
       type: 'object',
       keys: {
         plan: planShape,
-        limits: limitsShape(['codex-session-log'])
+        limits: limitsShape(CODEX_LIMIT_SOURCES)
       },
       required: ['plan', 'limits']
     }
