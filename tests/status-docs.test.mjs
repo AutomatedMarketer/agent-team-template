@@ -95,8 +95,17 @@ test('the status README runs the collector from a pinned code checkout, apart fr
   const workingDirectory = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1] ?? ''
   assert.ok(!workingDirectory.startsWith(clone), 'the plist works from inside the data clone')
   // Pinned to a reviewed commit, and how to move the pin on purpose.
-  assert.match(doc, /git -c advice\.detachedHead=false checkout /)
-  assert.match(doc, /git diff [^\n]*-- scripts\//)
+  assert.match(doc, /-c advice\.detachedHead=false checkout "\$id"/)
+  // The update steps: fetch, take the id of what was fetched, read the WHOLE diff - not only
+  // scripts/, since package.json or any file the scripts import changes what runs - then move.
+  const update = doc.slice(doc.indexOf('### Updating the collector'), doc.indexOf('### Rollback'))
+  const code = '~/.local/share/agent-status/collector-code'
+  assert.ok(update.includes(`git -C ${code} fetch --quiet origin`), 'no fetch step')
+  assert.ok(update.includes(`id=$(git -C ${code} rev-parse origin/main)`), 'no step that takes the id')
+  assert.ok(update.includes(`git -C ${code} diff HEAD "$id"`), 'no whole-tree diff of the new id')
+  assert.ok(update.includes(`git -C ${code} -c advice.detachedHead=false checkout "$id"`), 'no checkout of that same id')
+  assert.doesNotMatch(update, /diff HEAD[^\n]*-- scripts\//, 'the diff is limited to scripts/')
+  assert.match(update, /package\.json/)
   assert.match(doc, /never updates? itself/i)
 })
 

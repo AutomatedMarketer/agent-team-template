@@ -198,15 +198,15 @@ and a rollback.
 
 ### One-time setup
 
-1. Make the code checkout and pin it (replace the two `YOUR-` parts). Pick the commit to pin:
-   the newest one on `main` whose `scripts/` you have read. `git log -1 --format=%H origin/main`
-   prints its id.
+1. Make the code checkout and pin it (replace the two `YOUR-` parts). The pin is the commit
+   you have read: `id` holds its id, and the checkout uses that same id.
 
    ```bash
    mkdir -p ~/.local/share/agent-status
    git clone https://github.com/YOUR-ACCOUNT/YOUR-TEAM-REPO.git ~/.local/share/agent-status/collector-code
-   cd ~/.local/share/agent-status/collector-code
-   git -c advice.detachedHead=false checkout THE-COMMIT-ID-YOU-READ
+   id=$(git -C ~/.local/share/agent-status/collector-code rev-parse origin/main)
+   echo "$id"      # read the code at this commit (scripts/ and package.json at least) before going on
+   git -C ~/.local/share/agent-status/collector-code -c advice.detachedHead=false checkout "$id"
    ```
 
    This folder needs no push access and no git name. Nothing writes to it.
@@ -299,19 +299,23 @@ and a rollback.
 
 ### Updating the collector, on purpose
 
-The code checkout stays on the commit you pinned until you move it. Pushes to the team repo,
-including ones that change `scripts/`, do not reach the Mac's collector until you have read them:
+The code checkout stays on the commit you pinned until you move it. Pushes to the team repo do
+not reach the Mac's collector until you have read them. Fetch, take the id of what arrived, read
+the **whole** change - not only `scripts/`: `package.json` and any file the scripts load change
+what runs too - and then move the pin to that same id:
 
 ```bash
-cd ~/.local/share/agent-status/collector-code
-git fetch --quiet origin
-git log --oneline HEAD..origin/main -- scripts/          # what changed in the collector
-git diff HEAD origin/main -- scripts/                    # read every line of this
-git -c advice.detachedHead=false checkout THE-NEW-COMMIT-ID
+git -C ~/.local/share/agent-status/collector-code fetch --quiet origin
+id=$(git -C ~/.local/share/agent-status/collector-code rev-parse origin/main)
+git -C ~/.local/share/agent-status/collector-code log --oneline HEAD.."$id"   # what arrived
+git -C ~/.local/share/agent-status/collector-code diff HEAD "$id"             # read every line
+git -C ~/.local/share/agent-status/collector-code -c advice.detachedHead=false checkout "$id"
 ```
 
-If anything in that diff is not what you expected, do not move the pin. The next scheduled run
-uses the new code; nothing needs reloading.
+Checking out `"$id"` rather than `origin/main` matters: a fetch between your reading and the
+checkout would otherwise move you to code you have not read. If anything in the diff is not what
+you expected, do not move the pin. The next scheduled run uses the new code; nothing needs
+reloading.
 
 ### Rollback
 
