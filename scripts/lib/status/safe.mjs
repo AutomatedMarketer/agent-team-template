@@ -7,7 +7,7 @@
 // check that does not trust the promise. A problem names the field, never the value - the value
 // is the thing that might be the secret.
 
-import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, computerSlug } from './schema.mjs'
+import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, MAX_PERCENT, computerSlug } from './schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -120,8 +120,9 @@ function walk(value, shape, path, identity, problems) {
       }
       return
     case 'percent':
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
-        problems.push(`${path}: is not a percentage between 0 and 100`)
+      // Over 100 is over the limit and is written as it is; only past the ceiling is refused.
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_PERCENT) {
+        problems.push(`${path}: is not a percentage between 0 and ${MAX_PERCENT}`)
       }
       return
     case 'count':

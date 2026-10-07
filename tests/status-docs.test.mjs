@@ -122,3 +122,9 @@ test('the status README says a window with no number is left out, and resetsAt m
   assert.match(doc, /window with no number, that window is left out/i)
   assert.match(doc, /no `resetsAt`/)
 })
+
+test('the status README says percentages over 100 are written as they are', async () => {
+  const doc = await statusReadme()
+  assert.match(doc, /from 0 to 1000/)
+  assert.match(doc, /never clipped/i)
+})

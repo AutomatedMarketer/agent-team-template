@@ -10,7 +10,7 @@ import {
 } from '../scripts/lib/status/claude-limits.mjs'
 import { probe } from '../.claude/skills/surplus-burn/usage-probe.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
-import { MAX_WINDOWS } from '../scripts/lib/status/schema.mjs'
+import { MAX_WINDOWS, MAX_PERCENT } from '../scripts/lib/status/schema.mjs'
 import {
   makeFakeHome,
   fakeClaudeToken,
@@ -120,10 +120,37 @@ test('parser: a model name that is not a plain model name spoils the reading', (
   }
 })
 
-test('parser: a percentage over 100 is shown as 100, not as a broken meter', () => {
+// Over the limit is a real reading - extra usage, or a plan that lets you run past it. Clipping it
+// to 100 would hide by how much. Only a number past the contract's ceiling is not believable.
+test('parser: a percentage over 100 is kept as it is, never clipped', () => {
   const answer = newAnswer()
-  answer.limits[0].percent = 104
-  assert.equal(parseClaudeUsage(answer)[0].usedPercent, 100)
+  answer.limits[0].percent = 112
+  assert.equal(parseClaudeUsage(answer)[0].usedPercent, 112)
+  const ceiling = newAnswer()
+  ceiling.limits[0].percent = MAX_PERCENT
+  assert.equal(parseClaudeUsage(ceiling)[0].usedPercent, MAX_PERCENT)
+  const beyond = newAnswer()
+  beyond.limits[0].percent = MAX_PERCENT + 1
+  assert.equal(parseClaudeUsage(beyond), null)
+})
+
+test('a live reading of 112% is written, not refused', async () => {
+  const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
+  try {
+    const answer = { limits: [{ kind: 'session', percent: 112, resets_at: '2026-10-07T21:40:00Z' }] }
+    const { limits } = await collectClaudeLimits(depsFor(fake, { fetch: fetchStub(() => ({ status: 200, body: answer })) }))
+    assert.deepEqual(limits.windows, [{ kind: 'five_hour', usedPercent: 112, resetsAt: '2026-10-07T21:40:00Z' }])
+    const doc = {
+      schema: 'agent-status/usage/v1',
+      takenAt: '2026-10-07T20:00:00Z',
+      computer: 'Test PC',
+      claude: { plan: { status: 'not found' }, limits, activity: { status: 'not found' } },
+      codex: { plan: { status: 'not found' }, limits: { status: 'not found' } }
+    }
+    assert.deepEqual(checkUsage(doc, { username: 'fakeperson', home: fake.home, hostname: 'fake-host-77' }), [])
+  } finally {
+    await fake.cleanup()
+  }
 })
 
 // The address sometimes answers a window with no number at all (utilization: null) - a window

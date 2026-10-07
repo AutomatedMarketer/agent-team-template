@@ -2,6 +2,7 @@
 // value or null - never a guess - so a source can treat null as "this answer is not understood".
 
 import { readFile } from 'node:fs/promises'
+import { MAX_PERCENT } from './schema.mjs'
 
 export const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -28,11 +29,13 @@ export function toIsoTime(raw) {
   return null
 }
 
-// One decimal place, capped at 100: a meter past full is shown full rather than broken. Negative
-// or non-numeric is not a percentage at all.
+// One decimal place, never clipped: over 100 means over the limit, and by how much is the point.
+// Negative, non-numeric, or past the contract's ceiling (MAX_PERCENT) is not a believable
+// percentage at all.
 export function cleanPercent(raw) {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) return null
-  return Math.min(100, Math.round(raw * 10) / 10)
+  const percent = Math.round(raw * 10) / 10
+  return percent <= MAX_PERCENT ? percent : null
 }
 
 // Reads JSON without ever letting an error message out: fs errors carry full paths, and a full

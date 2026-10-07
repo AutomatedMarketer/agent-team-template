@@ -16,6 +16,7 @@ import {
   WINDOW_LABELS,
   MAX_WINDOWS,
   MAX_ACTIVITY_DAYS,
+  MAX_PERCENT,
   WINDOW_REQUIRED,
   WINDOW_OPTIONAL,
   CLAUDE_LIMIT_SOURCES,
@@ -53,6 +54,7 @@ test('usage parity: the limits both sides enforce match', () => {
   assert.equal(MAX_FILES_READ, fixture.maxFilesRead)
   assert.equal(MAX_WINDOWS, fixture.maxWindows)
   assert.equal(MAX_ACTIVITY_DAYS, fixture.maxActivityDays)
+  assert.equal(MAX_PERCENT, fixture.maxPercent)
   assert.deepEqual(WINDOW_REQUIRED, fixture.windowRequired)
   assert.deepEqual(WINDOW_OPTIONAL, fixture.windowOptional)
 })
@@ -116,6 +118,14 @@ test('usage parity: a window needs windowRequired, may carry windowOptional, and
   accepted(docWith({ claudeWindows: [{ kind: 'weekly_model', model: 'Fable', usedPercent: 3 }] }))
   refused(docWith({ claudeWindows: [{ kind: 'five_hour', usedPercent: 3, label: '5-hour' }] }), /windows\[0\]\.label: is not an allowed key/)
   refused(docWith({ claudeWindows: [{ kind: 'five_hour', usedPercent: 3, resetsAt: null }] }), /windows\[0\]\.resetsAt/)
+})
+
+test('usage parity: the gate takes usedPercent from 0 to maxPercent, over 100 included, and no further', () => {
+  for (const usedPercent of [0, 100, 112, fixture.maxPercent]) {
+    accepted(docWith({ claudeWindows: [{ kind: 'five_hour', usedPercent }] }))
+  }
+  refused(docWith({ claudeWindows: [{ kind: 'five_hour', usedPercent: fixture.maxPercent + 0.1 }] }), /usedPercent/)
+  refused(docWith({ claudeWindows: [{ kind: 'five_hour', usedPercent: -0.1 }] }), /usedPercent/)
 })
 
 test('usage parity: the gate takes exactly maxActivityDays days, not one more', () => {

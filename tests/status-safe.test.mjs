@@ -151,12 +151,17 @@ test('rule: activity is always labelled an estimate', () => {
 
 // --- numbers and times --------------------------------------------------------------------------
 
-test('rule: percentages are finite and between 0 and 100', () => {
+// Above 100 means over the limit, which is exactly what the meter must show - so the gate allows
+// up to the contract's ceiling (1000) and refuses only what is not a percentage at all.
+test('rule: percentages are finite and between 0 and 1000, and over 100 is allowed', () => {
   assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = Number.NaN }, /usedPercent/)
   assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = Infinity }, /usedPercent/)
   assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = -1 }, /usedPercent/)
-  assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = 101 }, /usedPercent/)
+  assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = 1000.1 }, /usedPercent/)
   assertRejected((doc) => { doc.claude.limits.windows[0].usedPercent = '18' }, /usedPercent/)
+  for (const over of [101, 112, 1000]) {
+    assert.deepEqual(problemsAfter((doc) => { doc.claude.limits.windows[0].usedPercent = over }), [], `refused ${over}`)
+  }
 })
 
 test('rule: counts are whole and not negative', () => {

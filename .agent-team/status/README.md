@@ -89,7 +89,8 @@ Every block has a `status`: `found`, `not found` (the source is not on this comp
 `unavailable` (it is there but could not be read, with a short `why`). A percentage only ever
 appears inside a block that says `found` - a missing source is never written as a zero. The same
 goes for one window: if the address lists a window with no number, that window is left out and the
-others are kept. A block holds at most 8 windows. A window may have no `resetsAt` when the reset
+others are kept. A block holds at most 8 windows. `usedPercent` runs from 0 to 1000: above 100
+means you are over the limit, and it is written as it is, never clipped to 100. A window may have no `resetsAt` when the reset
 time is not known; the dashboard then says so.
 
 `byModel` counts replies per model family. `activity` is always marked `"estimate": true`: it

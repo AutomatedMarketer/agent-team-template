@@ -20,6 +20,7 @@ export const CLAUDE_LIMIT_SOURCES = ['unofficial-live', 'claude-code-saved']
 export const CODEX_LIMIT_SOURCES = ['codex-session-log']
 export const SOURCES = [...CLAUDE_LIMIT_SOURCES, ...CODEX_LIMIT_SOURCES]
 export const MAX_WINDOWS = 8
+export const MAX_PERCENT = 1000
 // A window always has a kind and a number. A reset time may be missing (the board then says it
 // is unknown), and only the model-scoped weekly window names a model.
 export const WINDOW_REQUIRED = ['kind', 'usedPercent']
