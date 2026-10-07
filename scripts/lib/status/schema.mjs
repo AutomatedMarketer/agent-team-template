@@ -158,6 +158,7 @@ export const OUTCOMES = [
   'pushed',
   'retried and pushed',
   'committed, push refused',
+  'committed, not pushed',
   'nothing to commit',
   'refused by the safety check',
   'not a dedicated clone',

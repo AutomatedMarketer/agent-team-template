@@ -292,6 +292,11 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       return 1
     }
     await finish(result.outcome, result.commit)
+    if (result.outcome === 'committed, not pushed') {
+      say(`The snapshot is committed here but was not pushed, because ${result.why}.`)
+      say('Nothing else was changed. Push it yourself when you are ready.')
+      return 0
+    }
     if (OUTCOME_LINES[result.outcome]) {
       say(OUTCOME_LINES[result.outcome].line)
       return OUTCOME_LINES[result.outcome].code

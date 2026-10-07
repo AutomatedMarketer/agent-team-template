@@ -1,8 +1,9 @@
 // Commit mode: getting the snapshot into the repo the dashboard reads, unattended.
 //
 // Two places it can commit from, and they are treated differently on purpose:
-//   - a person's own working copy: commit only the snapshot file, whatever else is staged, and if
-//     the push is refused, stop and say so. Nothing of theirs is ever reset.
+//   - a person's own working copy: commit only the snapshot file, whatever else is staged. Push
+//     only when that push would carry the snapshot alone to the default branch; otherwise, or if
+//     the push is refused, stop and say so. Nothing of theirs is ever reset or pushed.
 //   - the collector's dedicated clone (--clone): a folder nobody works in. It is brought level
 //     with the remote before writing, and a refused push is fetched, reset, rewritten and retried
 //     once. A folder with anybody else's changes in it is refused as "not a dedicated clone".
@@ -139,7 +140,50 @@ export async function prepareClone({ git, cloneDir, relativePath }) {
   return null
 }
 
+// The branch the remote calls its default (the one the dashboard reads), or main if it never said.
+async function defaultBranch(run) {
+  try {
+    const ref = (await run(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])).stdout.trim()
+    const name = ref.replace(/^refs\/remotes\/origin\//, '')
+    if (name && name !== ref) return name
+  } catch {
+    // No origin/HEAD recorded in this copy.
+  }
+  return 'main'
+}
+
+async function currentBranch(run) {
+  try {
+    return (await run(['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+// In a person's own copy a push is only safe when it carries the snapshot alone, to the branch
+// the dashboard reads. Checked BEFORE the snapshot is committed. Returns the branch to push to,
+// or a plain reason not to push. The person's own branch name is never repeated: it could be
+// anything, including their name.
+async function workingCopyPushTarget(run) {
+  const target = await defaultBranch(run)
+  const branch = await currentBranch(run)
+  if (!branch) return { why: 'this copy is not on a branch' }
+  if (branch !== target) return { why: `you are not on ${target}, the branch the dashboard reads` }
+  let ahead
+  try {
+    ahead = Number((await run(['rev-list', '--count', '@{u}..HEAD'])).stdout.trim())
+  } catch {
+    return { why: `${target} here does not follow a branch on the remote` }
+  }
+  if (!Number.isSafeInteger(ahead) || ahead !== 0) {
+    return { why: 'this copy has other commits that are not pushed yet, and a push would send them too' }
+  }
+  return { branch: target }
+}
+
 // mode: 'working-copy' | 'clone'. rewrite() puts the snapshot file back after a reset.
+// Every push names its remote and branch: a bare `git push` follows whatever the copy is set up
+// to do, which can mean other branches.
 export async function commitAndPush({ git, dir, relativePath, message, mode, rewrite }) {
   const run = (args) => git(args, dir)
   const succeeds = async (args) => {
@@ -158,9 +202,21 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
     return (await run(['rev-parse', 'HEAD'])).stdout.trim()
   }
 
+  let target
+  if (mode === 'clone') {
+    // prepareClone has already required a branch that follows the remote.
+    const branch = await currentBranch(run)
+    if (!branch) throw new Error('the dedicated clone is not on a branch')
+    target = { branch }
+  } else {
+    target = await workingCopyPushTarget(run)
+  }
+  const push = () => succeeds(['push', '--quiet', 'origin', `HEAD:refs/heads/${target.branch}`])
+
   let commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
-  if (await succeeds(['push', '--quiet'])) return { outcome: 'pushed', commit }
+  if (target.why) return { outcome: 'committed, not pushed', commit, why: target.why }
+  if (await push()) return { outcome: 'pushed', commit }
   if (mode !== 'clone') return { outcome: 'committed, push refused', commit }
 
   // The dedicated clone holds nothing but snapshots, so catching up is always safe: the newer
@@ -170,6 +226,6 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
   await rewrite()
   commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
-  if (await succeeds(['push', '--quiet'])) return { outcome: 'retried and pushed', commit }
+  if (await push()) return { outcome: 'retried and pushed', commit }
   return { outcome: 'committed, push refused', commit }
 }

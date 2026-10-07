@@ -28,7 +28,7 @@ npm run collect:status -- --computer "Mac Mini" --commit  # write it, commit onl
 |---|---|
 | `--computer "<label>"` | The name shown on the dashboard. Letters, numbers and spaces; up to 60 characters |
 | `--dry-run` | Prints the file it would write. Writes nothing, commits nothing |
-| `--commit` | Writes, commits only the snapshot file (anything else you have staged stays staged), pushes |
+| `--commit` | Writes, commits only the snapshot file (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
 | `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector` |
 | `--only usage` | Only usage exists so far. Connections and Hermes are later phases |
@@ -38,8 +38,13 @@ slot was already claimed). 1 means it refused or failed after reading. 2 means i
 reading anything - an unknown option, a bad label, a folder that is not a dedicated clone, or a
 `--clone` folder that holds the collector's own code.
 
-If a push is refused in **your own working copy**, the collector stops and says so. The snapshot
-stays committed locally and nothing of yours is touched. Pull, then push when you are ready.
+In **your own working copy**, `--commit` pushes only when the push would carry the snapshot and
+nothing else, to the branch the dashboard reads (the remote's default branch, usually `main`).
+If you are on another branch, or you have other commits that are not pushed yet, it commits the
+snapshot, does not push, and says which of those it was - a push would have sent your other work
+too. It always pushes by name (`git push origin HEAD:refs/heads/main`), never a bare `git push`.
+If a push is refused, it stops and says so. Either way the snapshot stays committed locally and
+nothing of yours is touched; push when you are ready.
 
 ## The file
 

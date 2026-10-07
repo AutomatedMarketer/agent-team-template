@@ -99,3 +99,10 @@ test('the status README runs the collector from a pinned code checkout, apart fr
   assert.match(doc, /git diff [^\n]*-- scripts\//)
   assert.match(doc, /never updates? itself/i)
 })
+
+test('the status README says when --commit in your own copy does not push', async () => {
+  const doc = await statusReadme()
+  assert.match(doc, /another branch/i)
+  assert.match(doc, /other commits that are not pushed yet/i)
+  assert.match(doc, /git push origin HEAD:refs\/heads\/main/)
+})

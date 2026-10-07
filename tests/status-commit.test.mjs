@@ -89,6 +89,114 @@ test('working copy: commits only its own file, leaves other staged work staged, 
   }
 })
 
+// A plain `git push` sends every unpushed commit on the branch, and pushes whatever branch the
+// person happens to be on. In somebody's own copy the collector pushes only when the push would
+// carry the snapshot alone, to the branch the dashboard reads - otherwise it commits and says why.
+
+const pushRecorder = () => {
+  const pushes = []
+  const recordingGit = async (args, cwd) => {
+    if (args[0] === 'push') pushes.push(args)
+    return realGit(args, cwd)
+  }
+  return { pushes, recordingGit }
+}
+
+const finalRecord = async (stateDir) => {
+  const [claim] = await readdir(join(stateDir, 'claims'))
+  return JSON.parse(await readFile(join(stateDir, 'claims', claim, 'final.json'), 'utf8'))
+}
+
+test('working copy: pushes with an explicit refspec to the default branch', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const { pushes, recordingGit } = pushRecorder()
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [['push', '--quiet', 'origin', 'HEAD:refs/heads/main']])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: with other unpushed commits it commits the snapshot, does not push, and says why', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await writeFile(join(repo.work, 'plan.md'), 'not ready to share\n')
+    await git(['add', 'plan.md'], repo.work)
+    await git(['commit', '-q', '-m', 'My private plan'], repo.work)
+    const stateDir = join(repo.root, 'state')
+    const { pushes, recordingGit } = pushRecorder()
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [], 'it pushed, and would have sent the person\'s own commit too')
+    assert.deepEqual(await log(repo.work), ['Usage snapshot from Test PC', 'My private plan', 'start'])
+    assert.deepEqual(await log(repo.remote, 'main'), ['start'])
+    assert.match(result.stdout, /committed here but was not pushed/i)
+    assert.match(result.stdout, /other commits that are not pushed yet/i)
+    assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: on another branch it commits the snapshot there, does not push, and says why', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await git(['checkout', '-q', '-b', 'experiment'], repo.work)
+    await git(['push', '-q', '-u', 'origin', 'experiment'], repo.work)
+    const { pushes, recordingGit } = pushRecorder()
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [])
+    assert.equal((await log(repo.work))[0], 'Usage snapshot from Test PC')
+    assert.deepEqual(await log(repo.remote, 'experiment'), ['start'])
+    assert.deepEqual(await log(repo.remote, 'main'), ['start'])
+    assert.match(result.stdout, /committed here but was not pushed/i)
+    assert.match(result.stdout, /not on main, the branch the dashboard reads/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: the default branch is the one the remote names, not always main', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    // The remote says its default is "trunk"; this copy is on main.
+    await git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], repo.work)
+    const { pushes, recordingGit } = pushRecorder()
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [])
+    assert.match(result.stdout, /not on trunk, the branch the dashboard reads/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: pushes with an explicit refspec too', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const { pushes, recordingGit } = pushRecorder()
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [['push', '--quiet', 'origin', 'HEAD:refs/heads/main']])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
 test('working copy: a refused push stops and says so, and nothing is reset', async () => {
   const repo = await makeRemote()
   const fake = await makeFakeHome()
