@@ -165,15 +165,37 @@ test('parser: a window with no number is left out, and the rest of the reading i
   assert.ok(!JSON.stringify(flat).includes('"usedPercent":0'))
 })
 
-test('parser: when no window has a number, there is no reading', () => {
-  const answer = {
-    limits: [
-      { kind: 'session', percent: null },
-      { kind: 'weekly_all', utilization: null }
-    ],
-    five_hour: { utilization: null }
+// "Not understood" would send someone looking for a changed format. An answer in the known shape
+// whose windows all say null is understood perfectly - it just has no numbers yet - and the reason
+// says so. The parser tells the two apart: null for not understood, an empty list for no numbers.
+const noNumbers = () => ({
+  limits: [
+    { kind: 'session', percent: null },
+    { kind: 'weekly_all', utilization: null }
+  ],
+  five_hour: { utilization: null }
+})
+
+test('parser: when no window has a number, it says "no numbers", not "not understood"', () => {
+  assert.deepEqual(parseClaudeUsage(noNumbers()), [])
+  assert.equal(parseClaudeUsage({ something: 'else' }), null)
+})
+
+test('a live answer with no numbers in it is unavailable, and says exactly that', async () => {
+  const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
+  try {
+    const deps = depsFor(fake, { fetch: fetchStub(() => ({ status: 200, body: noNumbers() })) })
+    const { limits } = await collectClaudeLimits(deps)
+    assert.deepEqual(limits, { status: 'unavailable', why: 'the live answer had no numbers in it' })
+    await fake.write('.claude.json', savedReading(NOW - HOUR, noNumbers()))
+    const both = await collectClaudeLimits(depsFor(fake, { fetch: fetchStub(() => ({ status: 500, body: {} })) }))
+    assert.deepEqual(both.limits, { status: 'unavailable', why: 'live answer refused' })
+    await fake.write('.claude/.credentials.json', {})
+    const savedOnly = await collectClaudeLimits(depsFor(fake))
+    assert.deepEqual(savedOnly.limits, { status: 'unavailable', why: 'the saved reading had no numbers in it' })
+  } finally {
+    await fake.cleanup()
   }
-  assert.equal(parseClaudeUsage(answer), null)
 })
 
 test('parser: never more windows than the contract allows', () => {

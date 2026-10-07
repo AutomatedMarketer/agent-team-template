@@ -68,7 +68,7 @@ const BROKEN = Symbol('broken')
 // The 2026 shape: limits[] with kind session / weekly_all / weekly_scoped. Unknown kinds are
 // codenames for things nobody has explained, so they are skipped. A weekly_scoped entry with no
 // model says nothing a person could act on, so it is skipped too.
-function fromLimitsList(list) {
+function fromLimitsList(list, tally) {
   const windows = []
   for (const entry of list) {
     if (!isPlainObject(entry)) continue
@@ -84,7 +84,10 @@ function fromLimitsList(list) {
       kind = 'weekly_model'
     } else continue
     const window = readWindow(entry, kind, model)
-    if (window === NO_NUMBER) continue
+    if (window === NO_NUMBER) {
+      tally.withoutNumbers += 1
+      continue
+    }
     if (!window) return BROKEN
     windows.push(window)
   }
@@ -99,19 +102,23 @@ const FLAT_FIELDS = [
   ['seven_day_sonnet', 'weekly_model', 'Sonnet']
 ]
 
-function fromFlatFields(answer) {
+function fromFlatFields(answer, tally) {
   const windows = []
   for (const [field, kind, model] of FLAT_FIELDS) {
     if (answer[field] === undefined || answer[field] === null) continue
     const window = readWindow(answer[field], kind, model)
-    if (window === NO_NUMBER) continue
+    if (window === NO_NUMBER) {
+      tally.withoutNumbers += 1
+      continue
+    }
     if (!window) return BROKEN
     windows.push(window)
   }
   return windows
 }
 
-// Returns the windows, or null when the answer is not understood or no window has a number.
+// Returns the windows; an empty list when every window it recognised had no number; or null when
+// the answer is not understood.
 // Never a partial reading: one recognised window with a broken number spoils the lot, because a
 // meter that silently drops the window you were about to hit is worse than one that says
 // "unavailable". A window with no number at all is different - there is nothing to drop. At most
@@ -119,14 +126,15 @@ function fromFlatFields(answer) {
 // the whole snapshot.
 export function parseClaudeUsage(answer) {
   if (!isPlainObject(answer)) return null
+  const tally = { withoutNumbers: 0 }
   let windows = []
   if (Array.isArray(answer.limits)) {
-    const listed = fromLimitsList(answer.limits)
+    const listed = fromLimitsList(answer.limits, tally)
     if (listed === BROKEN) return null
     windows = listed
   }
   if (windows.length === 0) {
-    const flat = fromFlatFields(answer)
+    const flat = fromFlatFields(answer, tally)
     if (flat === BROKEN) return null
     windows = flat
   }
@@ -137,7 +145,8 @@ export function parseClaudeUsage(answer) {
     seen.add(key)
     return true
   })
-  return unique.length ? unique.slice(0, MAX_WINDOWS) : null
+  if (unique.length) return unique.slice(0, MAX_WINDOWS)
+  return tally.withoutNumbers > 0 ? [] : null
 }
 
 // --- reading the sign-in ------------------------------------------------------------------------------
@@ -213,6 +222,7 @@ async function readLive(deps, token) {
   }
   const windows = parseClaudeUsage(answer)
   if (!windows) return unavailable('live answer not understood')
+  if (windows.length === 0) return unavailable('the live answer had no numbers in it')
   return { status: 'found', source: 'unofficial-live', readAt: isoSeconds(deps.now), windows }
 }
 
@@ -228,6 +238,7 @@ async function readSaved(deps) {
   if (age > SAVED_MAX_AGE_HOURS * 3600_000) return unavailable('saved reading too old')
   const windows = parseClaudeUsage(saved.utilization)
   if (!windows) return unavailable('saved reading not understood')
+  if (windows.length === 0) return unavailable('the saved reading had no numbers in it')
   return { status: 'found', source: 'claude-code-saved', readAt: isoSeconds(saved.fetchedAtMs), windows }
 }
 
