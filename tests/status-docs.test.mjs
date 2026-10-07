@@ -36,7 +36,7 @@ test('the status README names the file, the format and the command', async () =>
   for (const phrase of [
     '.agent-team/status/usage/<computer>.json',
     'agent-status/usage/v1',
-    'npm run collect:status',
+    'npm run collect:status', // spawn-scan: not a run
     '--dry-run',
     '--commit',
     '--clone',
@@ -85,11 +85,11 @@ test('the status README runs the collector from a pinned code checkout, apart fr
   const doc = await statusReadme()
   const plist = /```xml\n([\s\S]*?)```/.exec(doc)?.[1] ?? ''
   const args = [...(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)?.[1] ?? '').matchAll(/<string>([^<]*)<\/string>/g)].map((match) => match[1])
-  const script = args.find((arg) => arg.endsWith('/scripts/collect-status.mjs'))
+  const script = args.find((arg) => arg.endsWith('/scripts/collect-status.mjs')) // spawn-scan: not a run
   const clone = args[args.indexOf('--clone') + 1]
-  assert.ok(script, 'the plist does not run scripts/collect-status.mjs')
+  assert.ok(script, 'the plist does not run scripts/collect-status.mjs') // spawn-scan: not a run
   assert.ok(clone && args.includes('--clone'), 'the plist does not name a data clone')
-  assert.match(script, /\/\.local\/share\/agent-status\/collector-code\/scripts\/collect-status\.mjs$/)
+  assert.match(script, /\/\.local\/share\/agent-status\/collector-code\/scripts\/collect-status\.mjs$/) // spawn-scan: not a run
   assert.match(clone, /\/\.local\/share\/agent-status\/data$/)
   assert.ok(!script.startsWith(`${clone}/`), 'the script the plist runs lives inside the data clone')
   const workingDirectory = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1] ?? ''
