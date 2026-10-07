@@ -1,0 +1,318 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, rm, readFile, writeFile, readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { runCollector } from '../scripts/lib/status/run.mjs'
+import { makeFakeHome, setMtime } from './helpers/fake-home.mjs'
+import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
+import { repoRoot } from './helpers/repo.mjs'
+
+/* Commit mode is the part that touches somebody's repo unattended, every three hours. Two rules
+   carry it: it commits only its own file, whatever else is staged; and a refused push in a
+   person's own working copy stops and says so, while only the collector's dedicated clone may be
+   reset and retried. These run real git against a throwaway bare remote - no network. */
+
+const execFileP = promisify(execFile)
+const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
+const OWN = '.agent-team/status/usage/test-pc.json'
+
+async function makeRemote() {
+  const root = await mkdtemp(join(tmpdir(), 'agent-status-git-'))
+  const remote = join(root, 'remote.git')
+  await git(['init', '--bare', '-q', '-b', 'main', remote], root)
+  const clone = async (name) => {
+    const dir = join(root, name)
+    await git(['clone', '-q', remote, dir], root)
+    await git(['config', 'user.name', 'Collector Test'], dir)
+    await git(['config', 'user.email', 'collector-test' + '@' + 'invalid'], dir)
+    await git(['config', 'commit.gpgsign', 'false'], dir)
+    await git(['checkout', '-q', '-B', 'main'], dir)
+    return dir
+  }
+  const seed = await clone('seed')
+  await writeFile(join(seed, 'README.md'), 'team\n')
+  await git(['add', '.'], seed)
+  await git(['commit', '-q', '-m', 'start'], seed)
+  await git(['push', '-q', '-u', 'origin', 'main'], seed)
+  const work = await clone('work')
+  await git(['branch', '-q', '--set-upstream-to=origin/main', 'main'], work)
+  return { root, remote, seed, work, clone, cleanup: () => rm(root, { recursive: true, force: true }) }
+}
+
+// Someone else pushes while the collector is not looking.
+async function advanceRemote(repo, name) {
+  await git(['pull', '-q', '--ff-only'], repo.seed).catch(() => {})
+  await writeFile(join(repo.seed, `${name}.md`), `${name}\n`)
+  await git(['add', '.'], repo.seed)
+  await git(['commit', '-q', '-m', name], repo.seed)
+  await git(['push', '-q'], repo.seed)
+}
+
+const realGit = async (args, cwd) => git(args, cwd)
+
+async function collect(fake, args, { repo, extra = {}, stateDir }) {
+  const stdout = []
+  const stderr = []
+  const code = await runCollector({
+    argv: ['--computer', 'Test PC', '--state-dir', stateDir, ...args],
+    deps: depsFor(fake, { git: realGit, ...extra }),
+    repoRoot: repo,
+    out: (line) => stdout.push(line),
+    err: (line) => stderr.push(line)
+  })
+  return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') }
+}
+
+const log = async (dir, ref = 'HEAD') => (await git(['log', '--format=%s', ref], dir)).stdout.trim().split('\n')
+const filesIn = async (dir, ref = 'HEAD') => (await git(['show', '--name-only', '--format=', ref], dir)).stdout.trim().split('\n')
+
+test('working copy: commits only its own file, leaves other staged work staged, and pushes', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await writeFile(join(repo.work, 'notes.md'), 'half-finished thought\n')
+    await git(['add', 'notes.md'], repo.work)
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(await filesIn(repo.work), [OWN])
+    assert.equal((await log(repo.work))[0], 'Usage snapshot from Test PC')
+    const staged = (await git(['diff', '--cached', '--name-only'], repo.work)).stdout.trim()
+    assert.equal(staged, 'notes.md', 'the other staged file was committed or unstaged')
+    assert.equal((await log(repo.remote, 'main'))[0], 'Usage snapshot from Test PC')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: a refused push stops and says so, and nothing is reset', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await advanceRemote(repo, 'someone-else')
+    await writeFile(join(repo.work, 'notes.md'), 'mine\n')
+    await git(['add', 'notes.md'], repo.work)
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /push was refused/i)
+    assert.match(result.stderr, /left as it is/i)
+    assert.equal((await log(repo.work))[0], 'Usage snapshot from Test PC', 'the local commit should stay')
+    assert.equal((await git(['diff', '--cached', '--name-only'], repo.work)).stdout.trim(), 'notes.md')
+    assert.ok(existsSync(join(repo.work, 'notes.md')))
+    assert.notEqual((await log(repo.remote, 'main'))[0], 'Usage snapshot from Test PC')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: catches up before writing, so another push in between is no problem', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    await advanceRemote(repo, 'earlier')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual((await log(repo.remote, 'main')).slice(0, 2), ['Usage snapshot from Test PC', 'earlier'])
+    assert.equal(existsSync(join(repo.work, ...OWN.split('/'))), false, 'it wrote into the working copy instead of the clone')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: a push refused mid-run is fetched, reset, rewritten and retried once', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    let pushes = 0
+    const racingGit = async (args, cwd) => {
+      if (args[0] === 'push' && pushes++ === 0) await advanceRemote(repo, 'raced')
+      return realGit(args, cwd)
+    }
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: racingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal(pushes, 2)
+    assert.deepEqual((await log(repo.remote, 'main')).slice(0, 2), ['Usage snapshot from Test PC', 'raced'])
+    assert.match(result.stdout, /retried/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: a second refusal stops rather than looping', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    let pushes = 0
+    const alwaysRacing = async (args, cwd) => {
+      if (args[0] === 'push') {
+        pushes++
+        await advanceRemote(repo, `raced-${pushes}`)
+      }
+      return realGit(args, cwd)
+    }
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: alwaysRacing } })
+    assert.equal(result.code, 1)
+    assert.equal(pushes, 2, 'it retried more than once')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: a folder with someone else\'s changes in it is not a dedicated clone', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await writeFile(join(repo.work, 'draft.md'), 'work in progress\n')
+    const result = await collect(fake, ['--commit', '--clone', repo.work], { repo: join(repo.root, 'elsewhere'), stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 2)
+    assert.match(result.stderr, /not a dedicated clone/i)
+    assert.ok(existsSync(join(repo.work, 'draft.md')), 'the person\'s file was reset away')
+    assert.equal(existsSync(join(repo.work, ...OWN.split('/'))), false)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: the repo the collector runs from is never treated as its clone', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const result = await collect(fake, ['--commit', '--clone', repo.work], { repo: repo.work, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 2)
+    assert.match(result.stderr, /not a dedicated clone/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('--clone and --state-dir only mean something with --commit', async () => {
+  const fake = await makeFakeHome()
+  const target = await mkdtemp(join(tmpdir(), 'agent-status-repo-'))
+  try {
+    for (const args of [['--clone', target], ['--commit', '--dry-run']]) {
+      const code = await runCollector({ argv: args, deps: depsFor(fake), repoRoot: target, out: () => {}, err: () => {} })
+      assert.equal(code, 2, `${args.join(' ')} was accepted`)
+    }
+    assert.deepEqual(await filesUnder(target), [])
+  } finally {
+    await fake.cleanup()
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+// --- receipts and the lock -------------------------------------------------------------------------------
+
+test('a commit run leaves a claim with a receipt and a final record, statuses and hashes only', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    const claims = await readdir(join(stateDir, 'claims'))
+    assert.deepEqual(claims, ['2026-10-07T20-00-00Z.claim'])
+    const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claims[0], 'receipt.json'), 'utf8'))
+    const final = JSON.parse(await readFile(join(stateDir, 'claims', claims[0], 'final.json'), 'utf8'))
+    assert.equal(receipt.schema, 'agent-status/receipt/v1')
+    assert.equal(receipt.file, OWN)
+    assert.match(receipt.sha256, /^[0-9a-f]{64}$/)
+    assert.deepEqual(Object.keys(receipt.sources).sort(), ['claudeActivity', 'claudeLimits', 'claudePlan', 'codexLimits', 'codexPlan'])
+    assert.equal(final.schema, 'agent-status/final/v1')
+    assert.equal(final.outcome, 'pushed')
+    assert.match(final.commit, /^[0-9a-f]{40}$/)
+    assert.equal(final.commit, (await git(['rev-parse', 'HEAD'], repo.work)).stdout.trim())
+    assert.ok(!existsSync(join(stateDir, 'lock')), 'the lock was not released')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('LEAK TEST: receipts from the hostile home carry none of it', async () => {
+  const repo = await makeRemote()
+  const fake = await hostileHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    const texts = [result.stdout, result.stderr]
+    for (const file of await filesUnder(stateDir)) texts.push(await readFile(file, 'utf8'))
+    texts.push(await readFile(join(repo.work, ...OWN.split('/')), 'utf8'))
+    texts.push((await git(['log', '-1', '--format=%B'], repo.work)).stdout)
+    for (const text of texts) {
+      for (const needle of FORBIDDEN()) {
+        assert.ok(!text.includes(needle), `a receipt or output contained a forbidden string (${needle.slice(0, 6)}...)`)
+      }
+    }
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('a run already holding the lock makes the next one skip, writing nothing', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    await mkdir(join(stateDir, 'lock'), { recursive: true })
+    await setMtime(join(stateDir, 'lock'), NOW - 60_000)
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0)
+    assert.match(result.stdout, /still running/i)
+    assert.equal(existsSync(join(repo.work, ...OWN.split('/'))), false)
+    assert.ok(existsSync(join(stateDir, 'lock')), 'it removed somebody else\'s lock')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('a lock left behind by a crash over an hour ago is taken over', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    await mkdir(join(stateDir, 'lock'), { recursive: true })
+    await setMtime(join(stateDir, 'lock'), NOW - 2 * 3600_000)
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    assert.ok(existsSync(join(repo.work, ...OWN.split('/'))))
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('the same occurrence is never run twice', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    assert.equal((await collect(fake, ['--commit'], { repo: repo.work, stateDir })).code, 0)
+    const second = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(second.code, 0)
+    assert.match(second.stdout, /already/i)
+    assert.equal((await log(repo.work)).filter((line) => line.startsWith('Usage snapshot')).length, 1)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('the collector never writes into the template repo itself during these tests', () => {
+  assert.equal(existsSync(join(repoRoot, '.agent-team', 'status', 'usage')), false)
+})

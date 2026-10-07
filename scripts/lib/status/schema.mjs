@@ -144,3 +144,52 @@ export const USAGE_SHAPE = {
   },
   required: ['schema', 'takenAt', 'computer', 'claude', 'codex']
 }
+
+// --- receipts --------------------------------------------------------------------------------------
+//
+// A commit run claims its occurrence before it starts and leaves two records in the claim: the
+// receipt (what was written - statuses and a hash, never a value) and the final record (what
+// happened to it). A claim with a receipt and no final record is an outcome nobody knows, and the
+// Mac task policy says not to replay that blindly.
+
+export const RECEIPT_SCHEMA = 'agent-status/receipt/v1'
+export const FINAL_SCHEMA = 'agent-status/final/v1'
+export const OUTCOMES = [
+  'pushed',
+  'retried and pushed',
+  'committed, push refused',
+  'nothing to commit',
+  'refused by the safety check',
+  'not a dedicated clone',
+  'failed'
+]
+
+const statusWord = { type: 'enum', values: STATUSES }
+
+export const RECEIPT_SHAPE = {
+  type: 'object',
+  keys: {
+    schema: { type: 'const', value: RECEIPT_SCHEMA },
+    claimedAt: { type: 'iso' },
+    computer: text,
+    file: { type: 'pattern', pattern: /^\.agent-team\/status\/usage\/[a-z0-9-]{1,32}\.json$/ },
+    sha256: { type: 'pattern', pattern: /^[0-9a-f]{64}$/ },
+    sources: {
+      type: 'object',
+      keys: { claudePlan: statusWord, claudeLimits: statusWord, claudeActivity: statusWord, codexPlan: statusWord, codexLimits: statusWord },
+      required: ['claudePlan', 'claudeLimits', 'claudeActivity', 'codexPlan', 'codexLimits']
+    }
+  },
+  required: ['schema', 'claimedAt', 'computer', 'file', 'sha256', 'sources']
+}
+
+export const FINAL_SHAPE = {
+  type: 'object',
+  keys: {
+    schema: { type: 'const', value: FINAL_SCHEMA },
+    finishedAt: { type: 'iso' },
+    outcome: { type: 'enum', values: OUTCOMES },
+    commit: { type: 'pattern', pattern: /^[0-9a-f]{40}$/ }
+  },
+  required: ['schema', 'finishedAt', 'outcome']
+}

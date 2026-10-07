@@ -5,8 +5,10 @@ import {
   checkLine,
   checkComputerLabel,
   assertSafeUsage,
+  checkAgainst,
   GateError
 } from '../scripts/lib/status/safe.mjs'
+import { RECEIPT_SHAPE, FINAL_SHAPE } from '../scripts/lib/status/schema.mjs'
 
 /* The gate is the whole reason this collector is allowed to run unattended. It reads files that
    hold sign-in tokens, account emails and a person's folder names, and it writes into a repo that
@@ -256,4 +258,42 @@ test('a short username or hostname does not make every word suspicious', () => {
   const tiny = { username: 'ma', home: '/home/ma', hostname: 'pc' }
   const doc = validDoc()
   assert.deepEqual(checkUsage(doc, tiny), [])
+})
+
+// --- receipts ------------------------------------------------------------------------------------------
+
+
+const validReceipt = () => ({
+  schema: 'agent-status/receipt/v1',
+  claimedAt: '2026-10-07T20:00:00Z',
+  computer: 'Mac Mini',
+  file: '.agent-team/status/usage/mac-mini.json',
+  sha256: 'a'.repeat(64),
+  sources: { claudePlan: 'found', claudeLimits: 'found', claudeActivity: 'found', codexPlan: 'not found', codexLimits: 'unavailable' }
+})
+
+test('a receipt holds statuses and a hash, and the gate holds it to exactly that', () => {
+  assert.deepEqual(checkAgainst(validReceipt(), RECEIPT_SHAPE, identity), [])
+  const cases = [
+    [(receipt) => { receipt.file = '/Users/fakeperson/repo/.agent-team/status/usage/mac-mini.json' }, /^file: /],
+    [(receipt) => { receipt.file = '.agent-team/status/usage/../../secret.json' }, /^file: /],
+    [(receipt) => { receipt.sha256 = 'A'.repeat(64) }, /^sha256: /],
+    [(receipt) => { receipt.sources.claudeLimits = 18 }, /sources\.claudeLimits/],
+    [(receipt) => { receipt.sources.email = 'found' }, /sources\.email/],
+    [(receipt) => { receipt.token = 'x' }, /^token: /]
+  ]
+  for (const [change, field] of cases) {
+    const receipt = validReceipt()
+    change(receipt)
+    const problems = checkAgainst(receipt, RECEIPT_SHAPE, identity)
+    assert.ok(problems.some((problem) => field.test(problem)), `not refused: ${field}`)
+  }
+})
+
+test('a final record names a known outcome and, at most, a commit id', () => {
+  const final = { schema: 'agent-status/final/v1', finishedAt: '2026-10-07T20:01:00Z', outcome: 'pushed', commit: 'b'.repeat(40) }
+  assert.deepEqual(checkAgainst(final, FINAL_SHAPE, identity), [])
+  assert.ok(checkAgainst({ ...final, outcome: 'it went fine' }, FINAL_SHAPE, identity).some((problem) => problem.startsWith('outcome: ')))
+  assert.ok(checkAgainst({ ...final, commit: 'HEAD' }, FINAL_SHAPE, identity).some((problem) => problem.startsWith('commit: ')))
+  assert.ok(checkAgainst({ ...final, remote: 'x' }, FINAL_SHAPE, identity).some((problem) => problem.startsWith('remote: ')))
 })

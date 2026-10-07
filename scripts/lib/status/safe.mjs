@@ -50,10 +50,11 @@ function needlesOf(identity = {}) {
   return found
 }
 
-function stringProblems(value, path, identity, { allowSlash = false } = {}) {
+function stringProblems(value, path, identity, { allowSlash = false, exactForm = false } = {}) {
   if (typeof value !== 'string') return [`${path}: is not text`]
   const problems = []
-  if (value.length > MAX_STRING_LENGTH) problems.push(`${path}: is longer than ${MAX_STRING_LENGTH} characters`)
+  // A value held to an exact pattern (a 64-character hash) has its length set by the pattern.
+  if (!exactForm && value.length > MAX_STRING_LENGTH) problems.push(`${path}: is longer than ${MAX_STRING_LENGTH} characters`)
   for (const rule of NEVER) {
     if (allowSlash && rule.slash) continue
     if (rule.test(value)) problems.push(`${path}: ${rule.says}`)
@@ -137,6 +138,12 @@ function walk(value, shape, path, identity, problems) {
       // closed list instead - "Users/somebody" has a slash too and is not on it.
       problems.push(...stringProblems(value, path, identity, { allowSlash: true }))
       if (typeof value === 'string' && !isKnownTimezone(value)) problems.push(`${path}: is not a known timezone`)
+      return
+    case 'pattern':
+      // Paths and hashes in receipts: held to an exact form, so the slash in a repo-relative path is
+      // allowed and nothing else is.
+      if (typeof value !== 'string' || !shape.pattern.test(value)) problems.push(`${path}: is not in the expected form`)
+      else problems.push(...stringProblems(value, path, identity, { allowSlash: true, exactForm: true }))
       return
     case 'true':
       if (value !== true) problems.push(`${path}: must be true`)
