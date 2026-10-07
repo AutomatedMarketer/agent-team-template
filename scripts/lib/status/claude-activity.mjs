@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { claudeConfigDir } from './claude-limits.mjs'
 import { isPlainObject } from './util.mjs'
 import { isKnownTimezone } from './safe.mjs'
+import { MAX_ACTIVITY_DAYS } from './schema.mjs'
 
 export const ESTIMATE_DAYS = 15
 const DAY_MS = 86400_000
@@ -148,8 +149,11 @@ export async function collectClaudeActivity(deps) {
     }
   }
 
+  // Never more days than the gate allows - one extra day would refuse the whole snapshot - so if
+  // the count ever runs over, the oldest go first.
   const ordered = [...days.values()]
     .sort((a, b) => a.day.localeCompare(b.day))
+    .slice(-MAX_ACTIVITY_DAYS)
     .map((bucket) => ({ ...bucket, sessions: bucket.sessions.size }))
   return { status: 'found', estimate: true, timezone, days: ordered }
 }

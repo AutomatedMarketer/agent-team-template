@@ -12,6 +12,9 @@ export const DEFAULT_COMPUTER = 'this computer'
 export const MAX_STRING_LENGTH = 60
 export const STALE_AFTER_HOURS = 8
 export const MAX_FILES_READ = 5
+// Fifteen days back from now touches up to seventeen local days: a part-day at each end, plus
+// the spring clock change or the few minutes of drift allowed past "now".
+export const MAX_ACTIVITY_DAYS = 17
 export const STATUSES = ['found', 'not found', 'unavailable']
 export const SOURCES = ['unofficial-live', 'claude-code-saved', 'codex-session-log']
 export const WINDOW_LABELS = {
@@ -113,7 +116,7 @@ const activityShape = {
   found: {
     estimate: { type: 'true' },
     timezone: { type: 'timezone' },
-    days: { type: 'array', of: dayShape, min: 0, max: 16 }
+    days: { type: 'array', of: dayShape, min: 0, max: MAX_ACTIVITY_DAYS }
   },
   foundRequired: ['estimate', 'timezone', 'days']
 }

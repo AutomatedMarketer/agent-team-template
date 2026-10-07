@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { collectClaudeActivity, ESTIMATE_DAYS } from '../scripts/lib/status/claude-activity.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
+import { MAX_ACTIVITY_DAYS } from '../scripts/lib/status/schema.mjs'
 import { makeFakeHome, setMtime, FAKE_UUID } from './helpers/fake-home.mjs'
 
 const NOW = Date.parse('2026-10-07T20:00:00Z')
@@ -111,6 +112,39 @@ test('the estimate passes the gate as part of a usage file', async () => {
     await fake.cleanup()
   }
 })
+
+// Fifteen days back from now touches up to seventeen local calendar days: a part-day at each end,
+// plus the hour the clocks go forward in spring (or the five minutes of clock drift allowed past
+// "now"). The gate used to stop at sixteen, which refused the whole snapshot - limits and all.
+for (const [label, now, last] of [
+  ['an ordinary fortnight that starts and ends just before midnight', Date.parse('2026-10-08T03:58:00Z'), Date.parse('2026-10-08T04:02:00Z')],
+  ['a fortnight across the spring clock change', Date.parse('2026-03-16T04:58:00Z'), Date.parse('2026-03-16T04:58:00Z')]
+]) {
+  test(`activity over ${label} is 17 days, and the gate accepts it`, async () => {
+    const fake = await makeFakeHome()
+    try {
+      const cutoff = now - ESTIMATE_DAYS * DAY
+      const times = [cutoff + 30_000]
+      for (let at = cutoff + 6 * 3600_000; at < now; at += 6 * 3600_000) times.push(at)
+      times.push(last)
+      const path = await fake.write(`.claude/projects/${PROJECT}/a.jsonl`, times.map((at, index) => assistant({ at, id: `m${index}`, request: `r${index}` })).join('\n'))
+      await setMtime(path, now)
+      const activity = await collectClaudeActivity(deps(fake, { now }))
+      assert.equal(activity.days.length, 17)
+      assert.equal(activity.days.length, MAX_ACTIVITY_DAYS)
+      const doc = {
+        schema: 'agent-status/usage/v1',
+        takenAt: '2026-10-07T20:00:00Z',
+        computer: 'Test PC',
+        claude: { plan: { status: 'not found' }, limits: { status: 'not found' }, activity },
+        codex: { plan: { status: 'not found' }, limits: { status: 'not found' } }
+      }
+      assert.deepEqual(checkUsage(doc, fake.identity), [])
+    } finally {
+      await fake.cleanup()
+    }
+  })
+}
 
 test('nothing older than the fifteen-day cut is counted', async () => {
   assert.equal(ESTIMATE_DAYS, 15)
