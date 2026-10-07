@@ -18,9 +18,10 @@ near the reset, tell the owner and spend the surplus making existing work better
 node .claude/skills/surplus-burn/usage-probe.mjs
 ```
 
-Returns utilization percentages and exact reset timestamps. The OAuth token is read inside
-the script and never printed - output is percentages only. If it reports
-`no local credentials file`, the machine signs in through a keychain; use the fallback.
+Returns each limit window - `five_hour`, `weekly_all`, and `weekly_model` when one model has
+its own weekly cap - with `usedPercent` and `resetsAt`. On a Mac it reads the sign-in from the
+Keychain, elsewhere from the credentials file; the token is never printed or refreshed. If it
+reports `"status": "not found"` or `"unavailable"`, say which and use the fallback.
 
 **Fallback - a consumption estimate** from local transcripts:
 

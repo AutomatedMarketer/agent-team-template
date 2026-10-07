@@ -85,10 +85,10 @@ refuses to guess, so this step is not optional.
    node .claude/skills/surplus-burn/usage-probe.mjs
    ```
 
-   The output includes `resets_at` timestamps. Take the **weekly** one, convert it to the
+   The output includes `resetsAt` times. Take the **`weekly_all`** one, convert it to the
    owner's local time, and read off the weekday (ISO, 1 = Monday) and hour.
 
-2. If the probe says `no local credentials file` (keychain sign-in) or the endpoint errors,
+2. If the probe says `"status": "not found"` or `"unavailable"`,
    ask the owner to open `claude.ai/settings/usage` and read the weekly reset line out loud.
    That page is the source of truth; the probe is only the shortcut.
 

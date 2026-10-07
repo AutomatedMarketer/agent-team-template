@@ -1,38 +1,37 @@
-// usage-probe.mjs — query the real subscription usage limits from Anthropic's
-// OAuth usage endpoint (the same data the /usage screen shows).
+// usage-probe.mjs - the real subscription limits, as percentages and reset times.
 //
-// SECRET SAFETY: the OAuth token is read inside this process and used only in
-// the Authorization header. It is NEVER printed. Output is limits/percentages
-// only, and any token-shaped string is redacted before printing.
+// A thin wrapper: the reading itself lives in scripts/lib/status/claude-limits.mjs, which the
+// usage collector uses too. That module asks the Mac Keychain first and the credentials file
+// second, never prints or refreshes the sign-in token, and falls back to the reading Claude Code
+// saved itself. This file prints the parsed windows only - never the raw answer - and only after
+// the same safety check the collector uses has passed them.
+//
+// Run it: node .claude/skills/surplus-burn/usage-probe.mjs
 
-import { readFileSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { pathToFileURL } from 'node:url'
+import { collectClaudeLimits } from '../../../scripts/lib/status/claude-limits.mjs'
+import { machineDeps } from '../../../scripts/lib/status/machine.mjs'
+import { assertSafe, assertSafeLine } from '../../../scripts/lib/status/safe.mjs'
+import { USAGE_SHAPE } from '../../../scripts/lib/status/schema.mjs'
 
-const credPath = join(homedir(), '.claude', '.credentials.json');
-if (!existsSync(credPath)) {
-  console.log(JSON.stringify({ ok: false, reason: 'no local credentials file (keychain-based auth?)' }));
-  process.exit(0);
+const LIMITS_SHAPE = USAGE_SHAPE.keys.claude.keys.limits
+
+export async function probe(deps) {
+  const { limits } = await collectClaudeLimits(deps)
+  let out
+  try {
+    assertSafe(limits, LIMITS_SHAPE, deps.identity)
+    out = { ok: limits.status === 'found', ...limits }
+    const line = JSON.stringify(out, null, 2)
+    assertSafeLine(line, deps.identity)
+    console.log(line)
+  } catch {
+    out = { ok: false, status: 'unavailable', why: 'refused by the safety check' }
+    console.log(JSON.stringify(out, null, 2))
+  }
+  return out
 }
-const tok = JSON.parse(readFileSync(credPath, 'utf8'))?.claudeAiOauth?.accessToken;
-if (!tok) {
-  console.log(JSON.stringify({ ok: false, reason: 'credentials file has no accessToken' }));
-  process.exit(0);
-}
 
-const redact = (s) => s.replaceAll(tok, '[REDACTED]').replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, '[REDACTED]');
-
-try {
-  const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
-    headers: {
-      Authorization: `Bearer ${tok}`,
-      'anthropic-beta': 'oauth-2025-04-20',
-      'Content-Type': 'application/json',
-    },
-  });
-  const body = await r.text();
-  console.log(JSON.stringify({ ok: r.ok, status: r.status }));
-  console.log(redact(body).slice(0, 2000));
-} catch (e) {
-  console.log(JSON.stringify({ ok: false, reason: String(e.message) }));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await probe(machineDeps())
 }
