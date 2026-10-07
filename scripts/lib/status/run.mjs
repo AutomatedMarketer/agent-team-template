@@ -23,7 +23,7 @@ import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
-import { takeLock, releaseLock, openClaim, writeRecord, prepareClone, commitAndPush } from './commit.mjs'
+import { takeLock, releaseLock, openClaim, writeRecord, prepareClone, commitAndPush, SNAPSHOT_SUBJECT } from './commit.mjs'
 
 const DEFAULT_SOURCES = {
   claudeLimits: collectClaudeLimits,
@@ -226,7 +226,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
     if (mode === 'clone') {
       let reason
       try {
-        reason = await prepareClone({ git: deps.git, cloneDir: target, repoRoot, relativePath })
+        reason = await prepareClone({ git: deps.git, cloneDir: target, relativePath })
       } catch {
         reason = 'it could not be brought level with the remote'
       }
@@ -272,7 +272,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         git: deps.git,
         dir: target,
         relativePath,
-        message: `Usage snapshot from ${computer}`,
+        message: `${SNAPSHOT_SUBJECT}${computer}`,
         mode,
         rewrite: write
       })

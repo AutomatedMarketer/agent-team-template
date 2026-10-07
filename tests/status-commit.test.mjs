@@ -185,13 +185,41 @@ test('dedicated clone: a folder with someone else\'s changes in it is not a dedi
   }
 })
 
-test('dedicated clone: the repo the collector runs from is never treated as its clone', async () => {
+// A clean folder can still hold work: commits that were never pushed. Resetting to the remote
+// would throw them away, so a clone with any commit the collector did not make is refused.
+test('dedicated clone: unpushed commits that are not snapshots mean it is somebody\'s work', async () => {
   const repo = await makeRemote()
   const fake = await makeFakeHome()
   try {
+    await writeFile(join(repo.work, 'plan.md'), 'my plan\n')
+    await git(['add', 'plan.md'], repo.work)
+    await git(['commit', '-q', '-m', 'My plan'], repo.work)
     const result = await collect(fake, ['--commit', '--clone', repo.work], { repo: repo.work, stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 2)
     assert.match(result.stderr, /not a dedicated clone/i)
+    assert.equal((await log(repo.work))[0], 'My plan', 'the unpushed commit was reset away')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+// The scheduled job runs the collector out of its own clone, so the clone's code is always the
+// latest pushed code. That has to be allowed, and an earlier snapshot commit that never got
+// pushed is the collector's own and safe to replace.
+test('dedicated clone: the collector may run from inside its own clone', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    await mkdir(join(dedicated, '.agent-team', 'status', 'usage'), { recursive: true })
+    await writeFile(join(dedicated, ...OWN.split('/')), '{}\n')
+    await git(['add', '.'], dedicated)
+    await git(['commit', '-q', '-m', 'Usage snapshot from Test PC'], dedicated)
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: dedicated, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal((await log(repo.remote, 'main'))[0], 'Usage snapshot from Test PC')
+    assert.equal((await log(repo.remote, 'main')).filter((line) => line.startsWith('Usage snapshot')).length, 1)
   } finally {
     await fake.cleanup()
     await repo.cleanup()

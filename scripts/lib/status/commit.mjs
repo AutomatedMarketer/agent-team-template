@@ -16,6 +16,10 @@ import { isoSeconds } from './util.mjs'
 
 export const LOCK_STALE_MS = 3600_000
 
+// Every collector commit starts with this, which is how a dedicated clone tells its own unpushed
+// commits from anybody else's.
+export const SNAPSHOT_SUBJECT = 'Usage snapshot from '
+
 export function claimStamp(now) {
   // Colons are not allowed in Windows file names.
   return isoSeconds(now).replaceAll(':', '-')
@@ -80,9 +84,9 @@ async function sameFolder(a, b) {
   }
 }
 
-// Returns null when the folder is fit to be used, or a short reason when it is not.
-export async function prepareClone({ git, cloneDir, repoRoot, relativePath }) {
-  if (await sameFolder(cloneDir, repoRoot)) return 'it is the repo the collector runs from'
+// Returns null when the folder is fit to be used, or a short reason when it is not. The collector
+// may run from inside its own clone - that is how the scheduled job always has the latest code.
+export async function prepareClone({ git, cloneDir, relativePath }) {
   let top
   try {
     top = (await git(['rev-parse', '--show-toplevel'], cloneDir)).stdout.trim()
@@ -93,6 +97,17 @@ export async function prepareClone({ git, cloneDir, repoRoot, relativePath }) {
   const status = (await git(['status', '--porcelain', '--untracked-files=all'], cloneDir)).stdout
   const others = status.split('\n').filter((line) => line.trim() && line.slice(3).trim() !== relativePath)
   if (others.length) return 'it has changes in it that the collector did not make'
+  // A clean folder can still hold somebody's work in commits never pushed. Resetting would lose
+  // them, so only the collector's own unpushed snapshots are allowed to be there.
+  let ahead
+  try {
+    ahead = (await git(['log', '@{u}..HEAD', '--format=%s'], cloneDir)).stdout
+  } catch {
+    return 'it has no remote branch to follow'
+  }
+  if (ahead.split('\n').some((subject) => subject.trim() && !subject.startsWith(SNAPSHOT_SUBJECT))) {
+    return 'it has unpushed commits the collector did not make'
+  }
   await git(['fetch', '--quiet'], cloneDir)
   await git(['reset', '--hard', '--quiet', '@{u}'], cloneDir)
   return null
