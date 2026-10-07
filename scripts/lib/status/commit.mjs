@@ -159,9 +159,23 @@ export async function prepareClone({ git, cloneDir, relativePath }) {
   if (ahead.split('\n').some((subject) => subject.trim() && !subject.startsWith(SNAPSHOT_SUBJECT))) {
     return 'it has unpushed commits the collector did not make'
   }
-  await git(['fetch', '--quiet'], cloneDir)
+  try {
+    await git(['fetch', '--quiet'], cloneDir)
+  } catch {
+    // Git's own message is dropped: it names the remote address, which can carry a token.
+    throw new RemoteUnreachable()
+  }
   await git(['reset', '--hard', '--quiet', '@{u}'], cloneDir)
   return null
+}
+
+// The folder is fine; the team repo could not be reached (network, remote gone, key revoked).
+// That is a failed run, not a reason to call the folder somebody else's.
+export class RemoteUnreachable extends Error {
+  constructor() {
+    super('the team repo could not be reached')
+    this.name = 'RemoteUnreachable'
+  }
 }
 
 // The branch the remote calls its default (the one the dashboard reads), or main if it never said.

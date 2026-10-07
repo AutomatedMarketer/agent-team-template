@@ -33,6 +33,7 @@ import {
   prepareClone,
   commitAndPush,
   isInsideFolder,
+  RemoteUnreachable,
   SNAPSHOT_SUBJECT
 } from './commit.mjs'
 
@@ -251,8 +252,16 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       let reason
       try {
         reason = await prepareClone({ git: deps.git, cloneDir: target, relativePath })
-      } catch {
-        reason = 'it could not be brought level with the remote'
+      } catch (error) {
+        if (error instanceof RemoteUnreachable) {
+          complain('Could not reach the team repo to bring the dedicated clone up to date, so nothing was collected or written.')
+          complain('Check the network and that this computer can still pull from the team repo. The next run tries again.')
+        } else {
+          complain('Getting the dedicated clone ready failed, so nothing was collected or written.')
+          complain('Nothing git printed is shown, because git messages can include the remote address.')
+        }
+        await finish('failed')
+        return 1
       }
       if (reason) {
         complain(`Refused: that folder is not a dedicated clone - ${reason}. Nothing was changed in it.`)

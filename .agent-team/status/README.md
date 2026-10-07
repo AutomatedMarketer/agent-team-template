@@ -34,7 +34,8 @@ npm run collect:status -- --computer "Mac Mini" --commit  # write it, commit onl
 | `--only usage` | Only usage exists so far. Connections and Hermes are later phases |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
-slot was already claimed). 1 means it refused or failed after reading. 2 means it refused before
+slot was already claimed). 1 means it refused or failed after reading, or could not reach the team
+repo to bring a dedicated clone up to date. 2 means it refused before
 reading anything - an unknown option, a bad label, a folder that is not a dedicated clone, or a
 `--clone` folder that holds the collector's own code.
 

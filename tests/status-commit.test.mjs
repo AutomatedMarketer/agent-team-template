@@ -294,6 +294,29 @@ test('dedicated clone: a folder with someone else\'s changes in it is not a dedi
   }
 })
 
+// A remote that cannot be reached is a failed run - the network, the remote, a revoked key - not
+// a sign that the folder is somebody's work. Calling it "not a dedicated clone" sent people to
+// look at the wrong thing.
+test('dedicated clone: a fetch that fails is a failed run, not "not a dedicated clone"', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    await git(['remote', 'set-url', 'origin', join(repo.root, 'gone.git')], dedicated)
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: join(repo.root, 'code'), stateDir })
+    assert.equal(result.code, 1)
+    assert.doesNotMatch(result.stderr, /not a dedicated clone/i)
+    assert.match(result.stderr, /could not reach the team repo/i)
+    assert.ok(!result.stderr.includes('gone.git'), 'git\'s own message, with the remote address, was passed on')
+    assert.equal((await finalRecord(stateDir)).outcome, 'failed')
+    assert.equal(existsSync(join(dedicated, ...OWN.split('/'))), false, 'it wrote a snapshot it could not push')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
 // A clean folder can still hold work: commits that were never pushed. Resetting to the remote
 // would throw them away, so a clone with any commit the collector did not make is refused.
 test('dedicated clone: unpushed commits that are not snapshots mean it is somebody\'s work', async () => {
