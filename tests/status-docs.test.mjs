@@ -103,8 +103,11 @@ test('the status README runs the collector from a pinned code checkout, apart fr
 test('the status README says when --commit in your own copy does not push', async () => {
   const doc = await statusReadme()
   assert.match(doc, /another branch/i)
-  assert.match(doc, /other commits that are not pushed yet/i)
-  assert.match(doc, /git push origin HEAD:refs\/heads\/main/)
+  assert.match(doc, /commits that origin's .main. does not have yet/i)
+  assert.match(doc, /even if your branch follows\s+somewhere else/i)
+  assert.match(doc, /no remote called .origin./i)
+  assert.match(doc, /git push origin <snapshot commit id>:refs\/heads\/main/)
+  assert.doesNotMatch(doc, /git push origin HEAD:/)
 })
 
 test('the status README lists every setting that keeps the token at home', async () => {

@@ -113,9 +113,13 @@ test('working copy: pushes with an explicit refspec to the default branch', asyn
   const fake = await makeFakeHome()
   try {
     const { pushes, recordingGit } = pushRecorder()
-    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { git: recordingGit } })
     assert.equal(result.code, 0, result.stderr)
-    assert.deepEqual(pushes, [['push', '--quiet', 'origin', 'HEAD:refs/heads/main']])
+    // The snapshot's own commit by id, not HEAD: whatever HEAD becomes after the check, the
+    // push carries exactly the commit that was checked.
+    const { commit } = await finalRecord(stateDir)
+    assert.deepEqual(pushes, [['push', '--quiet', 'origin', `${commit}:refs/heads/main`]])
   } finally {
     await fake.cleanup()
     await repo.cleanup()
@@ -137,7 +141,7 @@ test('working copy: with other unpushed commits it commits the snapshot, does no
     assert.deepEqual(await log(repo.work), ['Usage snapshot from Test PC', 'My private plan', 'start'])
     assert.deepEqual(await log(repo.remote, 'main'), ['start'])
     assert.match(result.stdout, /committed here but was not pushed/i)
-    assert.match(result.stdout, /other commits that are not pushed yet/i)
+    assert.match(result.stdout, /other commits that are not on origin's main yet/i)
     assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
   } finally {
     await fake.cleanup()
@@ -189,9 +193,79 @@ test('dedicated clone: pushes with an explicit refspec too', async () => {
   try {
     const dedicated = await repo.clone('dedicated')
     const { pushes, recordingGit } = pushRecorder()
-    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: recordingGit } })
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir, extra: { git: recordingGit } })
     assert.equal(result.code, 0, result.stderr)
-    assert.deepEqual(pushes, [['push', '--quiet', 'origin', 'HEAD:refs/heads/main']])
+    const { commit } = await finalRecord(stateDir)
+    assert.deepEqual(pushes, [['push', '--quiet', 'origin', `${commit}:refs/heads/main`]])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+// The check has to be against the branch the push goes to - origin's default branch - not against
+// whatever this branch happens to follow. A copy fast-forwarded from the template's own remote, or
+// following another branch on origin, has nothing "ahead" of its upstream and still holds commits
+// origin has never seen. A push of HEAD would publish them too.
+async function expectHeldBack(repo, fake, extraSetup) {
+  const stateDir = join(repo.root, 'state')
+  const { pushes, recordingGit } = pushRecorder()
+  const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { git: recordingGit } })
+  assert.equal(result.code, 0, result.stderr)
+  assert.deepEqual(pushes, [], 'it pushed from a copy holding commits the team repo has never seen')
+  assert.deepEqual(await log(repo.remote, 'main'), ['start'])
+  assert.match(result.stdout, /committed here but was not pushed/i)
+  assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
+  return result
+}
+
+test('working copy: following another remote (say, the template) does not hide unreviewed commits', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const template = join(repo.root, 'template.git')
+    await git(['init', '--bare', '-q', '-b', 'main', template], repo.root)
+    await writeFile(join(repo.work, 'upstream.md'), 'from the template\n')
+    await git(['add', 'upstream.md'], repo.work)
+    await git(['commit', '-q', '-m', 'UNREVIEWED upstream change'], repo.work)
+    await git(['remote', 'add', 'upstream', template], repo.work)
+    await git(['push', '-q', 'upstream', 'main'], repo.work)
+    await git(['branch', '-q', '--set-upstream-to=upstream/main', 'main'], repo.work)
+    const result = await expectHeldBack(repo, fake)
+    assert.match(result.stdout, /other commits that are not on origin's main yet/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: following another branch on origin does not hide unreviewed commits', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await writeFile(join(repo.work, 'feature.md'), 'half done\n')
+    await git(['add', 'feature.md'], repo.work)
+    await git(['commit', '-q', '-m', 'Feature work'], repo.work)
+    await git(['push', '-q', 'origin', 'HEAD:refs/heads/develop'], repo.work)
+    await git(['branch', '-q', '--set-upstream-to=origin/develop', 'main'], repo.work)
+    const result = await expectHeldBack(repo, fake)
+    assert.match(result.stdout, /other commits that are not on origin's main yet/i)
+    assert.deepEqual(await log(repo.remote, 'develop'), ['Feature work', 'start'])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: with no remote called origin it says so, instead of blaming the remote', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await git(['remote', 'rename', 'origin', 'team'], repo.work)
+    const result = await expectHeldBack(repo, fake)
+    assert.match(result.stdout, /no remote called origin/i)
+    assert.doesNotMatch(result.stdout + result.stderr, /remote has commits/i)
   } finally {
     await fake.cleanup()
     await repo.cleanup()

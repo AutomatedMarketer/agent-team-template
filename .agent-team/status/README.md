@@ -40,12 +40,18 @@ reading anything - an unknown option, a bad label, a folder that is not a dedica
 `--clone` folder that holds the collector's own code.
 
 In **your own working copy**, `--commit` pushes only when the push would carry the snapshot and
-nothing else, to the branch the dashboard reads (the remote's default branch, usually `main`).
-If you are on another branch, or you have other commits that are not pushed yet, it commits the
-snapshot, does not push, and says which of those it was - a push would have sent your other work
-too. It always pushes by name (`git push origin HEAD:refs/heads/main`), never a bare `git push`.
-If a push is refused, it stops and says so. Either way the snapshot stays committed locally and
-nothing of yours is touched; push when you are ready.
+nothing else, to the branch the dashboard reads (`origin`'s default branch, usually `main`). It
+commits the snapshot, does **not** push, and says which of these it was when:
+
+- you are on another branch;
+- your copy has commits that origin's `main` does not have yet - even if your branch follows
+  somewhere else, such as the template's own repo, and git says you are up to date with it;
+- your copy has no remote called `origin`, or has never fetched origin's `main`.
+
+A push in any of those cases would have sent your other work too. When it does push, it pushes
+the snapshot's own commit by id (`git push origin <snapshot commit id>:refs/heads/main`), never
+HEAD and never a bare `git push`. If a push is refused, it stops and says so. Either way the
+snapshot stays committed locally and nothing of yours is touched; push when you are ready.
 
 ## The file
 

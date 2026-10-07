@@ -198,30 +198,51 @@ async function currentBranch(run) {
   }
 }
 
+// How many commits `commit` holds that origin's <target> does not, as this copy last saw it.
+// Measured against origin's branch itself - the one the push goes to - never against whatever
+// this branch follows, which can be another remote (a template) or another branch.
+async function aheadOfOrigin(run, target, commit) {
+  try {
+    const count = Number((await run(['rev-list', '--count', `refs/remotes/origin/${target}..${commit}`])).stdout.trim())
+    return Number.isSafeInteger(count) ? count : null
+  } catch {
+    return null
+  }
+}
+
+const OTHER_WORK = (target) => `this copy has other commits that are not on origin's ${target} yet, and a push would send them too`
+
 // In a person's own copy a push is only safe when it carries the snapshot alone, to the branch
-// the dashboard reads. Checked BEFORE the snapshot is committed. Returns the branch to push to,
-// or a plain reason not to push. The person's own branch name is never repeated: it could be
-// anything, including their name.
+// the dashboard reads. Checked BEFORE the snapshot is committed, and again on the snapshot's own
+// commit just before the push. Returns the branch to push to, or a plain reason not to push.
+// The person's own branch name is never repeated: it could be anything, including their name.
 async function workingCopyPushTarget(run) {
+  let remotes = []
+  try {
+    remotes = (await run(['remote'])).stdout.split('\n').map((name) => name.trim())
+  } catch {
+    remotes = []
+  }
+  if (!remotes.includes('origin')) {
+    return { why: 'this copy has no remote called origin, so there is no team repo to push to' }
+  }
   const target = await defaultBranch(run)
   const branch = await currentBranch(run)
   if (!branch) return { why: 'this copy is not on a branch' }
   if (branch !== target) return { why: `you are not on ${target}, the branch the dashboard reads` }
-  let ahead
   try {
-    ahead = Number((await run(['rev-list', '--count', '@{u}..HEAD'])).stdout.trim())
+    await run(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`])
   } catch {
-    return { why: `${target} here does not follow a branch on the remote` }
+    return { why: `this copy has never fetched origin's ${target}, so it cannot tell what a push would send` }
   }
-  if (!Number.isSafeInteger(ahead) || ahead !== 0) {
-    return { why: 'this copy has other commits that are not pushed yet, and a push would send them too' }
-  }
+  const ahead = await aheadOfOrigin(run, target, 'HEAD')
+  if (ahead !== 0) return { why: OTHER_WORK(target) }
   return { branch: target }
 }
 
 // mode: 'working-copy' | 'clone'. rewrite() puts the snapshot file back after a reset.
-// Every push names its remote and branch: a bare `git push` follows whatever the copy is set up
-// to do, which can mean other branches.
+// Every push names its remote, its branch and the exact commit: a bare `git push` follows
+// whatever the copy is set up to do, and HEAD can move between the check and the push.
 export async function commitAndPush({ git, dir, relativePath, message, mode, rewrite }) {
   const run = (args) => git(args, dir)
   const succeeds = async (args) => {
@@ -249,12 +270,16 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
   } else {
     target = await workingCopyPushTarget(run)
   }
-  const push = () => succeeds(['push', '--quiet', 'origin', `HEAD:refs/heads/${target.branch}`])
+  const push = (commit) => succeeds(['push', '--quiet', 'origin', `${commit}:refs/heads/${target.branch}`])
 
   let commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
   if (target.why) return { outcome: 'committed, not pushed', commit, why: target.why }
-  if (await push()) return { outcome: 'pushed', commit }
+  // The snapshot commit itself must be the only thing origin is missing.
+  if (mode !== 'clone' && (await aheadOfOrigin(run, target.branch, commit)) !== 1) {
+    return { outcome: 'committed, not pushed', commit, why: OTHER_WORK(target.branch) }
+  }
+  if (await push(commit)) return { outcome: 'pushed', commit }
   if (mode !== 'clone') return { outcome: 'committed, push refused', commit }
 
   // The dedicated clone holds nothing but snapshots, so catching up is always safe: the newer
@@ -264,6 +289,6 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
   await rewrite()
   commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
-  if (await push()) return { outcome: 'retried and pushed', commit }
+  if (await push(commit)) return { outcome: 'retried and pushed', commit }
   return { outcome: 'committed, push refused', commit }
 }
