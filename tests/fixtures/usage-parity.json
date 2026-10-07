@@ -33,11 +33,13 @@
     "resetsAt"
   ],
   "maxActivityDays": 17,
+  "maxPercent": 1000,
   "rules": [
     "usedPercent appears only inside a limits block whose status is found",
     "a missing source is { status: not found }, never a zero",
     "a window whose resetsAt has passed shows no percentage",
-    "resetsAt may be missing or null; the board then says the reset time is unknown",
-    "the freshness shown is the reading time (limits.readAt), not only the file time (takenAt)"
+    "resetsAt may be missing; the collector never writes null, and the board treats a null like a missing one and says the reset time is unknown",
+    "the freshness shown is the reading time (limits.readAt), not only the file time (takenAt)",
+    "usedPercent is a finite number from 0 to maxPercent; above 100 means over the limit and is shown, never clipped"
   ]
 }
