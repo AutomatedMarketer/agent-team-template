@@ -255,10 +255,14 @@ export function assertSafeLine(text, identity) {
 
 // The label is the only free text a person gives the collector, and it ends up in the file name
 // and inside the file. It is checked before any source is read, and it may not be the hostname -
-// the hostname is often the person's name.
+// the hostname is often the person's name. It also lands in commit messages and console lines,
+// so no control character: a newline could forge a log line, an escape could repaint a terminal.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
+
 export function checkComputerLabel(label, identity) {
   if (typeof label !== 'string' || !label.trim()) return ['computer: is empty']
   const problems = stringProblems(label, 'computer', identity)
+  if (CONTROL_CHARACTER.test(label)) problems.push('computer: contains a control character')
   if (!computerSlug(label)) problems.push('computer: has no letters or numbers to name a file after')
   const hostSlug = computerSlug(identity?.hostname ?? '')
   if (hostSlug && computerSlug(label) === hostSlug) problems.push('computer: is the computer name')

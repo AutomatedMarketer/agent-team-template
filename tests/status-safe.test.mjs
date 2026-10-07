@@ -297,3 +297,14 @@ test('a final record names a known outcome and, at most, a commit id', () => {
   assert.ok(checkAgainst({ ...final, commit: 'HEAD' }, FINAL_SHAPE, identity).some((problem) => problem.startsWith('commit: ')))
   assert.ok(checkAgainst({ ...final, remote: 'x' }, FINAL_SHAPE, identity).some((problem) => problem.startsWith('remote: ')))
 })
+
+// The label goes into the file, the commit message and every console line that names the
+// computer. A newline could forge a second line in a log; an ANSI escape could rewrite what a
+// terminal shows. Any control character - C0, DEL or C1 - refuses the label.
+test('a computer label with a control character is refused', () => {
+  for (const label of ['Mac\nMini', 'Mac\rMini', '\u001b[31mMac Mini', 'Mac\tMini', 'Mac\u0000Mini', 'Mac\u007fMini', 'Mac\u0085Mini', 'Mac\u009bMini']) {
+    const problems = checkComputerLabel(label, identity)
+    assert.ok(problems.some((problem) => /control character/.test(problem)), `accepted ${JSON.stringify(label)}`)
+  }
+  assert.deepEqual(checkComputerLabel('Büro Mac 2', identity), [])
+})

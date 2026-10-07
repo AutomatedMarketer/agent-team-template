@@ -124,7 +124,7 @@ test('with no label the file says "this computer", never the hostname', async ()
 test('a hostile label is refused before anything is read or written', async () => {
   const fake = await hostileHome()
   try {
-    for (const label of [FAKE_HOSTNAME, FAKE_EMAIL, '../../etc', 'x'.repeat(61), '!!!', `${FAKE_USERNAME} laptop`]) {
+    for (const label of [FAKE_HOSTNAME, FAKE_EMAIL, '../../etc', 'x'.repeat(61), '!!!', `${FAKE_USERNAME} laptop`, 'Mac\nMini', '\u001b[31mMac Mini']) {
       const deps = depsFor(fake)
       const target = await mkdtemp(join(tmpdir(), 'agent-status-repo-'))
       const stderr = []
