@@ -123,9 +123,12 @@ reading is skipped and the saved one is tried.
 
 It also **never sends the token** when this Node could be talking to something other than the
 real address: certificate checks switched off (`NODE_TLS_REJECT_UNAUTHORIZED=0`), extra
-certificates trusted (`NODE_EXTRA_CA_CERTS`), or `NODE_OPTIONS` holding `--use-system-ca`,
-`--use-openssl-ca`, `--require` / `-r`, `--import`, `--loader` or `--experimental-loader`. The
-saved reading is tried instead, and the meter's reason names the setting, never its value.
+certificates trusted (`NODE_EXTRA_CA_CERTS`), the system's certificates in use
+(`NODE_USE_SYSTEM_CA=1`), or `NODE_OPTIONS` - or Node's own command line - holding
+`--use-system-ca`, `--use-openssl-ca`, `--require` / `-r`, `--import`, `--loader`,
+`--experimental-loader`, or any debugger option (`--inspect`, `--inspect-brk`, `--inspect-port`,
+`--inspect-wait`): a debugger can read the token straight out of memory. The saved reading is
+tried instead, and the meter's reason names the setting, never its value.
 
 ## What is never written
 

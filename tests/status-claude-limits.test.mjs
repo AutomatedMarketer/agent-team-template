@@ -11,6 +11,7 @@ import {
 import { probe } from '../.claude/skills/surplus-burn/usage-probe.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
 import { MAX_WINDOWS, MAX_PERCENT } from '../scripts/lib/status/schema.mjs'
+import { machineDeps } from '../scripts/lib/status/machine.mjs'
 import {
   makeFakeHome,
   fakeClaudeToken,
@@ -364,16 +365,56 @@ for (const [label, env, why] of [
   })
 }
 
-test('ordinary NODE_OPTIONS do not stop the live call', async () => {
+// A debugger attached to this Node can read any variable, the token included. And the same
+// options that NODE_OPTIONS can carry can be given on Node's own command line, where they show
+// up in process.execArgv instead - which the tests hand in as deps.execArgv.
+const ON_COMMAND_LINE = 'node was started with certificate, code or debug options'
+for (const [label, extra, why] of [
+  ['--inspect in NODE_OPTIONS', { env: { NODE_OPTIONS: '--inspect' } }, 'NODE_OPTIONS opens a debugger'],
+  ['--inspect-brk in NODE_OPTIONS', { env: { NODE_OPTIONS: '--inspect-brk=9229' } }, 'NODE_OPTIONS opens a debugger'],
+  ['--inspect-port in NODE_OPTIONS', { env: { NODE_OPTIONS: '--inspect-port=0' } }, 'NODE_OPTIONS opens a debugger'],
+  ['--inspect-wait in NODE_OPTIONS', { env: { NODE_OPTIONS: '--inspect-wait' } }, 'NODE_OPTIONS opens a debugger'],
+  ['NODE_USE_SYSTEM_CA=1', { env: { NODE_USE_SYSTEM_CA: '1' } }, 'NODE_USE_SYSTEM_CA changes certificates'],
+  ['--inspect on the command line', { execArgv: ['--inspect'] }, ON_COMMAND_LINE],
+  ['--inspect-brk on the command line', { execArgv: ['--inspect-brk=127.0.0.1:9229'] }, ON_COMMAND_LINE],
+  ['--require on the command line', { execArgv: ['--require', './hook.js'] }, ON_COMMAND_LINE],
+  ['-r on the command line', { execArgv: ['-r', './hook.js'] }, ON_COMMAND_LINE],
+  ['--import on the command line', { execArgv: ['--import=./hook.mjs'] }, ON_COMMAND_LINE],
+  ['--loader on the command line', { execArgv: ['--loader', './hook.mjs'] }, ON_COMMAND_LINE],
+  ['--experimental-loader on the command line', { execArgv: ['--experimental-loader=./hook.mjs'] }, ON_COMMAND_LINE],
+  ['--use-system-ca on the command line', { execArgv: ['--use-system-ca'] }, ON_COMMAND_LINE],
+  ['--use-openssl-ca on the command line', { execArgv: ['--use-openssl-ca'] }, ON_COMMAND_LINE]
+]) {
+  test(`with ${label}, the token is never sent`, async () => {
+    const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
+    try {
+      const deps = depsFor(fake, extra)
+      const { limits } = await collectClaudeLimits(deps)
+      assert.equal(deps.fetch.calls.length, 0, 'the token was sent')
+      assert.deepEqual(limits, { status: 'unavailable', why })
+    } finally {
+      await fake.cleanup()
+    }
+  })
+}
+
+test('ordinary NODE_OPTIONS and command-line options do not stop the live call', async () => {
   const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
   try {
-    const deps = depsFor(fake, { env: { NODE_OPTIONS: '--max-old-space-size=4096 --enable-source-maps', NODE_EXTRA_CA_CERTS: '' } })
+    const deps = depsFor(fake, {
+      env: { NODE_OPTIONS: '--max-old-space-size=4096 --enable-source-maps', NODE_EXTRA_CA_CERTS: '', NODE_USE_SYSTEM_CA: '0' },
+      execArgv: ['--max-old-space-size=4096', '--no-warnings']
+    })
     const { limits } = await collectClaudeLimits(deps)
     assert.equal(deps.fetch.calls.length, 1)
     assert.equal(limits.source, 'unofficial-live')
   } finally {
     await fake.cleanup()
   }
+})
+
+test('on the real machine the guard is handed Node\'s own command-line options', () => {
+  assert.equal(machineDeps().execArgv, process.execArgv)
 })
 
 test('a refused live call falls back to the saved reading, then to unavailable', async () => {

@@ -23,6 +23,8 @@ export function machineDeps(overrides = {}) {
   return {
     home,
     env: process.env,
+    // Node's own command-line options: the token guard refuses a debugger or loaded code here too.
+    execArgv: process.execArgv,
     platform: process.platform,
     now: Date.now(),
     fetch: globalThis.fetch,

@@ -112,7 +112,7 @@ test('the status README says when --commit in your own copy does not push', asyn
 
 test('the status README lists every setting that keeps the token at home', async () => {
   const doc = await statusReadme()
-  for (const setting of ['NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS', 'NODE_OPTIONS', '--use-system-ca', '--use-openssl-ca', '--require', '-r', '--import', '--loader', '--experimental-loader']) {
+  for (const setting of ['NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS', 'NODE_OPTIONS', '--use-system-ca', '--use-openssl-ca', '--require', '-r', '--import', '--loader', '--experimental-loader', 'NODE_USE_SYSTEM_CA', '--inspect', '--inspect-brk', '--inspect-port', '--inspect-wait']) {
     assert.ok(doc.includes(`\`${setting}`), `the README does not name ${setting}`)
   }
 })

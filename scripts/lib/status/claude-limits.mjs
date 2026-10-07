@@ -247,21 +247,35 @@ async function readSaved(deps) {
 // Settings that let something other than the real address read the token: certificate checks
 // off, certificates added or swapped for another store, or code loaded into Node before the
 // collector runs. Each matches the option alone or with "=value"; -r is --require's short form.
-const UNTRUSTED_NODE_OPTIONS = ['--use-system-ca', '--use-openssl-ca', '--require', '-r', '--import', '--loader', '--experimental-loader']
+const CODE_OR_CERTIFICATE_OPTIONS = ['--use-system-ca', '--use-openssl-ca', '--require', '-r', '--import', '--loader', '--experimental-loader']
+
+const matches = (option, flag) => option === flag || option.startsWith(`${flag}=`)
+// A debugger attached to this Node can read any variable, the token included. Every inspector
+// option starts this way (--inspect, --inspect-brk, --inspect-port, --inspect-wait, ...).
+const opensDebugger = (option) => option.startsWith('--inspect')
+const changesCodeOrCertificates = (option) => CODE_OR_CERTIFICATE_OPTIONS.some((flag) => matches(option, flag))
+
+const optionsIn = (text) => (typeof text === 'string' ? text.split(/\s+/).map((option) => option.replace(/^["']+|["']+$/g, '')) : [])
 
 // Returns the reason the token must stay home, or null. A meter is not worth the token, so with
 // any of these the live call is skipped and the saved reading tried instead. The reason names
-// the setting, never its value: the value is usually a file path.
-export function untrustedConnection(env = {}) {
+// the setting, never its value: the value is usually a file path. `execArgv` is Node's own
+// command line (process.execArgv), where the same options can be given instead of NODE_OPTIONS.
+export function untrustedConnection(env = {}, execArgv = []) {
   if (env.NODE_TLS_REJECT_UNAUTHORIZED === '0') return 'certificate checks are switched off'
   if (typeof env.NODE_EXTRA_CA_CERTS === 'string' && env.NODE_EXTRA_CA_CERTS !== '') return 'NODE_EXTRA_CA_CERTS adds certificates'
-  const options = typeof env.NODE_OPTIONS === 'string' ? env.NODE_OPTIONS.split(/\s+/).map((option) => option.replace(/^["']+|["']+$/g, '')) : []
-  const risky = options.some((option) => UNTRUSTED_NODE_OPTIONS.some((flag) => option === flag || option.startsWith(`${flag}=`)))
-  if (risky) return 'NODE_OPTIONS changes certificates or loads code'
+  if (env.NODE_USE_SYSTEM_CA === '1') return 'NODE_USE_SYSTEM_CA changes certificates'
+  const options = optionsIn(env.NODE_OPTIONS)
+  if (options.some(changesCodeOrCertificates)) return 'NODE_OPTIONS changes certificates or loads code'
+  if (options.some(opensDebugger)) return 'NODE_OPTIONS opens a debugger'
+  const commandLine = Array.isArray(execArgv) ? execArgv.map(String) : []
+  if (commandLine.some((option) => changesCodeOrCertificates(option) || opensDebugger(option))) {
+    return 'node was started with certificate, code or debug options'
+  }
   return null
 }
 
-// deps: { home, env, platform, now (ms), fetch, exec }
+// deps: { home, env, execArgv, platform, now (ms), fetch, exec }
 // Returns { limits, account }. `account` holds the two plan words from the sign-in, for plans.mjs
 // to turn into a name; it is never written as-is.
 export async function collectClaudeLimits(deps) {
@@ -271,7 +285,7 @@ export async function collectClaudeLimits(deps) {
   let live = null
   if (credentials.status === 'found' && credentials.token) {
     const expired = credentials.expiresAt !== null && credentials.expiresAt <= deps.now
-    const untrusted = untrustedConnection(deps.env)
+    const untrusted = untrustedConnection(deps.env, deps.execArgv)
     if (expired) live = unavailable('sign-in expired')
     else if (untrusted) live = unavailable(untrusted)
     else live = await readLive(deps, credentials.token)
