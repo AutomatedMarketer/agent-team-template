@@ -35,7 +35,8 @@ npm run collect:status -- --computer "Mac Mini" --commit  # write it, commit onl
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
 slot was already claimed). 1 means it refused or failed after reading. 2 means it refused before
-reading anything - an unknown option, a bad label, or a folder that is not a dedicated clone.
+reading anything - an unknown option, a bad label, a folder that is not a dedicated clone, or a
+`--clone` folder that holds the collector's own code.
 
 If a push is refused in **your own working copy**, the collector stops and says so. The snapshot
 stays committed locally and nothing of yours is touched. Pull, then push when you are ready.
@@ -129,50 +130,72 @@ unknown; look before running it again.
 ## The Mac schedule (phase 4, task T14)
 
 The always-on Mac Mini runs the collector every three hours, America/New_York, as a **GUI
-LaunchAgent** - a GUI session is what can read the login Keychain. It runs out of a **dedicated
-clone** that nothing else uses, so it always has the latest pushed code and never touches anyone's
-working copy. This follows the team's ongoing-task policy: deterministic, no model call, one
-owner, receipts, and a rollback.
+LaunchAgent** - a GUI session is what can read the login Keychain. It uses two folders that
+nothing else uses, and never touches anyone's working copy:
+
+- **The code checkout**, `~/.local/share/agent-status/collector-code` - the collector that runs.
+  It is pinned to one commit you have read, and it **never updates itself**. You move it by hand.
+- **The data clone**, `~/.local/share/agent-status/data` - where the snapshot is written,
+  committed and pushed. It is reset to whatever the team repo holds on every run.
+
+Why two: anyone who can push to the team repo - a person, or a cloud agent talked into it -
+decides what the data clone holds three hours later. If the code ran from there, they would be
+choosing code that runs on the Mac with access to its Keychain. So the code comes from a checkout
+only you move, and the collector **refuses to run** if its own code is inside the `--clone` folder.
+
+This follows the team's ongoing-task policy: deterministic, no model call, one owner, receipts,
+and a rollback.
 
 | Item | Value |
 |---|---|
 | Task ID | `agent-status-collector` |
 | Owner | `~/Library/LaunchAgents/local.donna.agent-status-collector.plist` |
 | Cadence | 00:07, 03:07, ... 21:07 Mac local time (the Mac must be set to New York time) |
-| Command | `node <clone>/scripts/collect-status.mjs --computer "Mac Mini" --commit --clone <clone>` |
-| Receipts | `~/.local/state/agent-status-collector/claims/<UTC>.claim/{receipt,final}.json` |
+| Command | `node <code>/scripts/collect-status.mjs --computer "Mac Mini" --commit --clone <data>` |
+| Receipts | `~/.local/state/agent-status-collector/claims/<slot>.claim/{receipt,final}.json` |
 | Missed runs | Skipped. If the Mac sleeps through a slot, launchd runs once on wake: one fresh reading under a new claim, not a replay |
 | Alert | The dashboard's stale banner after 8 hours |
-| Rollback | `launchctl bootout`, move the plist out, delete the clone |
+| Rollback | `launchctl bootout`, move the plist out, delete both folders |
 
 ### One-time setup
 
-1. Make the dedicated clone (replace the two `YOUR-` parts):
+1. Make the code checkout and pin it (replace the two `YOUR-` parts). Pick the commit to pin:
+   the newest one on `main` whose `scripts/` you have read. `git log -1 --format=%H origin/main`
+   prints its id.
 
    ```bash
    mkdir -p ~/.local/share/agent-status
-   git clone https://github.com/YOUR-ACCOUNT/YOUR-TEAM-REPO.git ~/.local/share/agent-status/YOUR-TEAM-REPO
+   git clone https://github.com/YOUR-ACCOUNT/YOUR-TEAM-REPO.git ~/.local/share/agent-status/collector-code
+   cd ~/.local/share/agent-status/collector-code
+   git -c advice.detachedHead=false checkout THE-COMMIT-ID-YOU-READ
    ```
 
-   The clone needs push access and a git name and email (`git config user.name` /
-   `user.email` inside it).
+   This folder needs no push access and no git name. Nothing writes to it.
 
-2. Find node's full path with `which node`, and use it in the plist below.
-
-3. Run it once **by hand in a Terminal on the Mac's screen**, not over SSH:
+2. Make the data clone:
 
    ```bash
-   cd ~/.local/share/agent-status/YOUR-TEAM-REPO
-   node scripts/collect-status.mjs --computer "Mac Mini" --dry-run
+   git clone https://github.com/YOUR-ACCOUNT/YOUR-TEAM-REPO.git ~/.local/share/agent-status/data
    ```
 
-   macOS may ask whether `security` may read "Claude Code-credentials". Unattended runs need
-   **Always Allow**. Know what that grants: any program that runs `security` as you can then read
-   that one item without asking. (Whether the prompt appears, and for which program, is not yet
-   verified on the Mac.)
+   This one needs push access and a git name and email (`git config user.name` /
+   `user.email` inside it).
 
-4. Save this as `~/Library/LaunchAgents/local.donna.agent-status-collector.plist`, replacing
-   `YOUR-MAC-USER`, `YOUR-TEAM-REPO` and the node path:
+3. Find node's full path with `which node`, and use it in the plist below.
+
+4. Run it once **by hand in a Terminal on the Mac's screen**, not over SSH:
+
+   ```bash
+   node ~/.local/share/agent-status/collector-code/scripts/collect-status.mjs --computer "Mac Mini" --dry-run
+   ```
+
+   macOS may ask whether `security` (`/usr/bin/security`) may read "Claude Code-credentials".
+   Unattended runs need **Always Allow**. Know what that grants: any program that runs `security`
+   as you can then read that one item without asking. (Whether the prompt appears, and for which
+   program, is not yet verified on the Mac.)
+
+5. Save this as `~/Library/LaunchAgents/local.donna.agent-status-collector.plist`, replacing
+   `YOUR-MAC-USER` and the node path:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -184,15 +207,15 @@ owner, receipts, and a rollback.
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/YOUR-MAC-USER/.local/share/agent-status/YOUR-TEAM-REPO/scripts/collect-status.mjs</string>
+    <string>/Users/YOUR-MAC-USER/.local/share/agent-status/collector-code/scripts/collect-status.mjs</string>
     <string>--computer</string>
     <string>Mac Mini</string>
     <string>--commit</string>
     <string>--clone</string>
-    <string>/Users/YOUR-MAC-USER/.local/share/agent-status/YOUR-TEAM-REPO</string>
+    <string>/Users/YOUR-MAC-USER/.local/share/agent-status/data</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/YOUR-MAC-USER/.local/share/agent-status/YOUR-TEAM-REPO</string>
+  <string>/Users/YOUR-MAC-USER/.local/share/agent-status/collector-code</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -221,7 +244,7 @@ owner, receipts, and a rollback.
 </plist>
 ```
 
-5. Load it, and run it once now to prove it:
+6. Load it, and run it once now to prove it:
 
    ```bash
    mkdir -p ~/.local/state/agent-status-collector
@@ -235,12 +258,28 @@ owner, receipts, and a rollback.
    "taken just now on Mac Mini". Then wait for the next scheduled slot and check again. Record
    the task in `donna/control-center/ONGOING-TASKS.md`.
 
+### Updating the collector, on purpose
+
+The code checkout stays on the commit you pinned until you move it. Pushes to the team repo,
+including ones that change `scripts/`, do not reach the Mac's collector until you have read them:
+
+```bash
+cd ~/.local/share/agent-status/collector-code
+git fetch --quiet origin
+git log --oneline HEAD..origin/main -- scripts/          # what changed in the collector
+git diff HEAD origin/main -- scripts/                    # read every line of this
+git -c advice.detachedHead=false checkout THE-NEW-COMMIT-ID
+```
+
+If anything in that diff is not what you expected, do not move the pin. The next scheduled run
+uses the new code; nothing needs reloading.
+
 ### Rollback
 
 ```bash
 launchctl bootout gui/$(id -u)/local.donna.agent-status-collector
 mv ~/Library/LaunchAgents/local.donna.agent-status-collector.plist ~/Desktop/
-rm -rf ~/.local/share/agent-status/YOUR-TEAM-REPO
+rm -rf ~/.local/share/agent-status/collector-code ~/.local/share/agent-status/data
 ```
 
 The receipts in `~/.local/state/agent-status-collector` are left for the record.

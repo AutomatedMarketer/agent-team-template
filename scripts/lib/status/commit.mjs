@@ -6,12 +6,13 @@
 //   - the collector's dedicated clone (--clone): a folder nobody works in. It is brought level
 //     with the remote before writing, and a refused push is fetched, reset, rewritten and retried
 //     once. A folder with anybody else's changes in it is refused as "not a dedicated clone".
+//     It holds data only: the code that runs is a separate checkout, pinned by hand.
 //
 // Nothing git prints is ever passed on: git messages can carry the remote address, and a remote
 // address can carry a token.
 
 import { mkdir, rm, stat, realpath, writeFile } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
+import { resolve, join, dirname, basename, relative, isAbsolute } from 'node:path'
 import { isoSeconds } from './util.mjs'
 
 export const LOCK_STALE_MS = 3600_000
@@ -84,8 +85,33 @@ async function sameFolder(a, b) {
   }
 }
 
-// Returns null when the folder is fit to be used, or a short reason when it is not. The collector
-// may run from inside its own clone - that is how the scheduled job always has the latest code.
+// The real path of a folder, following links. A path that does not exist yet is resolved as far
+// as it does exist, with the rest added back on.
+async function realFolder(path) {
+  const full = resolve(path)
+  try {
+    return await realpath(full)
+  } catch {
+    const parent = dirname(full)
+    return parent === full ? full : join(await realFolder(parent), basename(full))
+  }
+}
+
+// True when `inner` is `outer` or anywhere inside it, after following links. Case is ignored on
+// Windows and macOS, whose usual file systems ignore it too - "same folder" is the safe answer.
+export async function isInsideFolder(inner, outer) {
+  let [child, parent] = await Promise.all([realFolder(inner), realFolder(outer)])
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    child = child.toLowerCase()
+    parent = parent.toLowerCase()
+  }
+  const between = relative(parent, child)
+  return between === '' || (!between.startsWith('..') && !isAbsolute(between))
+}
+
+// Returns null when the folder is fit to be used, or a short reason when it is not. The
+// collector's own code never lives in this folder (run.mjs refuses that before it gets here):
+// this folder is reset to whatever the remote holds, and the remote is not who chooses the code.
 export async function prepareClone({ git, cloneDir, relativePath }) {
   let top
   try {

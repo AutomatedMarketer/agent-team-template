@@ -23,7 +23,7 @@ import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
-import { takeLock, releaseLock, openClaim, writeRecord, prepareClone, commitAndPush, SNAPSHOT_SUBJECT } from './commit.mjs'
+import { takeLock, releaseLock, openClaim, writeRecord, prepareClone, commitAndPush, isInsideFolder, SNAPSHOT_SUBJECT } from './commit.mjs'
 
 const DEFAULT_SOURCES = {
   claudeLimits: collectClaudeLimits,
@@ -170,6 +170,15 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   if (labelProblems.length) {
     complain(`Refused before reading anything. ${labelProblems.join('; ')}.`)
     complain('Give a plain label such as --computer "Mac Mini". It is never the computer\'s own name.')
+    return 2
+  }
+
+  // The data clone is reset to the remote every run. Code inside it would be code chosen by
+  // whoever last pushed to the team repo, run with this person's Keychain. Refused before anything.
+  if (values.clone !== undefined && (await isInsideFolder(repoRoot, values.clone))) {
+    complain('Refused: the collector\'s own code is inside the --clone folder.')
+    complain('That folder is reset to whatever the team repo holds, so anyone who can push could choose the code that runs here.')
+    complain('Run the collector from a separate code checkout, pinned to a commit you have read. The status README shows how.')
     return 2
   }
 

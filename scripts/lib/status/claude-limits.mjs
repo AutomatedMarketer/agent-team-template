@@ -14,7 +14,7 @@ export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USER_AGENT = 'agent-team-collector/1'
 // The full path, never the bare name: a bare name is looked up on PATH, and a program called
 // `security` earlier on PATH would be handed the sign-in.
-export const KEYCHAIN_COMMAND = ['/usr/bin/security',['find-generic-password', '-s', 'Claude Code-credentials', '-w']]
+export const KEYCHAIN_COMMAND = ['/usr/bin/security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w']]
 export const SAVED_MAX_AGE_HOURS = 6
 const LIVE_TIMEOUT_MS = 10_000
 

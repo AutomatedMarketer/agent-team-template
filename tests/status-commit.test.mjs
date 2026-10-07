@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, readFile, writeFile, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, writeFile, readdir, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -194,7 +194,7 @@ test('dedicated clone: unpushed commits that are not snapshots mean it is somebo
     await writeFile(join(repo.work, 'plan.md'), 'my plan\n')
     await git(['add', 'plan.md'], repo.work)
     await git(['commit', '-q', '-m', 'My plan'], repo.work)
-    const result = await collect(fake, ['--commit', '--clone', repo.work], { repo: repo.work, stateDir: join(repo.root, 'state') })
+    const result = await collect(fake, ['--commit', '--clone', repo.work], { repo: join(repo.root, 'code'), stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 2)
     assert.match(result.stderr, /not a dedicated clone/i)
     assert.equal((await log(repo.work))[0], 'My plan', 'the unpushed commit was reset away')
@@ -204,10 +204,8 @@ test('dedicated clone: unpushed commits that are not snapshots mean it is somebo
   }
 })
 
-// The scheduled job runs the collector out of its own clone, so the clone's code is always the
-// latest pushed code. That has to be allowed, and an earlier snapshot commit that never got
-// pushed is the collector's own and safe to replace.
-test('dedicated clone: the collector may run from inside its own clone', async () => {
+// An earlier snapshot commit that never got pushed is the collector's own and safe to replace.
+test('dedicated clone: an unpushed snapshot of its own is replaced, not refused', async () => {
   const repo = await makeRemote()
   const fake = await makeFakeHome()
   try {
@@ -216,10 +214,58 @@ test('dedicated clone: the collector may run from inside its own clone', async (
     await writeFile(join(dedicated, ...OWN.split('/')), '{}\n')
     await git(['add', '.'], dedicated)
     await git(['commit', '-q', '-m', 'Usage snapshot from Test PC'], dedicated)
-    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: dedicated, stateDir: join(repo.root, 'state') })
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: join(repo.root, 'code'), stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 0, result.stderr)
     assert.equal((await log(repo.remote, 'main'))[0], 'Usage snapshot from Test PC')
     assert.equal((await log(repo.remote, 'main')).filter((line) => line.startsWith('Usage snapshot')).length, 1)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+// The data clone is reset to whatever the remote holds on every run. If the collector's own code
+// lived in it, anyone who can push to the team repo - a person, or a cloud agent talked into it -
+// would choose the code the Mac runs next, with Keychain access. So the code lives in a separate
+// checkout updated by hand, and a run whose code sits inside the data clone refuses outright.
+test('dedicated clone: the collector refuses to run when its own code is inside the --clone folder', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    await advanceRemote(repo, 'pushed-by-someone')
+    const before = (await git(['rev-parse', 'HEAD'], dedicated)).stdout.trim()
+    for (const code of [dedicated, join(dedicated, 'nested', 'checkout')]) {
+      const calls = []
+      const recordingGit = async (args, cwd) => {
+        calls.push(args[0])
+        return realGit(args, cwd)
+      }
+      const stateDir = join(repo.root, 'state')
+      const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: code, stateDir, extra: { git: recordingGit } })
+      assert.equal(result.code, 2)
+      assert.match(result.stderr, /own code is inside the --clone folder/i)
+      assert.deepEqual(calls, [], 'git ran in the data clone before the refusal')
+      assert.equal(existsSync(join(stateDir, 'claims')), false, 'it claimed a slot before refusing')
+    }
+    assert.equal((await git(['rev-parse', 'HEAD'], dedicated)).stdout.trim(), before, 'the data clone was moved')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: a --clone path that leads to the code through a link is still refused', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const link = join(repo.root, 'link-to-dedicated')
+    // A junction needs no special rights on Windows; elsewhere the type is ignored.
+    await symlink(dedicated, link, 'junction')
+    const result = await collect(fake, ['--commit', '--clone', link], { repo: dedicated, stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 2)
+    assert.match(result.stderr, /own code is inside the --clone folder/i)
   } finally {
     await fake.cleanup()
     await repo.cleanup()

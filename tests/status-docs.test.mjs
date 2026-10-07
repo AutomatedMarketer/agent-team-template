@@ -77,3 +77,25 @@ test('the status README says the unofficial reading is labelled, and what to do 
   assert.match(doc, /unavailable/)
   assert.match(doc, /never refresh/i)
 })
+
+// The data clone is reset to the remote every run, so the code the Mac runs must not live in it -
+// otherwise whoever can push to the team repo chooses that code. The README's plist is what
+// people copy, so it is held to the split here.
+test('the status README runs the collector from a pinned code checkout, apart from the data clone', async () => {
+  const doc = await statusReadme()
+  const plist = /```xml\n([\s\S]*?)```/.exec(doc)?.[1] ?? ''
+  const args = [...(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)?.[1] ?? '').matchAll(/<string>([^<]*)<\/string>/g)].map((match) => match[1])
+  const script = args.find((arg) => arg.endsWith('/scripts/collect-status.mjs'))
+  const clone = args[args.indexOf('--clone') + 1]
+  assert.ok(script, 'the plist does not run scripts/collect-status.mjs')
+  assert.ok(clone && args.includes('--clone'), 'the plist does not name a data clone')
+  assert.match(script, /\/\.local\/share\/agent-status\/collector-code\/scripts\/collect-status\.mjs$/)
+  assert.match(clone, /\/\.local\/share\/agent-status\/data$/)
+  assert.ok(!script.startsWith(`${clone}/`), 'the script the plist runs lives inside the data clone')
+  const workingDirectory = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1] ?? ''
+  assert.ok(!workingDirectory.startsWith(clone), 'the plist works from inside the data clone')
+  // Pinned to a reviewed commit, and how to move the pin on purpose.
+  assert.match(doc, /git -c advice\.detachedHead=false checkout /)
+  assert.match(doc, /git diff [^\n]*-- scripts\//)
+  assert.match(doc, /never updates? itself/i)
+})
