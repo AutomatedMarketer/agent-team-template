@@ -126,8 +126,12 @@ never the value. These are never written:
 ## Receipts
 
 A `--commit` run takes a lock (so two runs never overlap; a lock over an hour old is from a crash
-and is taken over), then claims its time slot under
-`<state-dir>/claims/<UTC time>.claim/`. It writes `receipt.json` there once the snapshot is
+and is taken over), then claims its occurrence under `<state-dir>/claims/`. With `--clone` (the
+schedule) the occurrence is the three-hour slot, named by its New York date and starting hour -
+`2026-10-07T15-00-new-york.claim/` covers 15:00 to 18:00 - so a run on waking and a manual
+kickstart in the same slot do not both run; the second says so and skips. A run by hand in your
+own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), so asking again
+later always takes a fresh reading. It writes `receipt.json` there once the snapshot is
 written - which sources were found, the file name and its hash - and `final.json` when it is done:
 the outcome and the commit id. A claim with a receipt and no final record means the outcome is
 unknown; look before running it again.

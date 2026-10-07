@@ -22,9 +22,32 @@ export const LOCK_STALE_MS = 3600_000
 // commits from anybody else's.
 export const SNAPSHOT_SUBJECT = 'Usage snapshot from '
 
+// A run by hand is named after its own second: a person asking twice wants two readings.
 export function claimStamp(now) {
   // Colons are not allowed in Windows file names.
   return isoSeconds(now).replaceAll(':', '-')
+}
+
+// The schedule runs every three hours, New York time. A scheduled run is named after the slot it
+// belongs to - the New York date and the hour the slot starts - so a run on waking and a manual
+// kickstart in the same slot find the same claim, and only the first one runs. On the night the
+// clocks go back the 00:00 slot is four hours long; on the night they go forward it is two.
+export const SCHEDULE_ZONE = 'America/New_York'
+export const SLOT_HOURS = 3
+
+const slotParts = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SCHEDULE_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  hourCycle: 'h23'
+})
+
+export function slotStamp(now) {
+  const parts = Object.fromEntries(slotParts.formatToParts(new Date(now)).map((part) => [part.type, part.value]))
+  const start = Math.floor(Number(parts.hour) / SLOT_HOURS) * SLOT_HOURS
+  return `${parts.year}-${parts.month}-${parts.day}T${String(start).padStart(2, '0')}-00-new-york`
 }
 
 // One run at a time. The lock is a folder because making a folder either succeeds or fails in one
@@ -58,12 +81,13 @@ export async function releaseLock(lock) {
   if (lock) await rm(lock, { recursive: true, force: true })
 }
 
-// The claim is made before anything else happens, and its name is the occurrence's time. If it
-// already exists this occurrence has been run, whatever the outcome was, and is not run again.
-export async function openClaim(stateDir, now) {
+// The claim is made before anything else happens, and its name is the occurrence (a slot or a
+// second, above). If it already exists this occurrence has been run, whatever the outcome was,
+// and is not run again.
+export async function openClaim(stateDir, name) {
   const claims = join(stateDir, 'claims')
   await mkdir(claims, { recursive: true })
-  const claim = join(claims, `${claimStamp(now)}.claim`)
+  const claim = join(claims, `${name}.claim`)
   try {
     await mkdir(claim)
     return claim

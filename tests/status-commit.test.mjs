@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { runCollector } from '../scripts/lib/status/run.mjs'
+import { slotStamp } from '../scripts/lib/status/commit.mjs'
 import { makeFakeHome, setMtime } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
 import { repoRoot } from './helpers/repo.mjs'
@@ -479,16 +480,59 @@ test('a lock left behind by a crash over an hour ago is taken over', async () =>
   }
 })
 
-test('the same occurrence is never run twice', async () => {
+// The schedule runs at 00:07, 03:07 ... New York time. A Mac that slept through 15:07 runs once
+// on waking at, say, 16:00; someone then kickstarts it by hand at 17:30. Same slot - the second
+// one must not run. A claim named after the clock second never matched anything, so it never
+// stopped a repeat.
+test('the same scheduled slot is never run twice, even at a different time inside it', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const stateDir = join(repo.root, 'state')
+    const at = (iso) => ({ repo: join(repo.root, 'code'), stateDir, extra: { now: Date.parse(iso) } })
+    // 16:00 and 17:30 New York (daylight time) are both in the 15:00 slot; 18:10 is the next one.
+    const wake = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T20:00:00Z'))
+    assert.equal(wake.code, 0, wake.stderr)
+    const kickstart = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T21:30:00Z'))
+    assert.equal(kickstart.code, 0)
+    assert.match(kickstart.stdout, /already/i)
+    assert.equal((await log(repo.remote, 'main')).filter((line) => line.startsWith('Usage snapshot')).length, 1)
+    const next = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T22:10:00Z'))
+    assert.equal(next.code, 0, next.stderr)
+    assert.doesNotMatch(next.stdout, /already/i)
+    assert.equal((await log(repo.remote, 'main')).filter((line) => line.startsWith('Usage snapshot')).length, 2)
+    assert.deepEqual((await readdir(join(stateDir, 'claims'))).sort(), ['2026-10-07T15-00-new-york.claim', '2026-10-07T18-00-new-york.claim'])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('a slot is the New York date and three-hour block, through both clock changes', () => {
+  assert.equal(slotStamp(Date.parse('2026-10-07T20:00:00Z')), '2026-10-07T15-00-new-york')
+  assert.equal(slotStamp(Date.parse('2026-10-08T03:59:59Z')), '2026-10-07T21-00-new-york')
+  assert.equal(slotStamp(Date.parse('2026-10-08T04:00:00Z')), '2026-10-08T00-00-new-york')
+  // Clocks go back at 02:00 on 1 November: 01:30 happens twice, and both are the 00:00 slot.
+  assert.equal(slotStamp(Date.parse('2026-11-01T05:30:00Z')), '2026-11-01T00-00-new-york')
+  assert.equal(slotStamp(Date.parse('2026-11-01T06:30:00Z')), '2026-11-01T00-00-new-york')
+  assert.equal(slotStamp(Date.parse('2026-11-01T08:00:00Z')), '2026-11-01T03-00-new-york')
+  // Clocks go forward at 02:00 on 8 March 2026: 01:59 then 03:00, two different slots.
+  assert.equal(slotStamp(Date.parse('2026-03-08T06:59:00Z')), '2026-03-08T00-00-new-york')
+  assert.equal(slotStamp(Date.parse('2026-03-08T07:00:00Z')), '2026-03-08T03-00-new-york')
+})
+
+test('by hand in a working copy, a later run is never mistaken for a repeat', async () => {
   const repo = await makeRemote()
   const fake = await makeFakeHome()
   try {
     const stateDir = join(repo.root, 'state')
-    assert.equal((await collect(fake, ['--commit'], { repo: repo.work, stateDir })).code, 0)
-    const second = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
-    assert.equal(second.code, 0)
-    assert.match(second.stdout, /already/i)
-    assert.equal((await log(repo.work)).filter((line) => line.startsWith('Usage snapshot')).length, 1)
+    const first = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(first.code, 0, first.stderr)
+    const again = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { now: NOW + 10 * 60_000 } })
+    assert.equal(again.code, 0, again.stderr)
+    assert.doesNotMatch(again.stdout, /already/i)
+    assert.equal((await log(repo.work)).filter((line) => line.startsWith('Usage snapshot')).length, 2)
   } finally {
     await fake.cleanup()
     await repo.cleanup()

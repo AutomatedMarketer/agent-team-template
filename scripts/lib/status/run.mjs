@@ -23,7 +23,18 @@ import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
-import { takeLock, releaseLock, openClaim, writeRecord, prepareClone, commitAndPush, isInsideFolder, SNAPSHOT_SUBJECT } from './commit.mjs'
+import {
+  takeLock,
+  releaseLock,
+  openClaim,
+  claimStamp,
+  slotStamp,
+  writeRecord,
+  prepareClone,
+  commitAndPush,
+  isInsideFolder,
+  SNAPSHOT_SUBJECT
+} from './commit.mjs'
 
 const DEFAULT_SOURCES = {
   claudeLimits: collectClaudeLimits,
@@ -221,9 +232,13 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
     return 0
   }
   try {
-    const claim = await openClaim(stateDir, deps.now)
+    // The dedicated clone is the scheduled job, which runs once per three-hour slot however many
+    // times launchd wakes it. A run by hand in a working copy is its own occurrence.
+    const claim = await openClaim(stateDir, mode === 'clone' ? slotStamp(deps.now) : claimStamp(deps.now))
     if (!claim) {
-      say('This occurrence was already claimed by an earlier run. Skipped, not repeated.')
+      say(mode === 'clone'
+        ? 'This three-hour slot was already claimed by an earlier run. Skipped, not repeated.'
+        : 'This occurrence was already claimed by an earlier run. Skipped, not repeated.')
       return 0
     }
     const finish = async (outcome, commit) => {
