@@ -209,6 +209,56 @@ test('with certificate checks switched off, the token is never sent', async () =
   }
 })
 
+// Certificate checks switched off is not the only way to make Node trust a connection it should
+// not. Extra trusted certificates, the system's or OpenSSL's certificate store instead of Node's,
+// or code loaded into Node before the collector starts can all put something between the token
+// and the address. Any of them, and the token stays home. The reason names the setting, never
+// its value - the value is a file path.
+for (const [label, env, why] of [
+  ['extra trusted certificates', { NODE_EXTRA_CA_CERTS: '/Users/fakeperson/corp-proxy.pem' }, 'NODE_EXTRA_CA_CERTS adds certificates'],
+  ['the system certificate store', { NODE_OPTIONS: '--use-system-ca' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['the OpenSSL certificate store', { NODE_OPTIONS: '--max-old-space-size=4096 --use-openssl-ca' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--require', { NODE_OPTIONS: '--require /Users/fakeperson/hook.js' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--require=', { NODE_OPTIONS: '--require=./hook.js' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['a quoted --require', { NODE_OPTIONS: '"--require" ./hook.js' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['-r', { NODE_OPTIONS: '-r ./hook.js' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--import', { NODE_OPTIONS: '--import ./hook.mjs' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--import=', { NODE_OPTIONS: '--import=./hook.mjs' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--loader', { NODE_OPTIONS: '--loader ./hook.mjs' }, 'NODE_OPTIONS changes certificates or loads code'],
+  ['--experimental-loader', { NODE_OPTIONS: '--experimental-loader=./hook.mjs' }, 'NODE_OPTIONS changes certificates or loads code']
+]) {
+  test(`with ${label}, the token is never sent and the reason names the setting, not its value`, async () => {
+    const fake = await makeFakeHome({
+      '.claude/.credentials.json': credentials(),
+      '.claude.json': savedReading(NOW - HOUR)
+    })
+    try {
+      const deps = depsFor(fake, { env })
+      const { limits } = await collectClaudeLimits(deps)
+      assert.equal(deps.fetch.calls.length, 0, 'the token was sent')
+      assert.equal(limits.source, 'claude-code-saved')
+
+      await fake.write('.claude.json', {})
+      const alone = await collectClaudeLimits(depsFor(fake, { env }))
+      assert.deepEqual(alone.limits, { status: 'unavailable', why })
+    } finally {
+      await fake.cleanup()
+    }
+  })
+}
+
+test('ordinary NODE_OPTIONS do not stop the live call', async () => {
+  const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
+  try {
+    const deps = depsFor(fake, { env: { NODE_OPTIONS: '--max-old-space-size=4096 --enable-source-maps', NODE_EXTRA_CA_CERTS: '' } })
+    const { limits } = await collectClaudeLimits(deps)
+    assert.equal(deps.fetch.calls.length, 1)
+    assert.equal(limits.source, 'unofficial-live')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
 test('a refused live call falls back to the saved reading, then to unavailable', async () => {
   const fake = await makeFakeHome({
     '.claude/.credentials.json': credentials(),
