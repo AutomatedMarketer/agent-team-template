@@ -100,7 +100,8 @@ Both Claude readings are **undocumented**. Anthropic has not published that addr
 field, so the dashboard shows them with an "unofficial" label, and either can stop working
 without notice. When that happens the meter says `unavailable` rather than showing an old or
 invented number. The collector sends the sign-in token to that one address only, with an honest
-`User-Agent: agent-team-collector/1`, never follows a redirect with it, and will **never refresh**
+`User-Agent: agent-team-collector/1`, never follows a redirect with it, never sends it at all when
+Node's certificate checks are switched off (`NODE_TLS_REJECT_UNAUTHORIZED=0`), and will **never refresh**
 an expired token - refreshing it could sign Claude Code out. An expired token means the live
 reading is skipped and the saved one is tried.
 
