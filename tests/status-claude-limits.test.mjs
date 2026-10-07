@@ -9,6 +9,8 @@ import {
   KEYCHAIN_COMMAND
 } from '../scripts/lib/status/claude-limits.mjs'
 import { probe } from '../.claude/skills/surplus-burn/usage-probe.mjs'
+import { checkUsage } from '../scripts/lib/status/safe.mjs'
+import { MAX_WINDOWS } from '../scripts/lib/status/schema.mjs'
 import {
   makeFakeHome,
   fakeClaudeToken,
@@ -122,6 +124,72 @@ test('parser: a percentage over 100 is shown as 100, not as a broken meter', () 
   const answer = newAnswer()
   answer.limits[0].percent = 104
   assert.equal(parseClaudeUsage(answer)[0].usedPercent, 100)
+})
+
+// The address sometimes answers a window with no number at all (utilization: null) - a window
+// that exists but has nothing to report yet. That window is left out; it is never a zero, and it
+// does not cost the other windows their reading.
+test('parser: a window with no number is left out, and the rest of the reading is kept', () => {
+  const listed = newAnswer()
+  listed.limits[0].percent = null
+  assert.deepEqual(parseClaudeUsage(listed).map((window) => window.kind), ['weekly_all', 'weekly_model'])
+  const flat = parseClaudeUsage({ five_hour: { utilization: null, resets_at: null }, seven_day: { utilization: 49, resets_at: null } })
+  assert.deepEqual(flat, [{ kind: 'weekly_all', usedPercent: 49 }])
+  assert.ok(!JSON.stringify(flat).includes('"usedPercent":0'))
+})
+
+test('parser: when no window has a number, there is no reading', () => {
+  const answer = {
+    limits: [
+      { kind: 'session', percent: null },
+      { kind: 'weekly_all', utilization: null }
+    ],
+    five_hour: { utilization: null }
+  }
+  assert.equal(parseClaudeUsage(answer), null)
+})
+
+test('parser: never more windows than the contract allows', () => {
+  const answer = {
+    limits: Array.from({ length: MAX_WINDOWS + 3 }, (_, index) => ({
+      kind: 'weekly_scoped',
+      percent: index,
+      scope: { model: { display_name: `Model ${index}` } }
+    }))
+  }
+  const windows = parseClaudeUsage(answer)
+  assert.equal(windows.length, MAX_WINDOWS)
+  assert.equal(windows[0].model, 'Model 0')
+})
+
+test('a live answer with a null window and a null reset time passes the gate as a usage file', async () => {
+  const fake = await makeFakeHome({ '.claude/.credentials.json': credentials() })
+  try {
+    const answer = {
+      limits: [
+        { kind: 'session', utilization: null, resets_at: null },
+        { kind: 'weekly_all', percent: 49, resets_at: null },
+        { kind: 'weekly_scoped', percent: 2, scope: { model: { display_name: 'Fable' } } }
+      ]
+    }
+    const deps = depsFor(fake, { fetch: fetchStub(() => ({ status: 200, body: answer })) })
+    const { limits } = await collectClaudeLimits(deps)
+    assert.equal(limits.source, 'unofficial-live')
+    assert.deepEqual(limits.windows, [
+      { kind: 'weekly_all', usedPercent: 49 },
+      { kind: 'weekly_model', model: 'Fable', usedPercent: 2 }
+    ])
+    const doc = {
+      schema: 'agent-status/usage/v1',
+      takenAt: '2026-10-07T20:00:00Z',
+      computer: 'Test PC',
+      claude: { plan: { status: 'not found' }, limits, activity: { status: 'not found' } },
+      codex: { plan: { status: 'not found' }, limits: { status: 'not found' } }
+    }
+    assert.deepEqual(checkUsage(doc, { username: 'fakeperson', home: fake.home, hostname: 'fake-host-77' }), [])
+  } finally {
+    await fake.cleanup()
+  }
 })
 
 // --- the live call --------------------------------------------------------------------------------

@@ -113,3 +113,9 @@ test('the status README lists every setting that keeps the token at home', async
     assert.ok(doc.includes(`\`${setting}`), `the README does not name ${setting}`)
   }
 })
+
+test('the status README says a window with no number is left out, and resetsAt may be missing', async () => {
+  const doc = await statusReadme()
+  assert.match(doc, /window with no number, that window is left out/i)
+  assert.match(doc, /no `resetsAt`/)
+})

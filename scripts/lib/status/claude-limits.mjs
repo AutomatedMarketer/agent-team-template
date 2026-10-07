@@ -9,6 +9,7 @@
 
 import { join } from 'node:path'
 import { isPlainObject, isoSeconds, toIsoTime, cleanPercent, readJson } from './util.mjs'
+import { MAX_WINDOWS } from './schema.mjs'
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USER_AGENT = 'agent-team-collector/1'
@@ -41,9 +42,15 @@ function cleanModel(raw) {
   return name[0].toUpperCase() + name.slice(1)
 }
 
+// A window the address lists with no number at all (null or missing) has nothing to report yet.
+// It is left out - never shown as 0. A number that is there but is not a percentage is broken.
+const NO_NUMBER = Symbol('no number')
+
 function readWindow(raw, kind, model) {
   if (!isPlainObject(raw)) return null
-  const percent = cleanPercent(raw.percent ?? raw.utilization ?? raw.used_percentage)
+  const rawPercent = raw.percent ?? raw.utilization ?? raw.used_percentage
+  if (rawPercent === undefined || rawPercent === null) return NO_NUMBER
+  const percent = cleanPercent(rawPercent)
   if (percent === null) return null
   const window = { kind }
   if (model) window.model = model
@@ -77,6 +84,7 @@ function fromLimitsList(list) {
       kind = 'weekly_model'
     } else continue
     const window = readWindow(entry, kind, model)
+    if (window === NO_NUMBER) continue
     if (!window) return BROKEN
     windows.push(window)
   }
@@ -96,15 +104,19 @@ function fromFlatFields(answer) {
   for (const [field, kind, model] of FLAT_FIELDS) {
     if (answer[field] === undefined || answer[field] === null) continue
     const window = readWindow(answer[field], kind, model)
+    if (window === NO_NUMBER) continue
     if (!window) return BROKEN
     windows.push(window)
   }
   return windows
 }
 
-// Returns the windows, or null when the answer is not understood. Never a partial reading: one
-// recognised window with a broken number spoils the lot, because a meter that silently drops the
-// window you were about to hit is worse than one that says "unavailable".
+// Returns the windows, or null when the answer is not understood or no window has a number.
+// Never a partial reading: one recognised window with a broken number spoils the lot, because a
+// meter that silently drops the window you were about to hit is worse than one that says
+// "unavailable". A window with no number at all is different - there is nothing to drop. At most
+// MAX_WINDOWS are kept, in the order the address gave them: one more and the gate would refuse
+// the whole snapshot.
 export function parseClaudeUsage(answer) {
   if (!isPlainObject(answer)) return null
   let windows = []
@@ -125,7 +137,7 @@ export function parseClaudeUsage(answer) {
     seen.add(key)
     return true
   })
-  return unique.length ? unique : null
+  return unique.length ? unique.slice(0, MAX_WINDOWS) : null
 }
 
 // --- reading the sign-in ------------------------------------------------------------------------------

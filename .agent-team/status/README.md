@@ -81,7 +81,10 @@ nothing of yours is touched; push when you are ready.
 
 Every block has a `status`: `found`, `not found` (the source is not on this computer) or
 `unavailable` (it is there but could not be read, with a short `why`). A percentage only ever
-appears inside a block that says `found` - a missing source is never written as a zero.
+appears inside a block that says `found` - a missing source is never written as a zero. The same
+goes for one window: if the address lists a window with no number, that window is left out and the
+others are kept. A block holds at most 8 windows. A window may have no `resetsAt` when the reset
+time is not known; the dashboard then says so.
 
 `byModel` counts replies per model family. `activity` is always marked `"estimate": true`: it
 counts what Claude Code logged on this one computer, and it never turns into a percentage, because
