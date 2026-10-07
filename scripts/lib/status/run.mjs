@@ -361,12 +361,9 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         say(OUTCOME_LINES[result.outcome].line)
         return OUTCOME_LINES[result.outcome].code
       }
-      if (mode === 'clone') {
-        complain('The push was refused twice. The dedicated clone holds the commit; the next run catches up.')
-      } else {
-        complain('The push was refused - the remote has commits this copy does not.')
-        complain('The snapshot is committed here and your working copy was left as it is. Pull, then push when ready.')
-      }
+      // Only the dedicated clone gets here: in a working copy a refused push is "committed, not
+      // pushed", with its reason, above.
+      complain('The push was refused twice. The dedicated clone holds the commit; the next run catches up.')
       return 1
     } catch {
       complain('The run stopped: the snapshot could not be written, or a step after it failed.')

@@ -198,12 +198,27 @@ async function currentBranch(run) {
   }
 }
 
-// How many commits `commit` holds that origin's <target> does not, as this copy last saw it.
-// Measured against origin's branch itself - the one the push goes to - never against whatever
-// this branch follows, which can be another remote (a template) or another branch.
-async function aheadOfOrigin(run, target, commit) {
+// What this copy last saw on origin's <target>, as a commit id, or null if it never fetched it.
+async function lastSeenOnOrigin(run, target) {
   try {
-    const count = Number((await run(['rev-list', '--count', `refs/remotes/origin/${target}..${commit}`])).stdout.trim())
+    return (await run(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}^{commit}`])).stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+async function isAncestor(run, older, newer) {
+  try {
+    await run(['merge-base', '--is-ancestor', older, newer])
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function commitsBetween(run, older, newer) {
+  try {
+    const count = Number((await run(['rev-list', '--count', `${older}..${newer}`])).stdout.trim())
     return Number.isSafeInteger(count) ? count : null
   } catch {
     return null
@@ -211,6 +226,16 @@ async function aheadOfOrigin(run, target, commit) {
 }
 
 const OTHER_WORK = (target) => `this copy has other commits that are not on origin's ${target} yet, and a push would send them too`
+const BEHIND = (target) => `this copy is behind origin's ${target}; pull, then take the snapshot again`
+const MOVED = 'the team repo has changed since this copy last fetched it, or pushes from here go to a different repo; fetch or pull, then take the snapshot again'
+
+// Whether `commit` is exactly one commit on top of `expected`: a fast-forward that carries the
+// snapshot and nothing else. Returns null when it is, or the reason it is not.
+async function onlyTheSnapshot(run, target, expected, commit) {
+  if (!(await isAncestor(run, expected, commit))) return BEHIND(target)
+  if ((await commitsBetween(run, expected, commit)) !== 1) return OTHER_WORK(target)
+  return null
+}
 
 // In a person's own copy a push is only safe when it carries the snapshot alone, to the branch
 // the dashboard reads. Checked BEFORE the snapshot is committed, and again on the snapshot's own
@@ -230,19 +255,23 @@ async function workingCopyPushTarget(run) {
   const branch = await currentBranch(run)
   if (!branch) return { why: 'this copy is not on a branch' }
   if (branch !== target) return { why: `you are not on ${target}, the branch the dashboard reads` }
-  try {
-    await run(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`])
-  } catch {
-    return { why: `this copy has never fetched origin's ${target}, so it cannot tell what a push would send` }
-  }
-  const ahead = await aheadOfOrigin(run, target, 'HEAD')
-  if (ahead !== 0) return { why: OTHER_WORK(target) }
+  const expected = await lastSeenOnOrigin(run, target)
+  if (!expected) return { why: `this copy has never fetched origin's ${target}, so it cannot tell what a push would send` }
+  if (!(await isAncestor(run, expected, 'HEAD'))) return { why: BEHIND(target) }
+  if ((await commitsBetween(run, expected, 'HEAD')) !== 0) return { why: OTHER_WORK(target) }
   return { branch: target }
 }
 
 // mode: 'working-copy' | 'clone'. rewrite() puts the snapshot file back after a reset.
-// Every push names its remote, its branch and the exact commit: a bare `git push` follows
-// whatever the copy is set up to do, and HEAD can move between the check and the push.
+//
+// Every check above is made against what this copy last fetched from origin, but the push goes to
+// the real remote - which may have moved since (a commit taken off with a force push), or may be
+// a different repo altogether (remote.origin.pushurl, url.<x>.pushInsteadOf). So every push:
+//   - names the exact commit and branch, never HEAD and never a bare `git push`;
+//   - is a fast-forward of exactly one commit on top of what was checked (`expected`);
+//   - carries a lease on `expected`, so it lands only if the remote's branch is still exactly
+//     that commit. A lease is a force push in git's terms, which is why the fast-forward check
+//     comes first: together they mean "add this one commit, or do nothing".
 export async function commitAndPush({ git, dir, relativePath, message, mode, rewrite }) {
   const run = (args) => git(args, dir)
   const succeeds = async (args) => {
@@ -270,17 +299,29 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
   } else {
     target = await workingCopyPushTarget(run)
   }
-  const push = (commit) => succeeds(['push', '--quiet', 'origin', `${commit}:refs/heads/${target.branch}`])
+
+  // Returns 'pushed', or the reason it did not push.
+  const pushOnly = async (commit) => {
+    const expected = await lastSeenOnOrigin(run, target.branch)
+    if (!expected) return `this copy has never fetched origin's ${target.branch}`
+    const why = await onlyTheSnapshot(run, target.branch, expected, commit)
+    if (why) return why
+    const pushed = await succeeds([
+      'push',
+      '--quiet',
+      `--force-with-lease=refs/heads/${target.branch}:${expected}`,
+      'origin',
+      `${commit}:refs/heads/${target.branch}`
+    ])
+    return pushed ? 'pushed' : MOVED
+  }
 
   let commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
   if (target.why) return { outcome: 'committed, not pushed', commit, why: target.why }
-  // The snapshot commit itself must be the only thing origin is missing.
-  if (mode !== 'clone' && (await aheadOfOrigin(run, target.branch, commit)) !== 1) {
-    return { outcome: 'committed, not pushed', commit, why: OTHER_WORK(target.branch) }
-  }
-  if (await push(commit)) return { outcome: 'pushed', commit }
-  if (mode !== 'clone') return { outcome: 'committed, push refused', commit }
+  let result = await pushOnly(commit)
+  if (result === 'pushed') return { outcome: 'pushed', commit }
+  if (mode !== 'clone') return { outcome: 'committed, not pushed', commit, why: result }
 
   // The dedicated clone holds nothing but snapshots, so catching up is always safe: the newer
   // snapshot is rewritten on top and pushed once more. Once - a second refusal waits for the next run.
@@ -289,6 +330,7 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
   await rewrite()
   commit = await commitOwnFile()
   if (!commit) return { outcome: 'nothing to commit' }
-  if (await push(commit)) return { outcome: 'retried and pushed', commit }
+  result = await pushOnly(commit)
+  if (result === 'pushed') return { outcome: 'retried and pushed', commit }
   return { outcome: 'committed, push refused', commit }
 }

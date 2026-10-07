@@ -115,7 +115,10 @@ test('the status README says when --commit in your own copy does not push', asyn
   assert.match(doc, /commits that origin's .main. does not have yet/i)
   assert.match(doc, /even if your branch follows\s+somewhere else/i)
   assert.match(doc, /no remote called .origin./i)
-  assert.match(doc, /git push origin <snapshot commit id>:refs\/heads\/main/)
+  assert.match(doc, /git push --force-with-lease=refs\/heads\/main:<last fetched id> origin <snapshot commit id>:refs\/heads\/main/)
+  assert.match(doc, /fetch or pull, then take the snapshot again/)
+  assert.match(doc, /pushInsteadOf/)
+  assert.match(doc, /behind origin's .main./)
   assert.doesNotMatch(doc, /git push origin HEAD:/)
 })
 

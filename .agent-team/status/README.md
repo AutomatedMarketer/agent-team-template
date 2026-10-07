@@ -46,12 +46,21 @@ commits the snapshot, does **not** push, and says which of these it was when:
 - you are on another branch;
 - your copy has commits that origin's `main` does not have yet - even if your branch follows
   somewhere else, such as the template's own repo, and git says you are up to date with it;
-- your copy has no remote called `origin`, or has never fetched origin's `main`.
+- your copy is behind origin's `main` (pull first);
+- your copy has no remote called `origin`, or has never fetched origin's `main`;
+- the team repo has changed since your copy last fetched it - for example a commit was taken
+  off it - or your pushes go to a different repo than your fetches (`pushurl`,
+  `pushInsteadOf`).
 
-A push in any of those cases would have sent your other work too. When it does push, it pushes
-the snapshot's own commit by id (`git push origin <snapshot commit id>:refs/heads/main`), never
-HEAD and never a bare `git push`. If a push is refused, it stops and says so. Either way the
-snapshot stays committed locally and nothing of yours is touched; push when you are ready.
+A push in any of those cases could have sent your other work too, or put back a commit someone
+removed. Every check is made against what your copy last fetched, so the push itself is
+guarded as well: it pushes the snapshot's own commit by id, as a fast-forward of exactly one
+commit, with a lease on what it checked -
+`git push --force-with-lease=refs/heads/main:<last fetched id> origin <snapshot commit id>:refs/heads/main`.
+The lease means it lands only if the team repo's `main` is still exactly what your copy saw;
+otherwise nothing is pushed and it tells you to fetch or pull, then take the snapshot again. It
+never pushes HEAD, never a bare `git push`, and never anything but that one commit. Either way
+the snapshot stays committed locally and nothing of yours is touched.
 
 ## The file
 

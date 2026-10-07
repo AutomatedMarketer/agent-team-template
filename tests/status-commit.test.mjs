@@ -126,7 +126,8 @@ test('working copy: pushes with an explicit refspec to the default branch', asyn
     // The snapshot's own commit by id, not HEAD: whatever HEAD becomes after the check, the
     // push carries exactly the commit that was checked.
     const { commit } = await finalRecord(stateDir)
-    assert.deepEqual(pushes, [['push', '--quiet', 'origin', `${commit}:refs/heads/main`]])
+    const expected = (await git(['rev-parse', `${commit}^`], repo.work)).stdout.trim()
+    assert.deepEqual(pushes, [['push', '--quiet', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
   } finally {
     await fake.cleanup()
     await repo.cleanup()
@@ -204,7 +205,8 @@ test('dedicated clone: pushes with an explicit refspec too', async () => {
     const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir, extra: { git: recordingGit } })
     assert.equal(result.code, 0, result.stderr)
     const { commit } = await finalRecord(stateDir)
-    assert.deepEqual(pushes, [['push', '--quiet', 'origin', `${commit}:refs/heads/main`]])
+    const expected = (await git(['rev-parse', `${commit}^`], dedicated)).stdout.trim()
+    assert.deepEqual(pushes, [['push', '--quiet', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
   } finally {
     await fake.cleanup()
     await repo.cleanup()
@@ -279,17 +281,92 @@ test('working copy: with no remote called origin it says so, instead of blaming 
   }
 })
 
-test('working copy: a refused push stops and says so, and nothing is reset', async () => {
+// Everything this copy checks, it checks against what it last fetched from origin. The push goes
+// to the real remote, which may have moved since - or may be a different repo altogether
+// (pushurl, pushInsteadOf). So the push carries a lease: it lands only if the remote's branch is
+// still exactly what was checked. Anything else is held back with a plain sentence, never forced.
+test('working copy: a commit removed from origin is never pushed back by a copy that still holds it', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    // Someone pushes a commit, this copy pulls it, then it is taken off origin (a leaked secret,
+    // say) with a force push. This copy never fetches again, so its origin/main still has it.
+    await advanceRemote(repo, 'LEAKED SECRET')
+    await git(['pull', '-q', '--ff-only'], repo.work)
+    const start = (await git(['rev-parse', 'HEAD~1'], repo.seed)).stdout.trim()
+    await git(['push', '-q', '--force', 'origin', `${start}:refs/heads/main`], repo.seed)
+    assert.deepEqual(await log(repo.remote, 'main'), ['start'])
+
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(await log(repo.remote, 'main'), ['start'], 'the removed commit was pushed back to origin')
+    assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
+    assert.match(result.stdout, /fetch or pull, then take the snapshot again/i)
+    assert.doesNotMatch(result.stdout + result.stderr, /experiment|work\b/)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+for (const [label, redirect] of [
+  ['remote.origin.pushurl', async (repo, other) => git(['config', 'remote.origin.pushurl', other], repo.work)],
+  ['url.<other>.pushInsteadOf', async (repo, other) => git(['config', `url.${other}.pushInsteadOf`, repo.remote], repo.work)]
+]) {
+  test(`working copy: ${label} sending pushes to another repo does not carry commits it lacks`, async () => {
+    const repo = await makeRemote()
+    const fake = await makeFakeHome()
+    try {
+      const other = join(repo.root, 'other.git')
+      await git(['clone', '--bare', '-q', repo.remote, other], repo.root)
+      await advanceRemote(repo, 'ONLY ON FETCH REMOTE')
+      await git(['pull', '-q', '--ff-only'], repo.work)
+      await redirect(repo, other)
+      const stateDir = join(repo.root, 'state')
+      const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+      assert.equal(result.code, 0, result.stderr)
+      assert.deepEqual(await log(other, 'main'), ['start'], 'the push carried a commit the push remote never had')
+      assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
+    } finally {
+      await fake.cleanup()
+      await repo.cleanup()
+    }
+  })
+}
+
+test('working copy: a copy behind origin is told to pull, and the push is never forced', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await advanceRemote(repo, 'newer on origin')
+    await git(['fetch', '-q'], repo.work)
+    const { pushes, recordingGit } = pushRecorder()
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(pushes, [], 'a push that is not a fast-forward was attempted')
+    assert.deepEqual(await log(repo.remote, 'main'), ['newer on origin', 'start'])
+    assert.match(result.stdout, /behind/i)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('working copy: a remote that moved since the last fetch holds the snapshot back, and nothing is reset', async () => {
   const repo = await makeRemote()
   const fake = await makeFakeHome()
   try {
     await advanceRemote(repo, 'someone-else')
     await writeFile(join(repo.work, 'notes.md'), 'mine\n')
     await git(['add', 'notes.md'], repo.work)
-    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
-    assert.equal(result.code, 1)
-    assert.match(result.stderr, /push was refused/i)
-    assert.match(result.stderr, /left as it is/i)
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /committed here but was not pushed/i)
+    assert.match(result.stdout, /fetch or pull, then take the snapshot again/i)
+    assert.equal((await finalRecord(stateDir)).outcome, 'committed, not pushed')
     assert.equal((await log(repo.work))[0], 'Usage snapshot from Test PC', 'the local commit should stay')
     assert.equal((await git(['diff', '--cached', '--name-only'], repo.work)).stdout.trim(), 'notes.md')
     assert.ok(existsSync(join(repo.work, 'notes.md')))
