@@ -4,8 +4,7 @@
 // identity - so the tests can run the whole thing against a fake home with a fake network, and
 // the leak test exercises exactly the code that runs on the real machine.
 
-import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createHash } from 'node:crypto'
 import {
@@ -19,6 +18,7 @@ import {
 } from './schema.mjs'
 import { checkUsage, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
+import { writeSnapshot, assertNoLinks, LinkedPath } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
@@ -123,17 +123,10 @@ function gatedPrinter(print, identity) {
   return (line) => print(checkLine(line, identity).length ? '(a line was withheld by the safety check)' : line)
 }
 
-async function writeAtomically(path, text) {
-  await mkdir(dirname(path), { recursive: true })
-  const temporary = `${path}.${process.pid}.tmp`
-  try {
-    await writeFile(temporary, text)
-    await rename(temporary, path)
-  } catch (error) {
-    await rm(temporary, { force: true })
-    throw error
-  }
-}
+const LINK_REFUSAL = [
+  'Refused: part of the path the snapshot goes to (.agent-team/status/usage) is a link to somewhere else.',
+  'Nothing was written. A link there would send the file outside this folder. Replace it with a real folder.'
+]
 
 const OUTCOME_LINES = {
   pushed: { code: 0, line: 'Committed and pushed.' },
@@ -212,7 +205,13 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     return 0
   }
 
-  await writeAtomically(join(repoRoot, ...relativePath.split('/')), text)
+  try {
+    await writeSnapshot(repoRoot, relativePath, text)
+  } catch (error) {
+    if (!(error instanceof LinkedPath)) throw error
+    LINK_REFUSAL.forEach(complain)
+    return 1
+  }
   say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
   summarize(doc).forEach(say)
   return 0
@@ -270,6 +269,16 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       }
     }
 
+    // Checked before anything is read, and again by every write.
+    try {
+      await assertNoLinks(target, relativePath, { git: deps.git })
+    } catch (error) {
+      if (!(error instanceof LinkedPath)) throw error
+      LINK_REFUSAL.forEach(complain)
+      await finish('failed')
+      return 1
+    }
+
     const doc = await collectUsage(deps, computer)
     const problems = checkUsage(doc, identity)
     if (problems.length) {
@@ -278,8 +287,15 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       return 1
     }
     const text = `${JSON.stringify(doc, null, 2)}\n`
-    const write = () => writeAtomically(join(target, ...relativePath.split('/')), text)
-    await write()
+    const write = () => writeSnapshot(target, relativePath, text, { git: deps.git })
+    try {
+      await write()
+    } catch (error) {
+      if (!(error instanceof LinkedPath)) throw error
+      LINK_REFUSAL.forEach(complain)
+      await finish('failed')
+      return 1
+    }
 
     const receipt = {
       schema: RECEIPT_SCHEMA,

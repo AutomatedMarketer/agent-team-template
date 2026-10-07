@@ -167,6 +167,12 @@ decides what the data clone holds three hours later. If the code ran from there,
 choosing code that runs on the Mac with access to its Keychain. So the code comes from a checkout
 only you move, and the collector **refuses to run** if its own code is inside the `--clone` folder.
 
+The same people could commit `.agent-team/status/usage` (or a folder above it) as a link, so
+that writing the snapshot "into the clone" writes somewhere else on the Mac. Before reading
+anything, and again before every write, the collector checks each part of that path - on disk
+and in git - and that the folder really is inside the clone. If any part is a link it **writes
+nothing**, says so, and records the run as `failed`. This check runs in every mode.
+
 This follows the team's ongoing-task policy: deterministic, no model call, one owner, receipts,
 and a rollback.
 

@@ -636,6 +636,91 @@ test('by hand in a working copy, a later run is never mistaken for a repeat', as
   }
 })
 
+// --- the snapshot's folder must be a real folder inside the clone ----------------------------------
+//
+// Anyone who can push to the team repo can commit .agent-team/status/usage (or .agent-team) as a
+// link to somewhere else. The data clone is reset to that every run, and a write that follows the
+// link lands anywhere this user can write. So every part of the path is checked - on disk and in
+// git's own index - and the folder written to must really be inside the clone.
+
+async function expectNothingOutside(outside) {
+  assert.deepEqual(await readdir(outside), [], 'something was written through the link')
+}
+
+test('dedicated clone: a usage folder pushed as a link is refused, and nothing is written through it', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const outside = join(repo.root, 'outside')
+    await mkdir(outside)
+    // Committed as a link in git itself (mode 120000), the way a push from any system would.
+    await git(['pull', '-q', '--ff-only'], repo.seed).catch(() => {})
+    const linkBlob = await new Promise((resolve, reject) => {
+      const child = execFile('git', ['hash-object', '-w', '--stdin'], { cwd: repo.seed, encoding: 'utf8' }, (error, stdout) => (error ? reject(error) : resolve(stdout.trim())))
+      child.stdin.end(outside)
+    })
+    await git(['update-index', '--add', '--cacheinfo', `120000,${linkBlob},.agent-team/status/usage`], repo.seed)
+    await git(['commit', '-q', '-m', 'Usage folder now points elsewhere'], repo.seed)
+    await git(['push', '-q'], repo.seed)
+
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: join(repo.root, 'code'), stateDir })
+    assert.equal(result.code, 1, result.stdout + result.stderr)
+    assert.match(result.stderr, /is a link/i)
+    assert.equal((await finalRecord(stateDir)).outcome, 'failed')
+    await expectNothingOutside(outside)
+    assert.deepEqual(await log(repo.remote, 'main'), ['Usage folder now points elsewhere', 'start'])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+for (const linked of ['.agent-team', '.agent-team/status/usage']) {
+  test(`working copy: ${linked} as a link on disk is refused, and nothing is written through it`, async () => {
+    const repo = await makeRemote()
+    const fake = await makeFakeHome()
+    try {
+      const outside = join(repo.root, 'outside')
+      await mkdir(outside)
+      const link = join(repo.work, ...linked.split('/'))
+      await mkdir(join(link, '..'), { recursive: true })
+      // A junction needs no special rights on Windows; elsewhere the type is ignored.
+      await symlink(outside, link, 'junction')
+      const stateDir = join(repo.root, 'state')
+      const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+      assert.equal(result.code, 1, result.stdout + result.stderr)
+      assert.match(result.stderr, /is a link/i)
+      assert.equal((await finalRecord(stateDir)).outcome, 'failed')
+      await expectNothingOutside(outside)
+      assert.deepEqual(await log(repo.work), ['start'])
+    } finally {
+      await fake.cleanup()
+      await repo.cleanup()
+    }
+  })
+}
+
+test('without --commit too, a linked usage folder is refused and nothing is written through it', async () => {
+  const fake = await makeFakeHome()
+  const target = await mkdtemp(join(tmpdir(), 'agent-status-repo-'))
+  const outside = await mkdtemp(join(tmpdir(), 'agent-status-outside-'))
+  try {
+    await mkdir(join(target, '.agent-team', 'status'), { recursive: true })
+    await symlink(outside, join(target, '.agent-team', 'status', 'usage'), 'junction')
+    const stderr = []
+    const code = await runCollector({ argv: ['--computer', 'Test PC'], deps: depsFor(fake), repoRoot: target, out: () => {}, err: (line) => stderr.push(line) })
+    assert.equal(code, 1)
+    assert.match(stderr.join('\n'), /is a link/i)
+    await expectNothingOutside(outside)
+  } finally {
+    await fake.cleanup()
+    await rm(target, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
+})
+
 test('the collector never writes into the template repo itself during these tests', () => {
   assert.equal(existsSync(join(repoRoot, '.agent-team', 'status', 'usage')), false)
 })
