@@ -309,6 +309,10 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
     const pushed = await succeeds([
       'push',
       '--quiet',
+      // Global push.followTags / push.recurseSubmodules would add the person's tags or a
+      // submodule's commits to this push; it must carry the snapshot and nothing else.
+      '--no-follow-tags',
+      '--recurse-submodules=no',
       `--force-with-lease=refs/heads/${target.branch}:${expected}`,
       'origin',
       `${commit}:refs/heads/${target.branch}`

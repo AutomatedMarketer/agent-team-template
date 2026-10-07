@@ -127,7 +127,7 @@ test('working copy: pushes with an explicit refspec to the default branch', asyn
     // push carries exactly the commit that was checked.
     const { commit } = await finalRecord(stateDir)
     const expected = (await git(['rev-parse', `${commit}^`], repo.work)).stdout.trim()
-    assert.deepEqual(pushes, [['push', '--quiet', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
+    assert.deepEqual(pushes, [['push', '--quiet', '--no-follow-tags', '--recurse-submodules=no', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
   } finally {
     await fake.cleanup()
     await repo.cleanup()
@@ -206,7 +206,7 @@ test('dedicated clone: pushes with an explicit refspec too', async () => {
     assert.equal(result.code, 0, result.stderr)
     const { commit } = await finalRecord(stateDir)
     const expected = (await git(['rev-parse', `${commit}^`], dedicated)).stdout.trim()
-    assert.deepEqual(pushes, [['push', '--quiet', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
+    assert.deepEqual(pushes, [['push', '--quiet', '--no-follow-tags', '--recurse-submodules=no', `--force-with-lease=refs/heads/main:${expected}`, 'origin', `${commit}:refs/heads/main`]])
   } finally {
     await fake.cleanup()
     await repo.cleanup()
@@ -334,6 +334,26 @@ for (const [label, redirect] of [
     }
   })
 }
+
+// Found in review round 4: with push.followTags on (a common global setting), git also sends every
+// annotated tag reachable from the pushed commit - the person's private tags rode along.
+test('working copy: the push carries no tags, even with push.followTags switched on', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    await git(['config', 'push.followTags', 'true'], repo.work)
+    await git(['tag', '-a', 'private-tag', '-m', 'my private note'], repo.work)
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal((await finalRecord(stateDir)).outcome, 'pushed')
+    const tags = (await git(['tag', '--list'], repo.remote)).stdout.trim()
+    assert.equal(tags, '', 'a private tag was pushed with the snapshot')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
 
 test('working copy: a copy behind origin is told to pull, and the push is never forced', async () => {
   const repo = await makeRemote()
