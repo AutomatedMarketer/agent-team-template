@@ -91,7 +91,7 @@ function isRealDay(value) {
 }
 
 let knownZones = null
-function isKnownTimezone(value) {
+export function isKnownTimezone(value) {
   if (!knownZones) {
     knownZones = new Set(['UTC'])
     try {
