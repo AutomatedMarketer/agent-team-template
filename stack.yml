@@ -6,7 +6,7 @@
 # makes the team better every week - is built into this repo already.
 #
 # `/install-stack` installs and verifies these. The weekly tune-up checks they are still
-# there and still current. You never edit this file by hand.
+# there and still current. You never edit the stack list by hand.
 
 stack:
   - name: last30days
@@ -41,3 +41,18 @@ stack:
     gives: Measures how much of the subscription week is still unspent and turns the surplus into reviews, fixes and hardening on existing work
     why: Unspent capacity on the strongest model expires at every weekly reset. This spends it on quality instead of losing it
     verify: "Ask how much quota is left this week and when it resets"
+
+# What you pay for the tools this team runs on. The dashboard adds it up per currency - never
+# converted - and flags a plan name that does not match what the usage collector saw.
+#
+# This list is the one part of this file that is yours. `/onboard` asks what you pay and writes
+# it, or ask for a change any time. `price` is a plain number, `currency` a three-letter code,
+# `per` is month or year (a yearly price is shown divided by 12, and says so). For example:
+#
+#   - name: Claude Max 20x
+#     service: claude
+#     price: 200
+#     currency: USD
+#     per: month
+
+subscriptions: []

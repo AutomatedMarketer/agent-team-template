@@ -1,0 +1,79 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { read } from './helpers/repo.mjs'
+import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
+
+/* The collector's paperwork: the subscriptions list the board totals, the promise that the
+   collector added no dependencies, and the page that tells a person (and the Mac schedule)
+   exactly what runs, what it writes and what it never writes. */
+
+test('stack.yml ships an empty subscriptions list for /onboard to fill', async () => {
+  const stack = parseSimpleYaml(await read('stack.yml'))
+  assert.deepEqual(stack.subscriptions, [])
+  assert.ok(Array.isArray(stack.stack) && stack.stack.length === 5, 'the starter stack still parses beside it')
+})
+
+test('stack.yml says what a subscription entry looks like and who writes it', async () => {
+  const text = await read('stack.yml')
+  assert.match(text, /^subscriptions: \[\]$/m)
+  for (const field of ['name', 'service', 'price', 'currency', 'per']) {
+    assert.match(text, new RegExp(`^#\\s+-?\\s*${field}:`, 'm'), `the example does not show ${field}`)
+  }
+  assert.match(text, /\/onboard/)
+})
+
+test('the collector added no dependencies', async () => {
+  const pkg = JSON.parse(await read('package.json'))
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    assert.ok(!pkg[field] || Object.keys(pkg[field]).length === 0, `package.json has ${field}`)
+  }
+})
+
+const statusReadme = () => read('.agent-team/status/README.md')
+
+test('the status README names the file, the format and the command', async () => {
+  const doc = await statusReadme()
+  for (const phrase of [
+    '.agent-team/status/usage/<computer>.json',
+    'agent-status/usage/v1',
+    'npm run collect:status',
+    '--dry-run',
+    '--commit',
+    '--clone',
+    'unofficial-live',
+    'claude-code-saved',
+    'codex-session-log'
+  ]) {
+    assert.ok(doc.includes(phrase), `the status README does not mention ${phrase}`)
+  }
+})
+
+test('the status README says what is never written', async () => {
+  const doc = await statusReadme()
+  assert.match(doc, /never written/i)
+  for (const word of ['token', 'email', 'username', 'home folder', 'project', 'computer name']) {
+    assert.match(doc, new RegExp(word, 'i'), `the never-written list leaves out ${word}`)
+  }
+})
+
+test('the status README carries a LaunchAgent template ready for the Mac, every three hours', async () => {
+  const doc = await statusReadme()
+  const plist = /```xml\n([\s\S]*?)```/.exec(doc)?.[1]
+  assert.ok(plist, 'no plist template in the README')
+  assert.match(plist, /<key>Label<\/key>\s*<string>local\.donna\.agent-status-collector<\/string>/)
+  assert.match(plist, /<key>LimitLoadToSessionType<\/key>\s*<string>Aqua<\/string>/, 'a GUI session is what can read the login Keychain')
+  assert.match(plist, /<string>--commit<\/string>/)
+  assert.match(plist, /<string>--clone<\/string>/)
+  assert.match(plist, /<string>Mac Mini<\/string>/)
+  const hours = [...plist.matchAll(/<key>Hour<\/key>\s*<integer>(\d+)<\/integer>/g)].map((match) => Number(match[1]))
+  assert.deepEqual(hours, [0, 3, 6, 9, 12, 15, 18, 21])
+  assert.match(doc, /launchctl bootstrap gui\//)
+  assert.match(doc, /launchctl bootout gui\/.*local\.donna\.agent-status-collector/)
+})
+
+test('the status README says the unofficial reading is labelled, and what to do when it stops', async () => {
+  const doc = await statusReadme()
+  assert.match(doc, /undocumented/i)
+  assert.match(doc, /unavailable/)
+  assert.match(doc, /never refresh/i)
+})
