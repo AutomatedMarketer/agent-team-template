@@ -5,6 +5,7 @@
 // the leak test exercises exactly the code that runs on the real machine.
 
 import { join } from 'node:path'
+import { mkdir, rm } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { createHash } from 'node:crypto'
 import {
@@ -217,6 +218,17 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   return 0
 }
 
+// The data clone holds whatever the team repo holds. Git there must not run hooks: a relative
+// core.hooksPath in someone's global settings points inside the repo, and then a pushed script is
+// code run on this computer. Every git command in clone mode looks for hooks in an empty folder
+// the collector owns instead.
+async function withoutHooks(git, stateDir) {
+  const hooks = join(stateDir, 'no-hooks')
+  await rm(hooks, { recursive: true, force: true })
+  await mkdir(hooks, { recursive: true })
+  return (args, cwd) => git(['-c', `core.hooksPath=${hooks}`, ...args], cwd)
+}
+
 // The unattended path: lock, claim, catch the clone up, collect, gate, write, receipt, commit,
 // push, final record, unlock. Every exit after the claim leaves a final record saying why.
 async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
@@ -225,6 +237,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
   const mode = values.clone !== undefined ? 'clone' : 'working-copy'
   const target = mode === 'clone' ? values.clone : repoRoot
   const relativePath = usagePath(computer)
+  const git = mode === 'clone' ? await withoutHooks(deps.git, stateDir) : deps.git
 
   const lock = await takeLock(stateDir, deps.now)
   if (!lock) {
@@ -257,7 +270,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       if (mode === 'clone') {
         let reason
         try {
-          reason = await prepareClone({ git: deps.git, cloneDir: target, relativePath })
+          reason = await prepareClone({ git, cloneDir: target, relativePath })
         } catch (error) {
           if (error instanceof RemoteUnreachable) {
             complain('Could not reach the team repo to bring the dedicated clone up to date, so nothing was collected or written.')
@@ -278,7 +291,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
 
       // Checked before anything is read, and again by every write.
       try {
-        await assertNoLinks(target, relativePath, { git: deps.git })
+        await assertNoLinks(target, relativePath, { git })
       } catch (error) {
         if (!(error instanceof LinkedPath)) throw error
         LINK_REFUSAL.forEach(complain)
@@ -294,7 +307,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         return 1
       }
       const text = `${JSON.stringify(doc, null, 2)}\n`
-      const write = () => writeSnapshot(target, relativePath, text, { git: deps.git })
+      const write = () => writeSnapshot(target, relativePath, text, { git })
       try {
         await write()
       } catch (error) {
@@ -325,7 +338,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       let result
       try {
         result = await commitAndPush({
-          git: deps.git,
+          git,
           dir: target,
           relativePath,
           message: `${SNAPSHOT_SUBJECT}${computer}`,

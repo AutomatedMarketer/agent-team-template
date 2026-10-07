@@ -55,6 +55,13 @@ async function advanceRemote(repo, name) {
 
 const realGit = async (args, cwd) => git(args, cwd)
 
+// The git command itself, without any "-c name=value" settings in front of it.
+const gitCommand = (args) => {
+  let rest = args
+  while (rest[0] === '-c') rest = rest.slice(2)
+  return rest
+}
+
 async function collect(fake, args, { repo, extra = {}, stateDir }) {
   const stdout = []
   const stderr = []
@@ -97,7 +104,7 @@ test('working copy: commits only its own file, leaves other staged work staged, 
 const pushRecorder = () => {
   const pushes = []
   const recordingGit = async (args, cwd) => {
-    if (args[0] === 'push') pushes.push(args)
+    if (gitCommand(args)[0] === 'push') pushes.push(gitCommand(args))
     return realGit(args, cwd)
   }
   return { pushes, recordingGit }
@@ -316,7 +323,7 @@ test('dedicated clone: a push refused mid-run is fetched, reset, rewritten and r
     const dedicated = await repo.clone('dedicated')
     let pushes = 0
     const racingGit = async (args, cwd) => {
-      if (args[0] === 'push' && pushes++ === 0) await advanceRemote(repo, 'raced')
+      if (gitCommand(args)[0] === 'push' && pushes++ === 0) await advanceRemote(repo, 'raced')
       return realGit(args, cwd)
     }
     const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: repo.work, stateDir: join(repo.root, 'state'), extra: { git: racingGit } })
@@ -337,7 +344,7 @@ test('dedicated clone: a second refusal stops rather than looping', async () => 
     const dedicated = await repo.clone('dedicated')
     let pushes = 0
     const alwaysRacing = async (args, cwd) => {
-      if (args[0] === 'push') {
+      if (gitCommand(args)[0] === 'push') {
         pushes++
         await advanceRemote(repo, `raced-${pushes}`)
       }
@@ -736,6 +743,80 @@ test('a write that fails after the claim still leaves a final record saying fail
     assert.match(result.stderr, /could not be written/i)
     assert.equal((await finalRecord(stateDir)).outcome, 'failed')
     assert.ok(!existsSync(join(stateDir, 'lock')), 'the lock was not released')
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+// --- no git hooks in the data clone ------------------------------------------------------------------
+//
+// The data clone holds whatever the team repo holds. If git there runs hooks from a folder inside
+// the repo - a relative core.hooksPath in the person's global settings does exactly that - then a
+// pushed hook script is code run on the Mac. In clone mode every git command is told to look for
+// hooks in an empty folder the collector owns.
+
+test('dedicated clone: every git command runs with hooks pointed at an empty folder', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const calls = []
+    const recordingGit = async (args, cwd) => {
+      calls.push(args)
+      return realGit(args, cwd)
+    }
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: join(repo.root, 'code'), stateDir, extra: { git: recordingGit } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.ok(calls.length > 5)
+    const hooks = join(stateDir, 'no-hooks')
+    for (const args of calls) {
+      assert.deepEqual(args.slice(0, 2), ['-c', `core.hooksPath=${hooks}`], `git ${gitCommand(args)[0]} ran without the empty hooks folder`)
+    }
+    assert.deepEqual(await readdir(hooks), [])
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('dedicated clone: a hook pushed into the team repo does not run', async (t) => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const marker = join(repo.root, 'hook-ran.txt')
+    const hook = `#!/bin/sh\necho ran > "${marker.replaceAll('\\', '/')}"\n`
+    await git(['pull', '-q', '--ff-only'], repo.seed).catch(() => {})
+    await mkdir(join(repo.seed, '.githooks'), { recursive: true })
+    await writeFile(join(repo.seed, '.githooks', 'pre-commit'), hook)
+    await git(['add', '.githooks/pre-commit'], repo.seed)
+    await git(['update-index', '--chmod=+x', '.githooks/pre-commit'], repo.seed)
+    await git(['commit', '-q', '-m', 'Add a hook'], repo.seed)
+    await git(['push', '-q'], repo.seed)
+
+    // A relative hooks folder, as a person's global git settings might set it.
+    const withHooks = async (name) => {
+      const dir = await repo.clone(name)
+      await git(['config', 'core.hooksPath', '.githooks'], dir)
+      return dir
+    }
+    // First prove the hook really runs here, so the test below means something.
+    const control = await withHooks('control')
+    await writeFile(join(control, 'x.md'), 'x\n')
+    await git(['add', 'x.md'], control)
+    await git(['commit', '-q', '-m', 'control'], control)
+    if (!existsSync(marker)) {
+      t.skip('git hooks do not run on this computer, so there is nothing to switch off here')
+      return
+    }
+    await rm(marker)
+
+    const dedicated = await withHooks('dedicated')
+    const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: join(repo.root, 'code'), stateDir: join(repo.root, 'state') })
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal((await log(repo.remote, 'main'))[0], 'Usage snapshot from Test PC')
+    assert.equal(existsSync(marker), false, 'a hook from the team repo ran during the collector\'s commit')
   } finally {
     await fake.cleanup()
     await repo.cleanup()

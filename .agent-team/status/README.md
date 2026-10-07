@@ -173,6 +173,11 @@ anything, and again before every write, the collector checks each part of that p
 and in git - and that the folder really is inside the clone. If any part is a link it **writes
 nothing**, says so, and records the run as `failed`. This check runs in every mode.
 
+Git in the data clone never runs hooks either: every git command there is told to look for hooks
+in an empty folder the collector owns (`<state-dir>/no-hooks`), so a hook script pushed into the
+team repo cannot run on the Mac even if your global git settings point hooks at a folder inside
+each repo.
+
 This follows the team's ongoing-task policy: deterministic, no model call, one owner, receipts,
 and a rollback.
 
