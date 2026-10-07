@@ -19,6 +19,7 @@
     "check:drift": "node scripts/check-drift.mjs",
     "check:sops": "node scripts/check-sops.mjs",
     "check:course": "node scripts/check-course-numbers.mjs",
-    "check:verdicts": "node scripts/check-verdicts.mjs"
+    "check:verdicts": "node scripts/check-verdicts.mjs",
+    "collect:status": "node scripts/collect-status.mjs"
   }
 }
