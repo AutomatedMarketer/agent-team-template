@@ -52,6 +52,12 @@ test('the status README says what the Hermes part reads, the alive rule, and the
   assert.match(doc, new RegExp(`${SESSION_DAYS} days`))
   assert.match(doc, new RegExp(`${UPDATE_CHECK_MAX_AGE_DAYS} days`))
   assert.match(doc, /needs a newer Node/)
+  // The session count is taken from a private copy, and the docs say exactly that.
+  assert.match(doc, /never opens Hermes's own file/i)
+  assert.match(doc, /private copy/i)
+  assert.match(doc, /never `state\.db-shm`/)
+  assert.match(doc, /200 MB/)
+  assert.doesNotMatch(doc, /opened \*\*read-only\*\*/, "the README still says Hermes's own state.db is opened read-only")
   assert.match(doc, /never runs? `?hermes`?/i)
   for (const state of Object.keys(GATEWAY_STATES)) assert.ok(doc.includes(`\`${state}\``), `the README does not list the gateway state ${state}`)
   for (const file of NEVER_OPENED) assert.ok(doc.includes(file), `the README does not say ${file} is never opened`)
@@ -98,6 +104,9 @@ test('the how-it-works guide lists every Hermes file read, what is kept, and the
   }
   for (const file of NEVER_OPENED) assert.ok(card.includes(file), `the explainer does not say ${file} is never opened`)
   assert.match(card, /PRAGMA table_info/)
+  assert.match(card, /never opened: `state\.db`, and `state\.db-wal`/)
+  assert.match(card, /never `state\.db-shm`/)
+  assert.match(card, /deleted in every case/)
   assert.match(card, /read-only/i)
   for (const test of ['tests/status-hermes.test.mjs', 'tests/status-hermes-run.test.mjs', 'tests/status-hermes-contract.test.mjs']) {
     assert.ok(card.includes(test), `the explainer does not name ${test}`)

@@ -34,7 +34,8 @@ export function machineDeps(overrides = {}) {
     // absolute path only, a time limit, an output cap, and a timeout stops everything it started.
     exec: createRunner({ spawn, platform: process.platform, env: process.env }),
     git: runGit,
-    // Hermes's state.db, opened read-only for one fixed question (hermes.mjs, readSessions).
+    // A private copy of Hermes's state.db, opened read-only for one fixed question (hermes.mjs,
+    // readSessions). Hermes's own file is never opened.
     openSqlite: openReadOnly,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     // Only ever used to REFUSE output that contains them. Never written anywhere.

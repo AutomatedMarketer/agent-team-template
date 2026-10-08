@@ -160,15 +160,21 @@ runs one profile; its root is used. The root is the profile Hermes calls `defaul
 | Profiles | `profiles/<name>/`, listed only when it holds one of Hermes's own profile files and has no tombstone in `profiles/.deleted/`; links are not followed | the name, if it passes Hermes's own id rule and the connection-name rule; else counted in `hidden`. Default first, then A to Z, 12 at most, the rest counted in `more` | - |
 | Model | each profile's `config.yaml` | `model.default` (its last part after the last `/`) and `model.provider`, each only if it passes the connection-name rule; a provider only with a model | `base_url` and every other key. The file is read as lines: only the first-level `default` and `provider` lines of the top-level `model` block are matched |
 | Skills | each profile's `skills/` folder | how many files are named `SKILL.md`, at any depth | the files themselves - none is opened, no link is followed |
-| Sessions | each profile's `state.db`, through `node:sqlite`, **read-only** | for top-level sessions: how many started in the last 7 days (`conversations`: every source but `cron`, `delegate`, `subagent`; `scheduled`: `cron`), and the newest activity time | titles, working folders, users, chat ids, models, costs, messages - no such column is ever asked for |
+| Sessions | a **private copy** of each profile's `state.db` (and `state.db-wal`), through `node:sqlite` | for top-level sessions: how many started in the last 7 days (`conversations`: every source but `cron`, `delegate`, `subagent`; `scheduled`: `cron`), and the newest activity time | titles, working folders, users, chat ids, models, costs, messages - no such column is ever asked for |
 | Scheduler | each profile's `cron/ticker_heartbeat` | the time in it (one number, seconds since 1970) | anything that is not that one number |
 
-**Checked to exist, never opened:** `config.yaml`, `.env`, `SOUL.md`, `profile.yaml`, `auth.json`
-and `state.db` - only to tell a real profile from a leftover folder - and the tombstone.
+**Checked to exist:** `config.yaml`, `.env`, `SOUL.md`, `profile.yaml`, `auth.json` and
+`state.db` - only to tell a real profile from a leftover folder - and the tombstone. Of these only
+`config.yaml` (its model lines) and `state.db` (copied, below) are ever read.
 **Never touched at all:** `.env`, `auth.json`, `SOUL.md`, `USER.md`, `memories`, `logs`, the
 `sessions` folder, `pairing`, `bot_relay`, every database but `state.db`.
 
-**The one question to `state.db`.** The collector opens it read-only (SQLite itself then refuses
+**The one question, asked of a copy.** Hermes keeps `state.db` in WAL mode, and SQLite makes
+`state.db-wal` and `state.db-shm` beside a WAL database for any connection, read-only or not, and
+can leave them behind. So Hermes's own file is never opened: `state.db`, and `state.db-wal` when
+there is one, are copied into a fresh folder under the collector's state folder (never
+`state.db-shm`), the copy is asked, and the folder is deleted in every case. Nothing above 200 MB is
+copied ("database too big"). The collector opens the copy read-only (SQLite itself then refuses
 any write, and a missing file is never created), asks `PRAGMA table_info(sessions)` for the column
 names, and then one `SELECT` made only of fixed words. Which fixed form it uses depends on which
 of `parent_session_id`, `last_activity_at` and `ended_at` exist; a name read from the file is
@@ -193,7 +199,9 @@ The tests that hold this:
 - `tests/status-hermes-contract.test.mjs` - the contract, the alive rule, the name rules, the gate.
 - `tests/status-hermes.test.mjs` - every file above: the home rule, the version and update check,
   the gateway, which folders are profiles, the model lines, the skills count, the scheduler time,
-  and the sessions question against real SQLite files (it never writes, asks two statements only,
+  and the sessions question against real SQLite files - WAL-mode ones too, with Hermes holding
+  one open and its newest rows only in `state.db-wal` - leaving Hermes's folder byte for byte as it
+  was, and the private copy deleted (it asks two statements only,
   and never names a private column).
 - `tests/status-hermes-run.test.mjs` - the heartbeat only when alive, one commit with the status
   files, the link check on `runs/heartbeat`, the log, a hostile Hermes home (keys in `.env` and

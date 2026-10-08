@@ -157,7 +157,9 @@ parts of the card still work.
 - your chats, their titles, and the folders they ran in
 - the logs
 
-It only counts your sessions. It never reads what was said in them.
+It only counts your sessions. To do that it copies Hermes's session list to a private folder,
+counts, and deletes the copy, so Hermes's own files are never changed. It never reads what was said
+in them.
 
 **The Hermes light on the Machines list.** Each time Hermes is running, the script also writes a
 **heartbeat**. To see it as a light, ask Claude: "add Hermes to my runtimes with a 200-minute

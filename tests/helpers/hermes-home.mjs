@@ -2,8 +2,9 @@
 // invented content. state.db is a real SQLite file made with node:sqlite, so the session counts are
 // read the way the collector reads them on a real machine. Nothing here runs Hermes.
 
-import { mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { join, dirname, relative } from 'node:path'
+import { createHash } from 'node:crypto'
 
 let sqlite
 try {
@@ -35,29 +36,81 @@ export const SESSION_COLUMNS = [
 ]
 
 // rows: [{ id, source, started_at, ... }]. columns: the column definitions to create, so a test can
-// leave out the optional ones. Returns the path.
-export async function makeStateDb(path, rows, { columns = SESSION_COLUMNS, table = 'sessions' } = {}) {
+// leave out the optional ones. wal: put the database in WAL mode, as Hermes does. Returns the path.
+export async function makeStateDb(path, rows, { columns = SESSION_COLUMNS, table = 'sessions', wal = false } = {}) {
   if (!sqlite) throw new Error('node:sqlite is not available')
   await mkdir(dirname(path), { recursive: true })
   const db = new sqlite.DatabaseSync(path)
   try {
+    if (wal) db.exec('PRAGMA journal_mode=WAL')
     db.exec(`CREATE TABLE ${table} (${columns.join(', ')})`)
-    const names = columns.map((column) => column.split(' ')[0])
-    for (const row of rows) {
-      const keys = names.filter((name) => Object.hasOwn(row, name))
-      db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((key) => row[key]))
-    }
+    insertRows(db, table, columns, rows)
   } finally {
     db.close()
   }
   return path
 }
 
+function insertRows(db, table, columns, rows) {
+  const names = columns.map((column) => column.split(' ')[0])
+  for (const row of rows) {
+    const keys = names.filter((name) => Object.hasOwn(row, name))
+    db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((key) => row[key]))
+  }
+}
+
+// A WAL-mode state.db that a pretend Hermes is still holding open, with `pending` rows written
+// after the last checkpoint - so they sit only in state.db-wal, as they do while Hermes runs.
+// Returns { path, close }; the test closes it when it is done.
+export async function openWalStateDb(path, saved, pending) {
+  if (!sqlite) throw new Error('node:sqlite is not available')
+  await mkdir(dirname(path), { recursive: true })
+  const db = new sqlite.DatabaseSync(path)
+  db.exec('PRAGMA journal_mode=WAL')
+  db.exec('PRAGMA wal_autocheckpoint=0')
+  db.exec(`CREATE TABLE sessions (${SESSION_COLUMNS.join(', ')})`)
+  insertRows(db, 'sessions', SESSION_COLUMNS, saved)
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  insertRows(db, 'sessions', SESSION_COLUMNS, pending)
+  return { path, close: () => db.close() }
+}
+
+// Every file under `dir`: its size, last-change time and a hash of its bytes, by relative path. Two
+// equal fingerprints mean nothing was added, removed or changed.
+export async function fingerprint(dir) {
+  const found = {}
+  const walk = async (current) => {
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const path = join(current, entry.name)
+      if (entry.isDirectory()) {
+        await walk(path)
+        continue
+      }
+      const info = await stat(path)
+      found[relative(dir, path).replaceAll('\\', '/')] = {
+        size: info.size,
+        mtimeMs: info.mtimeMs,
+        sha256: createHash('sha256').update(await readFile(path)).digest('hex')
+      }
+    }
+  }
+  await walk(dir)
+  return found
+}
+
 // The test-side opener: the same read-only opening the collector does, with a record of every
 // statement it is asked to prepare.
 export function recordingOpener() {
   const statements = []
+  const opened = []
   const open = async (path) => {
+    opened.push(path)
     const db = new sqlite.DatabaseSync(path, { readOnly: true })
     return {
       prepare: (sql) => {
@@ -68,6 +121,7 @@ export function recordingOpener() {
     }
   }
   open.statements = statements
+  open.opened = opened
   return open
 }
 

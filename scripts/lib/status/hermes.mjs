@@ -14,7 +14,8 @@
 //     config.yaml                     model.default and model.provider (never base_url, never any
 //                                     other key; only the lines of the top-level model block)
 //     skills/**/SKILL.md              counted, never opened
-//     state.db                        one fixed read-only question: how many top-level sessions in
+//     state.db (and state.db-wal)     copied into a private folder; the copy is asked one fixed
+//                                     question - how many top-level sessions in
 //                                     the last 7 days, by kind, and when the newest was active
 //     cron/ticker_heartbeat           the time in it
 // Checked to exist, never opened: the files that make a folder a profile (config.yaml, .env,
@@ -22,7 +23,8 @@
 // Never touched: memories, SOUL.md and USER.md contents, .env, auth.json, logs, sessions and
 // chat content, and anything else in the home.
 
-import { readFile, readdir, lstat, stat } from 'node:fs/promises'
+import { readFile, readdir, lstat, stat, mkdir, mkdtemp, copyFile, rm } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { join, isAbsolute, dirname, basename } from 'node:path'
 import {
   HERMES_SCHEMA,
@@ -44,6 +46,8 @@ const DAY_MS = 86400_000
 const EARLIEST_BELIEVABLE_MS = Date.parse('2000-01-01T00:00:00Z')
 // Folders and files visited while counting skills, at most - a skills folder is a few hundred.
 export const MAX_SKILL_ENTRIES = 50_000
+// The biggest state.db (with its -wal) the collector will copy to count sessions in.
+export const MAX_SESSION_DB_BYTES = 200 * 1024 * 1024
 
 // --- where Hermes lives ---------------------------------------------------------------------------------
 
@@ -345,7 +349,7 @@ async function schedulerBeat(dir, now) {
   return beatAt ? { status: 'found', beatAt } : { ...UNREADABLE }
 }
 
-// --- sessions: one fixed, read-only question ------------------------------------------------------------------
+// --- sessions: one fixed question, asked of a private copy ------------------------------------------------------------------
 
 const LAST_ACTIVE_COLUMNS = ['last_activity_at', 'ended_at', 'started_at']
 
@@ -374,9 +378,19 @@ const wholeCount = (value) => {
   return Number.isSafeInteger(number) && number >= 0 ? number : null
 }
 
-async function readSessions(dir, deps) {
-  const path = join(dir, 'state.db')
-  if (!(await exists(path))) return { ...NOT_FOUND }
+// The size of a file, 'missing' when it is not there, or null when it is not a plain file or could
+// not be looked at.
+async function fileSize(path) {
+  try {
+    const info = await stat(path)
+    return info.isFile() ? info.size : null
+  } catch (error) {
+    return error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? 'missing' : null
+  }
+}
+
+// Asks one database file the one question. `path` is always the private copy.
+async function askSessions(path, deps) {
   const open = deps.openSqlite ?? openReadOnly
   let db
   try {
@@ -404,8 +418,46 @@ async function readSessions(dir, deps) {
     try {
       db.close()
     } catch {
-      // Closing a read-only handle has nothing to lose.
+      // The copy is deleted next either way.
     }
+  }
+}
+
+// Hermes keeps state.db in WAL mode, and SQLite makes state.db-wal and state.db-shm beside a WAL
+// database for ANY connection to it - a read-only one included - and can leave them there. So
+// Hermes's own file is never opened. state.db, and state.db-wal when there is one (it holds the
+// newest sessions until Hermes checkpoints), are copied into a fresh private folder under the
+// collector's state folder; state.db-shm, which is only shared memory between running connections,
+// is never copied. The copy is asked, then the whole folder is deleted, whatever happened.
+// Above MAX_SESSION_DB_BYTES nothing is copied at all.
+async function readSessions(dir, deps) {
+  const path = join(dir, 'state.db')
+  const size = await fileSize(path)
+  if (size === 'missing') return { ...NOT_FOUND }
+  if (size === null || !deps.stateDir) return { ...UNREADABLE }
+  const walSize = await fileSize(`${path}-wal`)
+  if (walSize === null) return { ...UNREADABLE }
+  const limit = deps.sessionDbMaxBytes ?? MAX_SESSION_DB_BYTES
+  if (size + (walSize === 'missing' ? 0 : walSize) > limit) return { status: 'unavailable', why: 'database too big' }
+  let folder = null
+  try {
+    await mkdir(deps.stateDir, { recursive: true })
+    folder = await mkdtemp(join(deps.stateDir, 'hermes-db-'))
+    const copy = join(folder, 'state.db')
+    await copyFile(path, copy, constants.COPYFILE_EXCL)
+    if (walSize !== 'missing') {
+      try {
+        await copyFile(`${path}-wal`, `${copy}-wal`, constants.COPYFILE_EXCL)
+      } catch (error) {
+        // Hermes checkpointed and removed it between the look and the copy: state.db has it all.
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+    return await askSessions(copy, deps)
+  } catch {
+    return { ...UNREADABLE }
+  } finally {
+    if (folder) await rm(folder, { recursive: true, force: true }).catch(() => {})
   }
 }
 

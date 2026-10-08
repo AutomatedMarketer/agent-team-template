@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -12,7 +12,7 @@ import {
 import { SqliteMissing } from '../scripts/lib/status/sqlite.mjs'
 import { checkHermes } from '../scripts/lib/status/safe.mjs'
 import { makeFakeHome, execStub, FAKE_USERNAME } from './helpers/fake-home.mjs'
-import { HAVE_SQLITE, NO_SQLITE_SKIP, SESSION_COLUMNS, makeStateDb, recordingOpener, writeHermes } from './helpers/hermes-home.mjs'
+import { HAVE_SQLITE, NO_SQLITE_SKIP, SESSION_COLUMNS, makeStateDb, openWalStateDb, fingerprint, recordingOpener, writeHermes } from './helpers/hermes-home.mjs'
 
 /* The Hermes part: what is on the Hermes card, read from Hermes's own files and never by running
    Hermes. `hermes --version` is not read-only - run once, it tried to finish an update and rewrote
@@ -21,7 +21,8 @@ import { HAVE_SQLITE, NO_SQLITE_SKIP, SESSION_COLUMNS, makeStateDb, recordingOpe
 
 const NOW = Date.now()
 const DAY = 86400_000
-const deps = (fake, extra = {}) => ({ home: fake.home, env: {}, platform: 'linux', now: NOW, identity: fake.identity, exec: execStub(() => new Error('no program may run')), ...extra })
+const stateDirOf = (fake) => join(fake.home, '.local', 'state', 'agent-status-collector')
+const deps = (fake, extra = {}) => ({ home: fake.home, env: {}, platform: 'linux', now: NOW, identity: fake.identity, stateDir: stateDirOf(fake), exec: execStub(() => new Error('no program may run')), ...extra })
 const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
 
 // --- where Hermes lives -------------------------------------------------------------------------------
@@ -405,6 +406,80 @@ test('sessions: a layout it does not know, no state.db, or a file that is not a 
       charlie: { status: 'unavailable', why: 'not a layout this collector knows' }
     })
     assert.deepEqual(checkHermes(doc, fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// SQLite in WAL mode - how Hermes keeps state.db - makes state.db-wal and state.db-shm beside the
+// database for any connection, read-only ones included, and can leave them behind. So the collector
+// never opens Hermes's own file: it copies state.db (and state.db-wal, never -shm) into a private
+// folder, asks the copy, and deletes the copy. Hermes's folder must be exactly as it was.
+
+const privateCopies = async (fake) => (await readdir(stateDirOf(fake)).catch(() => [])).filter((name) => name.startsWith('hermes-db-'))
+
+test('sessions: a WAL-mode state.db, Hermes stopped - nothing in Hermes\'s folder appears, changes or goes', { skip: !HAVE_SQLITE && NO_SQLITE_SKIP }, async () => {
+  const fake = await makeFakeHome()
+  try {
+    const root = await writeHermes(fake, { now: NOW })
+    await makeStateDb(join(root, 'state.db'), sessionRows(), { wal: true })
+    const before = await fingerprint(root)
+    assert.deepEqual(Object.keys(before).filter((name) => name.startsWith('state.db')), ['state.db'], 'the test database left side files of its own')
+    const doc = await collectHermes(deps(fake), 'Test PC')
+    assert.deepEqual(doc.profiles.items[0].sessions, { status: 'found', days: 7, conversations: 3, scheduled: 2, lastActiveAt: iso(Math.floor(hoursAgo(1)) * 1000) })
+    assert.deepEqual(await fingerprint(root), before, 'the Hermes folder changed: a file appeared, went, or was written')
+    assert.deepEqual(await privateCopies(fake), [], 'the private copy was left behind')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('sessions: Hermes running with rows still only in state.db-wal - counted from the copy, nothing touched', { skip: !HAVE_SQLITE && NO_SQLITE_SKIP }, async () => {
+  const fake = await makeFakeHome()
+  let hermes = null
+  try {
+    const root = await writeHermes(fake, { now: NOW })
+    const rows = sessionRows()
+    hermes = await openWalStateDb(join(root, 'state.db'), rows.slice(0, 4), rows.slice(4))
+    const before = await fingerprint(root)
+    assert.ok(before['state.db-wal']?.size > 0, 'the newest rows are not waiting in state.db-wal')
+    const open = recordingOpener()
+    const doc = await collectHermes(deps(fake, { openSqlite: open }), 'Test PC')
+    // Row e, a scheduled run, is only in the -wal: counting 2 scheduled proves the -wal was copied too.
+    assert.deepEqual(doc.profiles.items[0].sessions, { status: 'found', days: 7, conversations: 3, scheduled: 2, lastActiveAt: iso(Math.floor(hoursAgo(1)) * 1000) })
+    assert.deepEqual(await fingerprint(root), before, 'the Hermes folder changed while Hermes held it open')
+    assert.deepEqual(await privateCopies(fake), [])
+    // It was handed the private copy, never Hermes's own file.
+    assert.equal(open.opened.length, 1)
+    assert.ok(open.opened[0].startsWith(stateDirOf(fake)), 'the opener was handed a file outside the private folder')
+  } finally {
+    hermes?.close()
+    await fake.cleanup()
+  }
+})
+
+test('sessions: a state.db over the size limit is not copied at all, and says so', { skip: !HAVE_SQLITE && NO_SQLITE_SKIP }, async () => {
+  const fake = await makeFakeHome()
+  try {
+    const root = await writeHermes(fake, { now: NOW })
+    await makeStateDb(join(root, 'state.db'), sessionRows())
+    const doc = await collectHermes(deps(fake, { sessionDbMaxBytes: 1024 }), 'Test PC')
+    assert.deepEqual(doc.profiles.items[0].sessions, { status: 'unavailable', why: 'database too big' })
+    assert.deepEqual(await privateCopies(fake), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('sessions: with no private folder to copy into, nothing is opened', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await fake.write('.hermes/state.db', 'pretend database')
+    let opened = 0
+    const doc = await collectHermes(deps(fake, { stateDir: undefined, openSqlite: async () => { opened += 1 } }), 'Test PC')
+    assert.deepEqual(doc.profiles.items[0].sessions, { status: 'unavailable', why: 'could not be read' })
+    assert.equal(opened, 0)
   } finally {
     await fake.cleanup()
   }

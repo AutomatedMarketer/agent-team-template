@@ -359,8 +359,16 @@ Hermes's home is found the way Hermes finds it: `HERMES_HOME` (when it points at
 | Profiles | the home itself (`default`, always first), then each folder in `profiles/` that Hermes would list, A to Z, at most 12 profiles | the name, when it passes the name rule; otherwise counted in `hidden`. Past 12, counted in `more` |
 | Model | each profile's `config.yaml`: the top-level `model` block's `model.default` and `model.provider` only | the model's last part after the last `/` (`anthropic/claude-opus-5-5` is `claude-opus-5-5`), and the provider - each only if it passes the name rule - never `base_url` or any other key |
 | Skills | each profile's `skills/` folder, at any depth | how many files are named `SKILL.md`. None is opened |
-| Sessions | each profile's `state.db`, opened **read-only** through `node:sqlite` | how many top-level sessions started in the last 7 days - `conversations` (every source but `cron`, `delegate` and `subagent`) and `scheduled` (`cron`) - and when the newest was last active |
+| Sessions | a **private copy** of each profile's `state.db` (and `state.db-wal`), asked through `node:sqlite` | how many top-level sessions started in the last 7 days - `conversations` (every source but `cron`, `delegate` and `subagent`) and `scheduled` (`cron`) - and when the newest was last active |
 | Scheduler | each profile's `cron/ticker_heartbeat` | the time in it |
+
+Hermes keeps `state.db` in WAL mode, and SQLite makes `state.db-wal` and `state.db-shm` beside a
+WAL database for any connection - even a read-only one - and can leave them there. So the collector
+**never opens Hermes's own file**. It copies `state.db`, and `state.db-wal` when there is one (it
+holds the newest sessions), into a new folder under its state folder (`<state-dir>/hermes-db-...`) -
+never `state.db-shm` - asks the copy, and deletes that folder whatever happens. Hermes's folder is
+left exactly as it was. Above 200 MB nothing is copied, and sessions say `unavailable` ("database
+too big").
 
 Sessions are one fixed question. The collector first asks which columns the `sessions` table has
 (`PRAGMA table_info`), then asks one `SELECT` built only from fixed words - never from anything read
@@ -369,9 +377,9 @@ from the file. A table missing an optional column (`parent_session_id`, `last_ac
 collector knows"). With no `node:sqlite` (Node 20, or Node 22 before 22.13) it is `unavailable`
 with "needs a newer Node" - **never 0**.
 
-**Checked to exist, never opened:** the files that make a folder a profile - `config.yaml`, `.env`,
-`SOUL.md`, `profile.yaml`, `auth.json`, `state.db` - and a profile's tombstone in
-`profiles/.deleted/`. **Never touched:** `.env`, `auth.json`, `SOUL.md` and `USER.md` contents,
+**Checked to exist:** the files that make a folder a profile - `config.yaml`, `.env`, `SOUL.md`,
+`profile.yaml`, `auth.json`, `state.db` - and a profile's tombstone in `profiles/.deleted/`. Of
+these only `config.yaml` (its model lines) and `state.db` (copied, above) are ever read. **Never touched:** `.env`, `auth.json`, `SOUL.md` and `USER.md` contents,
 `memories`, `logs`, sessions' titles, folders and chat content, the gateway's `pid`, `argv` and
 chat apps, and everything else in the home.
 
@@ -638,5 +646,6 @@ These are checked on the first live run on the Mac, not assumed:
   PC's copy only
 - the Mac's Node version: session counts need `node:sqlite` (Node 22.13 or newer); older says
   "needs a newer Node"
-- that a read-only open of a busy `state.db` (Hermes writing at the same moment) answers within the
-  2-second wait, rather than saying `could not be read`
+- that a copy of `state.db` and `state.db-wal` taken while Hermes is writing reads cleanly: a
+  checkpoint between the two copies can make the copy miss the newest sessions, or say
+  `could not be read` that run
