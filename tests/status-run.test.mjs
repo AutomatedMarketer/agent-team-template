@@ -265,7 +265,7 @@ test('the command line runs end to end, with a dry run that writes nothing into 
 })
 
 test('SPAWN SAFETY: a spawned collector on a "Mac" reaches the shut Keychain door, never /usr/bin/security', async () => {
-  const fake = await hostileHome()
+  const fake = await hostileHome({ now: Date.now() })
   try {
     const result = await spawnCollector(fake, ['--dry-run', '--computer', 'Script Test'], { platform: 'darwin' })
     assert.equal(result.code, 0, result.stderr)

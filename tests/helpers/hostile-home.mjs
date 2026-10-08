@@ -40,13 +40,15 @@ export function echoingAnswer(token) {
 }
 
 // A home that holds every kind of thing that must never leave it.
-export async function hostileHome() {
+// `now` is fixed for in-process runs, which are handed the same clock. A spawned real CLI reads the
+// real clock, so it must be given Date.now() - or the fake login "expires" once the date moves on.
+export async function hostileHome({ now = NOW } = {}) {
   const fake = await makeFakeHome({
     '.claude/.credentials.json': {
       claudeAiOauth: {
         accessToken: fakeClaudeToken(),
         refreshToken: fakeRefreshToken(),
-        expiresAt: NOW + 5 * HOUR,
+        expiresAt: now + 5 * HOUR,
         subscriptionType: 'max',
         rateLimitTier: 'default_claude_max_20x'
       },
@@ -55,7 +57,7 @@ export async function hostileHome() {
     '.claude.json': {
       oauthAccount: { emailAddress: FAKE_EMAIL, accountUuid: FAKE_UUID, displayName: 'Fake Person' },
       projects: { [`/Users/${FAKE_USERNAME}/secret-client`]: { allowedTools: [] } },
-      cachedUsageUtilization: { fetchedAtMs: NOW - HOUR, utilization: { five_hour: { utilization: 5 }, owner: FAKE_EMAIL } }
+      cachedUsageUtilization: { fetchedAtMs: now - HOUR, utilization: { five_hour: { utilization: 5 }, owner: FAKE_EMAIL } }
     },
     '.codex/auth.json': {
       OPENAI_API_KEY: null,
@@ -69,7 +71,7 @@ export async function hostileHome() {
   const log = await fake.write(`.claude/projects/${PROJECT}/${FAKE_UUID}.jsonl`, [
     JSON.stringify({
       type: 'assistant',
-      timestamp: new Date(NOW - HOUR).toISOString(),
+      timestamp: new Date(now - HOUR).toISOString(),
       sessionId: FAKE_UUID,
       requestId: 'req_1',
       cwd: `/Users/${FAKE_USERNAME}/secret-client`,
@@ -77,24 +79,24 @@ export async function hostileHome() {
     }),
     JSON.stringify({ type: 'user', cwd: `C:\\Users\\${FAKE_USERNAME}\\secret-client`, message: { content: fakeClaudeToken() } })
   ].join('\n'))
-  await setMtime(log, NOW - HOUR)
-  const date = new Date(NOW - HOUR)
+  await setMtime(log, now - HOUR)
+  const date = new Date(now - HOUR)
   const pad = (n) => String(n).padStart(2, '0')
   const codexLog = await fake.write(
     `.codex/sessions/${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}/rollout-2026-10-07T19-00-00-${FAKE_UUID}.jsonl`,
     [
-      JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), type: 'turn_context', payload: { cwd: `/Users/${FAKE_USERNAME}/secret-client` } }),
+      JSON.stringify({ timestamp: new Date(now - HOUR).toISOString(), type: 'turn_context', payload: { cwd: `/Users/${FAKE_USERNAME}/secret-client` } }),
       JSON.stringify({
-        timestamp: new Date(NOW - HOUR).toISOString(),
+        timestamp: new Date(now - HOUR).toISOString(),
         type: 'event_msg',
         payload: {
           type: 'token_count',
-          rate_limits: { limit_id: FAKE_EMAIL, primary: { used_percent: 3, window_minutes: 10080, resets_at: Math.floor((NOW + 48 * HOUR) / 1000) }, secondary: null }
+          rate_limits: { limit_id: FAKE_EMAIL, primary: { used_percent: 3, window_minutes: 10080, resets_at: Math.floor((now + 48 * HOUR) / 1000) }, secondary: null }
         }
       })
     ].join('\n')
   )
-  await setMtime(codexLog, NOW - HOUR)
+  await setMtime(codexLog, now - HOUR)
   return fake
 }
 
