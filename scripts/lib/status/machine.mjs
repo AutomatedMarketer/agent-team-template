@@ -3,8 +3,9 @@
 // and a fake Keychain - and prove nothing real was touched.
 
 import os from 'node:os'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createRunner } from './programs.mjs'
 
 const execFileP = promisify(execFile)
 
@@ -28,7 +29,9 @@ export function machineDeps(overrides = {}) {
     platform: process.platform,
     now: Date.now(),
     fetch: globalThis.fetch,
-    exec: execFileP,
+    // Every other program - the Keychain, claude, codex, the version checks - runs through this:
+    // absolute path only, a time limit, an output cap, and a timeout stops everything it started.
+    exec: createRunner({ spawn, platform: process.platform, env: process.env }),
     git: runGit,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     // Only ever used to REFUSE output that contains them. Never written anywhere.

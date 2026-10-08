@@ -240,6 +240,8 @@ async function writeAll(target, snapshots, options) {
   for (const { relativePath, text } of snapshots) await writeSnapshot(target, relativePath, text, options)
 }
 
+export const defaultStateDir = (deps) => join(deps.home, '.local', 'state', 'agent-status-collector')
+
 // args: { argv, deps, repoRoot, out, err }
 // Returns the exit code. 2 = refused before reading anything, 1 = refused or failed after.
 export async function runCollector({ argv, deps, repoRoot, out, err }) {
@@ -290,6 +292,11 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain('Run the collector from a separate code checkout, pinned to a commit you have read. The status README shows how.')
     return 2
   }
+
+  // Sources that run programs need the state folder (their empty working folder goes there) and
+  // the --clone folder (no program inside it may run).
+  const stateDir = values['state-dir'] ?? defaultStateDir(deps)
+  deps = { ...deps, stateDir, clone: values.clone }
 
   if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
 
@@ -345,7 +352,7 @@ async function withoutHooks(git, stateDir) {
 // push, final record, unlock. Every exit after the claim leaves a final record saying why.
 async function commitRun({ values, parts, computer, deps, repoRoot, say, complain }) {
   const identity = deps.identity ?? {}
-  const stateDir = values['state-dir'] ?? join(deps.home, '.local', 'state', 'agent-status-collector')
+  const { stateDir } = deps
   const mode = values.clone !== undefined ? 'clone' : 'working-copy'
   const target = mode === 'clone' ? values.clone : repoRoot
   const relativePaths = parts.map((part) => PART_TABLE[part].path(computer))
