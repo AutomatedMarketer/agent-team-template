@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 808
+ℹ tests 821
 ℹ fail 0
 ```
 
@@ -255,6 +255,18 @@ files in this repo. `/connect` is a skill that ships **in here**, in `.claude/sk
 | `/audit` | Diagnoses the team you actually have |
 | `/new-workflow` | Builds a job by asking you five questions |
 | `/connect` *(in this repo)* | Works out how a tool connects today, and wires it |
+
+---
+
+## Usage meters on the dashboard
+
+The dashboard can show how much of your Claude and Codex plan limits you have used, and when they
+reset. A small script on your computer reads the numbers and saves them into this repo.
+
+- **Set it up:** [Usage meters on your dashboard](docs/guides/usage-meters.md) - a step-by-step
+  guide, no coding needed. Or ask Claude: **set up my usage meters**.
+- **How it works:** [How the usage meters work](docs/guides/usage-meters-how-it-works.md) - the
+  data flow, every source, and what is never written.
 
 ---
 

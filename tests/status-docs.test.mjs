@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { read } from './helpers/repo.mjs'
+import { posix } from 'node:path'
+import { read, exists } from './helpers/repo.mjs'
 import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
 
 /* The collector's paperwork: the subscriptions list the board totals, the promise that the
@@ -155,4 +156,209 @@ test('the status README states exactly the label rule the collector enforces', a
   for (const mark of listed) assert.ok(LABEL_CHARACTERS.test(`a${mark}b`), `the README allows ${mark} but the collector does not`)
   const allowedPunctuation = LABEL_CHARACTERS.source.replace(/^\^\[\\p\{L\}\\p\{N\} /, '').replace(/\]\+\$$/, '')
   assert.deepEqual([...allowedPunctuation].sort(), [...listed.join('')].sort())
+})
+
+// --- the status line tap, the installer and the student guides ----------------------------------------
+//
+// The owner asked for the student repo to hold "all these instructions and also the tech behind".
+// These tests hold the two guides to the code: the commands they give exist, the paths they name
+// are the paths the code uses, every relative link resolves, and the beginner guide stays readable.
+
+const guide = () => read('docs/guides/usage-meters.md')
+const explainer = () => read('docs/guides/usage-meters-how-it-works.md')
+
+// GitHub's heading anchors: lower case, punctuation dropped, spaces to hyphens.
+const anchorsIn = (markdown) =>
+  new Set([...markdown.matchAll(/^#{1,6}\s+(.+)$/gm)].map((match) =>
+    match[1].trim().toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-')))
+
+async function brokenLinks(path) {
+  const text = await read(path)
+  const broken = []
+  for (const [, target] of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+    if (/^[a-z]+:/i.test(target)) continue
+    const [file, anchor] = target.split('#')
+    const relative = file ? posix.normalize(posix.join(posix.dirname(path), file)) : path
+    let body
+    try {
+      body = await read(relative)
+    } catch {
+      broken.push(target)
+      continue
+    }
+    if (anchor && relative.endsWith('.md') && !anchorsIn(body).has(anchor)) broken.push(target)
+  }
+  return broken
+}
+
+test('the README links both usage guides, and every link in them resolves', async () => {
+  const readme = await read('README.md')
+  assert.ok(readme.includes('](docs/guides/usage-meters.md)'), 'the README does not link the beginner guide')
+  assert.ok(readme.includes('](docs/guides/usage-meters-how-it-works.md)'), 'the README does not link the explainer')
+  for (const path of ['docs/guides/usage-meters.md', 'docs/guides/usage-meters-how-it-works.md', 'README.md']) {
+    assert.deepEqual(await brokenLinks(path), [], `${path} has a link that goes nowhere`)
+  }
+})
+
+test('the beginner guide gives both paths as numbered steps, with the real commands', async () => {
+  const doc = await guide()
+  const pathA = doc.slice(doc.indexOf('## Path A'), doc.indexOf('## Path B'))
+  const pathB = doc.slice(doc.indexOf('## Path B'), doc.indexOf('## What you will see'))
+  assert.match(pathA, /^1\. /m)
+  assert.match(pathA, /\/onboard/)
+  assert.match(pathA, /set up my usage meters/)
+  assert.match(pathA, /node scripts\/install-usage-tap\.mjs/)
+  assert.match(pathA, /3 hours/)
+  assert.match(pathB, /^1\. /m)
+  assert.match(pathB, /node scripts\/install-usage-tap\.mjs --dry-run/)
+  assert.match(pathB, /\/snapshot/)
+  for (const script of ['scripts/install-usage-tap.mjs', 'scripts/usage-tap.mjs']) {
+    assert.ok(await exists(script), `${script} is missing`)
+  }
+})
+
+test('the beginner guide explains its words before it uses them, and every label on the board', async () => {
+  const doc = await guide()
+  const glossary = doc.slice(doc.indexOf('## Words used in this guide'), doc.indexOf('## Before you start'))
+  for (const word of ['Status line', 'The tap', 'Snapshot', 'Team repo', 'Always-on computer']) {
+    assert.ok(glossary.includes(`**${word}**`), `the glossary does not explain ${word}`)
+  }
+  assert.ok(doc.indexOf('## Words used in this guide') < doc.indexOf('## Path A'), 'the words are explained after they are used')
+  const labels = doc.slice(doc.indexOf('## What you will see'), doc.indexOf('## The Mac "Always Allow" box'))
+  for (const label of ['saved copy', 'unofficial', 'estimate', 'not found', 'unavailable', 'reset since this reading', 'older than 8 hours']) {
+    assert.ok(labels.includes(`**${label}**`), `the guide does not explain "${label}"`)
+  }
+  assert.match(labels, /tap's numbers come straight from Claude Code/)
+  assert.match(doc, /Claude Pro or Max/)
+})
+
+test('the beginner guide says the Keychain box is only for the backup method, and what each answer does', async () => {
+  const doc = await guide()
+  const mac = doc.slice(doc.indexOf('## The Mac "Always Allow" box'), doc.indexOf('## How to undo everything'))
+  assert.match(mac, /only for the \*\*backup method\*\*/)
+  assert.match(mac, /\*\*Always Allow\*\*/)
+  assert.match(mac, /\*\*Deny\*\*/)
+  assert.match(mac, /tap's reading still works/)
+  assert.match(mac, /not yet\s+seen this box/, 'the exact wording of the prompt is unverified, and the guide must say so')
+})
+
+test('the beginner guide says how to undo every piece', async () => {
+  const doc = await guide()
+  const undo = doc.slice(doc.indexOf('## How to undo everything'), doc.indexOf('## If something looks wrong'))
+  assert.ok(undo.includes('node scripts/install-usage-tap.mjs --remove'))
+  assert.ok(undo.includes('rm -rf ~/.local/state/agent-status'))
+  assert.ok(undo.includes('Remove-Item -Recurse -Force "$env:LOCALAPPDATA\\agent-status"'))
+  assert.ok(undo.includes('settings.json.before-usage-tap-'))
+  assert.ok(undo.includes('.agent-team/status/usage/'))
+  assert.match(undo, /README\.md#rollback/)
+})
+
+// Students may not code, and the owner reads best in short sentences. Code, tables and headings are
+// left out, and the quoted text of the macOS box counts as two words; every other sentence counts.
+test('the beginner guide is written in short sentences', async () => {
+  const doc = (await guide()).replace(/```[\s\S]*?```/g, '').replace(/\*\*"[^"]*"\*\*/g, 'the box')
+  const sentences = doc
+    .split(/\n\s*\n|\n\s*(?=(?:-|\d+\.)\s)/)
+    .filter((block) => !/^\s*(\||#)/.test(block))
+    .flatMap((block) => block.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /[a-z]/i.test(sentence))
+  const words = sentences.map((sentence) => sentence.split(' ').length)
+  const longest = Math.max(...words)
+  const average = words.reduce((sum, count) => sum + count, 0) / words.length
+  assert.ok(longest <= 25, `a sentence has ${longest} words: "${sentences[words.indexOf(longest)]}"`)
+  assert.ok(average <= 12, `sentences average ${average.toFixed(1)} words`)
+})
+
+test('the explainer names every source in the order the collector tries them', async () => {
+  const doc = await explainer()
+  const table = doc.slice(doc.indexOf('### Claude limits'), doc.indexOf('### Why the tap is written as'))
+  const order = ['The status line tap', 'The live call', "Claude Code's saved reading", '**unavailable**']
+  const positions = order.map((name) => table.indexOf(name))
+  assert.ok(positions.every((position) => position >= 0), 'a source is missing from the order table')
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'the order table is out of order')
+  for (const source of ['claude-code-saved', 'unofficial-live', 'codex-session-log', 'estimate']) {
+    assert.ok(doc.includes(`\`${source}\``), `the explainer never names ${source}`)
+  }
+  assert.match(doc, /step 2 never runs, so \*\*your sign-in never leaves the computer\*\*/)
+  assert.match(doc, /under 6 hours old/)
+  assert.match(doc, /interactive sessions/)
+})
+
+test('the guides give the tap file paths the code actually uses', async () => {
+  const { tapFilePath } = await import('../scripts/lib/status/tap.mjs')
+  const mac = tapFilePath({ home: '~', env: {}, platform: 'darwin' }).replaceAll('\\', '/')
+  const windows = tapFilePath({ home: 'H', env: { LOCALAPPDATA: '%LOCALAPPDATA%' }, platform: 'win32' }).replaceAll('/', '\\')
+  for (const [name, doc] of [['the explainer', await explainer()], ['the status README', await statusReadme()]]) {
+    assert.ok(doc.includes(mac), `${name} does not give ${mac}`)
+    assert.ok(doc.includes(windows), `${name} does not give ${windows}`)
+  }
+  const undo = await guide()
+  assert.ok(undo.includes(posix.dirname(mac)), 'the undo step deletes another folder than the tap uses')
+})
+
+test('the explainer says why the tap is written as claude-code-saved, and what that costs', async () => {
+  const doc = await explainer()
+  const why = doc.slice(doc.indexOf('### Why the tap is written as'), doc.indexOf('### The other numbers'))
+  assert.match(why, /tests\/fixtures\/usage-parity\.json/)
+  assert.match(why, /no contract change/)
+  assert.match(why, /unofficial · saved copy/)
+  assert.match(why, /claude-code-statusline/)
+})
+
+test('the explainer covers chaining, and the trade-off of running the earlier command through a shell', async () => {
+  const doc = await explainer()
+  assert.match(doc, /`--then <command>`/)
+  assert.match(doc, /`--then64 <code>`/)
+  assert.match(doc, /\*\*The trade-off of running the earlier command through a shell\.\*\*/)
+  for (const cost of ['**Time.**', '**A guess on Windows.**', '**No new trust.**']) assert.ok(doc.includes(cost), `the trade-off leaves out ${cost}`)
+})
+
+test('the explainer says what is never written and names the checks that enforce it, which exist', async () => {
+  const doc = await explainer()
+  const section = doc.slice(doc.indexOf('## What is never written'), doc.indexOf('### Reasons, and the log'))
+  assert.match(section, /fails\s+closed/)
+  assert.ok(section.includes('scripts/lib/status/safe.mjs'))
+  const named = [...section.matchAll(/`(tests\/[a-z-]+\.test\.mjs)`/g)].map((match) => match[1])
+  for (const file of ['tests/status-run.test.mjs', 'tests/status-usage-tap.test.mjs', 'tests/status-tap-source.test.mjs', 'tests/status-spawn-scan.test.mjs', 'tests/secrets.test.mjs']) {
+    assert.ok(named.includes(file), `the explainer does not name ${file}`)
+  }
+  for (const file of named) assert.ok(await exists(file), `the explainer names ${file}, which does not exist`)
+  for (const thing of ['token', 'email', 'username', 'session ids', 'transcript paths', "computer's own name"]) {
+    assert.ok(section.includes(thing), `the never-written list leaves out ${thing}`)
+  }
+})
+
+test('the explainer covers the two Mac folders, the leased push, and the local app, ideas only', async () => {
+  const doc = await explainer()
+  assert.match(doc, /\*\*Two folders\.\*\*/)
+  assert.match(doc, /\*\*pinned by hand\*\*/)
+  assert.ok(doc.includes('--force-with-lease=refs/heads/main:<last fetched id>'))
+  assert.match(doc, /Jack Roberts/)
+  assert.match(doc, /ideas only - none of its code or art is\s+in here/)
+  assert.match(doc, /\*\*runs on your own computer\*\*/)
+  assert.match(doc, /\*\*pushes numbers out\*\*/)
+  assert.match(doc, /install it from the \*\*pinned code checkout\*\*/)
+})
+
+test('the status README documents the tap, the installer and the new reasons', async () => {
+  const doc = await statusReadme()
+  for (const phrase of [
+    'scripts/usage-tap.mjs',
+    'node scripts/install-usage-tap.mjs --dry-run',
+    'node scripts/install-usage-tap.mjs --remove',
+    'rate_limits.five_hour',
+    'https://code.claude.com/docs/en/statusline',
+    'docs/guides/usage-meters.md',
+    'docs/guides/usage-meters-how-it-works.md',
+    'holds no\nkey (Keychain)',
+    'file, no Keychain answer',
+    'file, Keychain unreadable'
+  ]) {
+    assert.ok(doc.includes(phrase), `the status README does not mention ${phrase.replace('\n', ' ')}`)
+  }
+  const sources = doc.slice(doc.indexOf('## Where each number comes from'), doc.indexOf('### The status line tap'))
+  assert.ok(sources.indexOf('first choice | **Official.**') > 0, 'the tap is not listed as the first choice')
+  assert.ok(sources.indexOf('second choice') > sources.indexOf('first choice'))
+  assert.ok(sources.indexOf('third choice') > sources.indexOf('second choice'))
 })

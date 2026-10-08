@@ -113,8 +113,9 @@ The exact shape, and the contract the dashboard reads it by, are in
 
 | Number | Source | Labelled |
 |---|---|---|
-| Claude limits, first choice | The address Claude Code's `/usage` screen calls. The sign-in comes from the Mac Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `unofficial-live` |
-| Claude limits, second choice | The last reading Claude Code saved in `~/.claude.json`, if under 6 hours old | `claude-code-saved` |
+| Claude limits, first choice | **Official.** The reading Claude Code hands its status line, kept by the status line tap (below) in `~/.local/state/agent-status/claude-statusline.json` (Windows: `%LOCALAPPDATA%\agent-status\claude-statusline.json`), if under 6 hours old and not every window in it has reset since | `claude-code-saved` |
+| Claude limits, second choice | The address Claude Code's `/usage` screen calls. The sign-in comes from the Mac Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `unofficial-live` |
+| Claude limits, third choice | The last reading Claude Code saved in `~/.claude.json`, if under 6 hours old | `claude-code-saved` |
 | Claude plan | The plan fields of the same sign-in | - |
 | Claude activity | Claude Code's session and subagent logs in `~/.claude/projects`, last 15 days | `estimate` |
 | Codex limits | The newest reading in Codex's own session logs, `~/.codex/sessions`, up to 7 days old | `codex-session-log` |
@@ -122,7 +123,35 @@ The exact shape, and the contract the dashboard reads it by, are in
 
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured if you have moved those folders.
 
-Both Claude readings are **undocumented**. Anthropic has not published that address or that saved
+### The status line tap - the official reading
+
+Claude Code hands every status line command the session's details on stdin, and for Pro and Max
+that includes `rate_limits.five_hour` and `rate_limits.seven_day` - documented at
+https://code.claude.com/docs/en/statusline. `scripts/usage-tap.mjs` is a status line command that
+keeps only those two readings in the file above and prints `5h 18% · wk 49%`, or your earlier status
+line. Install and remove it with:
+
+```bash
+node scripts/install-usage-tap.mjs --dry-run   # show the change to ~/.claude/settings.json
+node scripts/install-usage-tap.mjs             # install, keeping your status line via --then64
+node scripts/install-usage-tap.mjs --remove    # put back exactly what you had
+```
+
+The installer changes only the `statusLine` key and backs the file up first. The tap's reading is
+written as `claude-code-saved`: it is a reading Claude Code produced and this computer saved, and the
+contract's source names are shared with the dashboard. So the dashboard currently labels it
+"unofficial · saved copy" too. When the tap's reading is fresh, the live call is skipped and the
+token never leaves the computer.
+
+The tap only has a reading where Claude Code was used **interactively** in the last 6 hours: the
+status line does not run in headless `claude -p` jobs. On the always-on Mac, install the tap from
+the **code checkout** (`~/.local/share/agent-status/collector-code`), never from the data clone.
+Students' guide: `docs/guides/usage-meters.md`. The design and every trade-off:
+`docs/guides/usage-meters-how-it-works.md`.
+
+### The two undocumented readings
+
+The other two Claude readings are **undocumented**. Anthropic has not published that address or that saved
 field, so the dashboard shows them with an "unofficial" label, and either can stop working
 without notice. When that happens the meter says `unavailable` rather than showing an old or
 invented number. The collector sends the sign-in token to that one address only, with an honest
@@ -138,6 +167,13 @@ certificates trusted (`NODE_EXTRA_CA_CERTS`), the system's certificates in use
 `--experimental-loader`, or any debugger option (`--inspect`, `--inspect-brk`, `--inspect-port`,
 `--inspect-wait`): a debugger can read the token straight out of memory. The saved reading is
 tried instead, and the meter's reason names the setting, never its value.
+
+When a sign-in is found but holds no usable key, the reason says so - `sign-in found but holds no
+key (Keychain)` or `(file)` - instead of a fallback's reason. On a Mac every live reason also says
+where the sign-in came from: the Keychain, or the file because the Keychain gave no answer
+(`file, no Keychain answer`) or one it could not read (`file, Keychain unreadable`). The printed
+summary lists every Claude source tried, in order, with its status and reason (`- status line:
+found`, `- live: unavailable (...)`, `- saved: not found`); that list is printed only, never written.
 
 ## What is never written
 
@@ -341,6 +377,11 @@ The receipts in `~/.local/state/agent-status-collector` are left for the record.
 These are checked on the first live run on the Mac, not assumed:
 
 - the Keychain item name and whether the one-time "Always Allow" prompt appears
+- whether the Keychain item is printed as hex by `security -w` (the collector decodes it if so)
+- the first run (2026-10-08) found a sign-in naming a plan but holding no usable key; the new
+  reasons say whether it came from the Keychain or the file
+- whether the Mac Mini runs Claude Code interactively often enough for the status line tap's
+  reading to be under 6 hours old at each scheduled run
 - whether the live address answers a request that does not claim to be Claude Code
 - whether Claude Code saves its reading in `~/.claude.json` on the Mac
 - whether Codex keeps `auth.json` as a file on the Mac, or in a keyring (then the plan says `not found`)
