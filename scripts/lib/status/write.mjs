@@ -52,9 +52,10 @@ export async function assertNoLinks(root, relativePath, { git } = {}) {
   if (await isLinkInGit(git, root, relativePath)) throw new LinkedPath()
 }
 
-// Checks, makes the folder, checks again where it really is, then writes through a temporary
-// file and a rename so a reader never sees half a file.
-export async function writeSnapshot(root, relativePath, text, { git } = {}) {
+// Checks, makes the folder, checks again where it really is, then writes the text to a temporary
+// file beside the target. Returns { temporary, path } once the temporary file holds the whole text;
+// `made` is told the temporary name as soon as this call has created it, so a caller can remove it.
+async function stage(root, relativePath, text, { git }, made) {
   await assertNoLinks(root, relativePath, { git })
   const path = join(root, ...relativePath.split('/'))
   await mkdir(dirname(path), { recursive: true })
@@ -67,14 +68,36 @@ export async function writeSnapshot(root, relativePath, text, { git } = {}) {
   // runs git between here and the rename. Closing it fully would need openat-style calls Node
   // does not offer.
   const temporary = `${path}.${process.pid}.tmp`
+  // Anything already at the temporary name - a leftover, or a link someone committed there - is
+  // removed (rm never follows a link); a folder there is not ours and stops the write. 'wx' refuses
+  // to write through anything made since.
+  await rm(temporary, { force: true })
+  made.push(temporary)
+  await writeFile(temporary, text, { flag: 'wx' })
+  return { temporary, path }
+}
+
+// Writes several files as one: every file is first written whole to a temporary file beside its
+// target, and only when all of them are there are they renamed into place. Any failure before the
+// renames leaves no file of this run behind - every temporary file it made is removed, and nothing
+// else is touched. A reader never sees half a file.
+export async function writeSnapshots(root, files, { git } = {}) {
+  for (const { relativePath } of files) await assertNoLinks(root, relativePath, { git })
+  const made = []
+  const removeMade = () => Promise.all(made.map((temporary) => rm(temporary, { force: true }).catch(() => {})))
+  const staged = []
   try {
-    // Anything already at the temporary name - a leftover, or a link someone committed there - is
-    // removed (rm never follows a link), and 'wx' refuses to write through one made since.
-    await rm(temporary, { force: true })
-    await writeFile(temporary, text, { flag: 'wx' })
-    await rename(temporary, path)
+    for (const { relativePath, text } of files) staged.push(await stage(root, relativePath, text, { git }, made))
+    for (const { temporary, path } of staged) await rename(temporary, path)
   } catch (error) {
-    await rm(temporary, { force: true })
+    // Before the renames nothing of this run is in place. A rename failing part way (the disk
+    // going) is the one case that can leave some files renamed; the temporary files left are
+    // removed either way.
+    await removeMade()
     throw error
   }
+}
+
+export async function writeSnapshot(root, relativePath, text, options = {}) {
+  await writeSnapshots(root, [{ relativePath, text }], options)
 }

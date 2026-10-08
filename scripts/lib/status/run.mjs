@@ -28,7 +28,7 @@ import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
 import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
 import { checkUsage, checkConnections, checkHermes, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
-import { writeSnapshot, assertNoLinks, LinkedPath } from './write.mjs'
+import { writeSnapshots, assertNoLinks, LinkedPath } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
@@ -310,9 +310,10 @@ async function assertNoLinksAll(target, relativePaths, options) {
   for (const relativePath of relativePaths) await assertNoLinks(target, relativePath, options)
 }
 
+// Every file of the run lands together or not at all (write.mjs, writeSnapshots).
 async function writeAll(target, files, options) {
   await assertNoLinksAll(target, files.map(({ relativePath }) => relativePath), options)
-  for (const { relativePath, text } of files) await writeSnapshot(target, relativePath, text, options)
+  await writeSnapshots(target, files, options)
 }
 
 export const defaultStateDir = (deps) => join(deps.home, '.local', 'state', 'agent-status-collector')
@@ -403,8 +404,13 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   try {
     await writeAll(repoRoot, files, { git: deps.git })
   } catch (error) {
-    if (!(error instanceof LinkedPath)) throw error
-    LINK_REFUSAL.forEach(complain)
+    if (error instanceof LinkedPath) {
+      LINK_REFUSAL.forEach(complain)
+      return 1
+    }
+    // The error itself is not shown: it carries a full path, and a full path carries the username.
+    complain('Writing the snapshot files failed. Nothing was written: no snapshot file and no temporary file was left.')
+    complain('Check that this folder can be written to, and that nothing is in the way of .agent-team/status or runs/heartbeat.')
     return 1
   }
   for (const { relativePath } of files) say(`Snapshot for ${computer}. Wrote ${relativePath}`)

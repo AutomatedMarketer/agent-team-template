@@ -118,6 +118,25 @@ test('--only refuses parts that do not exist, before reading anything', async ()
   }
 })
 
+test('all or nothing on disk too: a failure writing the last file leaves no file and no temporary file', async () => {
+  const fake = await makeFakeHome()
+  const target = await mkdtemp(join(tmpdir(), 'agent-status-repo-'))
+  try {
+    // Something already sits where the Hermes file's temporary copy goes, and cannot be cleared: a
+    // folder with a file in it. Writing that last file fails after the first two could have landed.
+    const blocker = join(target, '.agent-team', 'status', 'hermes', `test-pc.json.${process.pid}.tmp`)
+    await mkdir(blocker, { recursive: true })
+    await writeFile(join(blocker, 'keep'), 'not the collector\'s\n')
+    const result = await runIn(fake, ['--computer', 'Test PC'], {}, target)
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /Nothing was written/)
+    assert.deepEqual(await relativeFiles(target), [`.agent-team/status/hermes/test-pc.json.${process.pid}.tmp/keep`], 'a snapshot or a temporary file was left behind')
+  } finally {
+    await fake.cleanup()
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
 test('all or nothing: if one part is refused by the gate, no part is written', async () => {
   const fake = await makeFakeHome()
   try {
