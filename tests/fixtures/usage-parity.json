@@ -14,6 +14,7 @@
   ],
   "sources": [
     "unofficial-live",
+    "claude-code-statusline",
     "claude-code-saved",
     "codex-session-log"
   ],
@@ -40,6 +41,7 @@
     "a window whose resetsAt has passed shows no percentage",
     "resetsAt may be missing; the collector never writes null, and the board treats a null like a missing one and says the reset time is unknown",
     "the freshness shown is the reading time (limits.readAt), not only the file time (takenAt)",
-    "usedPercent is a finite number from 0 to maxPercent; above 100 means over the limit and is shown, never clipped"
+    "usedPercent is a finite number from 0 to maxPercent; above 100 means over the limit and is shown, never clipped",
+    "claude-code-statusline is Claude Code's own documented status line reading, so the board labels it official"
   ]
 }
