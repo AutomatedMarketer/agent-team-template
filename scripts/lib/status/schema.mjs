@@ -16,7 +16,9 @@ export const MAX_FILES_READ = 5
 // the spring clock change or the few minutes of drift allowed past "now".
 export const MAX_ACTIVITY_DAYS = 17
 export const STATUSES = ['found', 'not found', 'unavailable']
-export const CLAUDE_LIMIT_SOURCES = ['unofficial-live', 'claude-code-saved']
+// claude-code-statusline is Claude Code's own documented status line reading (kept by the tap), so
+// the board labels it official; the other two are undocumented and labelled unofficial.
+export const CLAUDE_LIMIT_SOURCES = ['unofficial-live', 'claude-code-statusline', 'claude-code-saved']
 export const CODEX_LIMIT_SOURCES = ['codex-session-log']
 export const SOURCES = [...CLAUDE_LIMIT_SOURCES, ...CODEX_LIMIT_SOURCES]
 export const MAX_WINDOWS = 8

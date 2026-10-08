@@ -5,6 +5,7 @@ import { collectClaudeLimits } from '../scripts/lib/status/claude-limits.mjs'
 import { readTapReading, TAP_SCHEMA, TAP_MAX_AGE_HOURS } from '../scripts/lib/status/tap.mjs'
 import { collectUsage } from '../scripts/lib/status/run.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
+import { CLAUDE_LIMIT_SOURCES } from '../scripts/lib/status/schema.mjs'
 import { makeFakeHome, fakeClaudeToken, fakeRefreshToken, fetchStub, execStub, FAKE_EMAIL, FAKE_UUID, FAKE_USERNAME } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, runIn, filesUnder } from './helpers/hostile-home.mjs'
 
@@ -15,8 +16,12 @@ import { hostileHome, FORBIDDEN, runIn, filesUnder } from './helpers/hostile-hom
      2. the live call to the undocumented address (the sign-in token, Keychain or file);
      3. the reading Claude Code saved in ~/.claude.json;
      4. unavailable, with the most useful reason.
-   The tap is written to the contract as `claude-code-saved`: it is a reading Claude Code produced
-   and this computer saved, and the contract's source list is shared with the dashboard. */
+   The tap is written to the contract as `claude-code-statusline`, its own name, so the dashboard can
+   label it official - unlike `claude-code-saved` (the ~/.claude.json reading) and `unofficial-live`. */
+
+test('the contract names the tap reading claude-code-statusline, before the saved copy', () => {
+  assert.deepEqual(CLAUDE_LIMIT_SOURCES, ['unofficial-live', 'claude-code-statusline', 'claude-code-saved'])
+})
 
 const NOW = Date.parse('2026-10-08T12:00:00Z')
 const HOUR = 3600_000
@@ -56,12 +61,12 @@ const depsFor = (fake, extra = {}) => ({
 
 // --- reading the tap file ---------------------------------------------------------------------------
 
-test('a fresh tap reading is found, as claude-code-saved, read at the time it was captured', async () => {
+test('a fresh tap reading is found, as claude-code-statusline, read at the time it was captured', async () => {
   const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(NOW - HOUR) })
   try {
     assert.deepEqual(await readTapReading(depsFor(fake)), {
       status: 'found',
-      source: 'claude-code-saved',
+      source: 'claude-code-statusline',
       readAt: '2026-10-08T11:00:00Z',
       windows: [
         { kind: 'five_hour', usedPercent: 18, resetsAt: '2026-10-08T14:30:00Z' },
@@ -178,7 +183,7 @@ test('a fresh tap reading wins, and the token is never sent', async () => {
     const deps = depsFor(fake)
     const { limits, account } = await collectClaudeLimits(deps)
     assert.equal(deps.fetch.calls.length, 0, 'the official reading was there, so the token should have stayed home')
-    assert.equal(limits.source, 'claude-code-saved')
+    assert.equal(limits.source, 'claude-code-statusline')
     assert.equal(limits.windows[0].usedPercent, 18)
     // The plan still comes from the sign-in.
     assert.deepEqual(account, { subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' })
@@ -254,7 +259,7 @@ test('every source tried is listed, by status and reason only', async () => {
 
 // --- end to end ----------------------------------------------------------------------------------------
 
-test('the snapshot names the tap as claude-code-saved, and its log line says it came from the status line', async () => {
+test('the snapshot names the tap as claude-code-statusline, and its log line says it came from the status line', async () => {
   const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(Date.parse('2026-10-07T19:30:00Z'), [
     { kind: 'five_hour', usedPercent: 18, resetsAt: '2026-10-07T21:40:00Z' },
     { kind: 'weekly_all', usedPercent: 49, resetsAt: '2026-10-09T22:00:00Z' }
@@ -262,7 +267,7 @@ test('the snapshot names the tap as claude-code-saved, and its log line says it 
   try {
     const result = await runIn(fake, ['--computer', 'Test PC', '--dry-run'])
     assert.equal(result.code, 0, result.stderr)
-    assert.match(result.stdout, /- Claude limits found \(claude-code-saved\)/)
+    assert.match(result.stdout, /- Claude limits found \(claude-code-statusline\)/)
     assert.match(result.stdout, /status line: found/)
     await rm(result.target, { recursive: true, force: true })
   } finally {
@@ -301,7 +306,7 @@ test('a snapshot built from the tap passes the gate', async () => {
   const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(NOW - HOUR) })
   try {
     const doc = await collectUsage({ ...depsFor(fake), timezone: 'UTC', identity: fake.identity }, 'Test PC')
-    assert.equal(doc.claude.limits.source, 'claude-code-saved')
+    assert.equal(doc.claude.limits.source, 'claude-code-statusline')
     assert.deepEqual(checkUsage(doc, fake.identity), [])
   } finally {
     await fake.cleanup()

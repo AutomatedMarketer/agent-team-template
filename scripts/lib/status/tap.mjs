@@ -205,8 +205,8 @@ const unavailable = (why) => ({ status: 'unavailable', why })
 
 // Reads the tap file back as a limits block. The file is re-checked here from scratch: it sits in
 // a folder anything running as this person can write to, so it is treated as outside input.
-// The source is `claude-code-saved` - it IS a reading Claude Code produced and this computer
-// saved - because the contract's source list is shared with the dashboard and fixed.
+// The source is `claude-code-statusline`: Claude Code's own documented reading, which the
+// dashboard labels official - unlike the two undocumented Claude sources.
 export async function readTapReading(deps) {
   const file = await readJson(tapFilePath({ home: deps.home, env: deps.env ?? {}, platform: deps.platform }))
   if (file.state === 'missing') return { status: 'not found' }
@@ -219,5 +219,5 @@ export async function readTapReading(deps) {
   const windows = file.value.windows.map((window) => ({ ...window }))
   const stillOpen = windows.filter((window) => !window.resetsAt || Date.parse(window.resetsAt) > deps.now)
   if (stillOpen.length === 0) return unavailable('status line reading is from before the reset')
-  return { status: 'found', source: 'claude-code-saved', readAt: isoSeconds(Math.min(capturedAt, deps.now)), windows }
+  return { status: 'found', source: 'claude-code-statusline', readAt: isoSeconds(Math.min(capturedAt, deps.now)), windows }
 }

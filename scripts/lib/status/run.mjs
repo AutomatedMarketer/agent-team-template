@@ -87,8 +87,8 @@ const SUMMARY_ROWS = [
 ]
 
 // Statuses and sources only - never a value. This is what a scheduled run's log shows. Under the
-// Claude limits row it lists every source tried, in order, so "claude-code-saved" can be told
-// apart (status line or ~/.claude.json) and a failure shows each reason, not only the last.
+// Claude limits row it lists every source tried, in order, so a fallback or a failure shows each
+// reason, not only the last.
 export function summarize(doc, trail = []) {
   return SUMMARY_ROWS.flatMap(([label, pick]) => {
     const block = pick(doc)
