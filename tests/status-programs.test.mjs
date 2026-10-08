@@ -119,13 +119,19 @@ test('find: a name with a slash, a dot path or a drive is not a program name', a
 
 const runner = createRunner({ spawn, platform: process.platform, env: process.env })
 
+// On Windows a process that has just ended - or been stopped - lets go of its working folder a
+// moment later, and a virus scanner may still hold a file it wrote there. Deleting that folder at
+// once can fail with EBUSY (seen once in a full-suite run, after every assertion had passed). rm
+// retries exactly those errors; the test itself is unchanged.
+const RELEASED_LATER = { maxRetries: 10, retryDelay: 200 }
+
 test('the runner runs from the folder it is given, and hands back stdout', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'agent-status-cwd-'))
   try {
     const { stdout } = await runner(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd, timeout: 20_000 })
     assert.equal(await realpath(stdout), await realpath(cwd))
   } finally {
-    await rm(cwd, { recursive: true, force: true })
+    await rm(cwd, { recursive: true, force: true, ...RELEASED_LATER })
   }
 })
 
@@ -175,7 +181,7 @@ test('a timeout kills the program and everything it started', async () => {
     }
     assert.equal(alive, false, 'the program was stopped but what it started is still running')
   } finally {
-    await rm(folder, { recursive: true, force: true })
+    await rm(folder, { recursive: true, force: true, ...RELEASED_LATER })
   }
 })
 
