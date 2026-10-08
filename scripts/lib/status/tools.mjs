@@ -12,10 +12,11 @@
 //   - The Claude and ChatGPT apps (and Tailscale, when its app is there) on a Mac: the app's
 //     Info.plist, read by /usr/bin/plutil. On Windows and Linux the apps "could not check".
 
-import { readFile, stat } from 'node:fs/promises'
-import { join, isAbsolute } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { TOOL_NAMES, VERSION_PATTERN, MAX_VERSION_LENGTH } from './connections-schema.mjs'
 import { findProgram, emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
+import { hermesRoot, hermesVersionAt } from './hermes.mjs'
 
 export const VERSION_OUTPUT_CAP = 16 * 1024
 const PLUTIL = '/usr/bin/plutil'
@@ -37,48 +38,14 @@ const exists = async (path) => {
   }
 }
 
-// Hermes's own rule: HERMES_HOME, else %LOCALAPPDATA%\hermes on Windows, else ~/.hermes.
-export function hermesHome({ home, env = {}, platform }) {
-  if (typeof env.HERMES_HOME === 'string' && isAbsolute(env.HERMES_HOME)) return env.HERMES_HOME
-  if (platform === 'win32') {
-    const local = typeof env.LOCALAPPDATA === 'string' && isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : join(home, 'AppData', 'Local')
-    return join(local, 'hermes')
-  }
-  return join(home, '.hermes')
-}
+// The Hermes card (hermes.mjs) and this row read the same folder, found by Hermes's own rule.
+export const hermesHome = hermesRoot
 
-// The version line under [project] in pyproject.toml, or __version__ in hermes_cli/__init__.py.
-// Only that one line is matched; the rest of each file is never looked at.
 async function hermesVersion(deps) {
-  const root = hermesHome(deps)
+  const root = hermesRoot(deps)
   if (!(await exists(root))) return { state: 'not found' }
-  const agent = join(root, 'hermes-agent')
-  try {
-    let section = null
-    for (const line of (await readFile(join(agent, 'pyproject.toml'), 'utf8')).split(/\r?\n/)) {
-      const header = /^\s*\[([^\]]+)\]\s*$/.exec(line)
-      if (header) {
-        section = header[1].trim()
-        continue
-      }
-      const version = section === 'project' ? /^\s*version\s*=\s*["']([^"']*)["']/.exec(line) : null
-      if (version) {
-        const found = versionFrom(version[1])
-        if (found) return { state: 'found', version: found }
-      }
-    }
-  } catch {
-    // No pyproject.toml; try the package itself.
-  }
-  try {
-    const text = await readFile(join(agent, 'hermes_cli', '__init__.py'), 'utf8')
-    const version = /^__version__\s*=\s*["']([^"']*)["']/m.exec(text)
-    const found = version ? versionFrom(version[1]) : null
-    if (found) return { state: 'found', version: found }
-  } catch {
-    // Neither file: Hermes's folder is here, but not a version anybody can read.
-  }
-  return { state: 'could not check' }
+  const version = await hermesVersionAt(root)
+  return version ? { state: 'found', version } : { state: 'could not check' }
 }
 
 // Runs one program and keeps the number from what it prints. Each run starts in a freshly emptied

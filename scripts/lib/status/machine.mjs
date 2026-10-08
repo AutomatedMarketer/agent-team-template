@@ -6,6 +6,7 @@ import os from 'node:os'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRunner } from './programs.mjs'
+import { openReadOnly } from './sqlite.mjs'
 
 const execFileP = promisify(execFile)
 
@@ -33,6 +34,8 @@ export function machineDeps(overrides = {}) {
     // absolute path only, a time limit, an output cap, and a timeout stops everything it started.
     exec: createRunner({ spawn, platform: process.platform, env: process.env }),
     git: runGit,
+    // Hermes's state.db, opened read-only for one fixed question (hermes.mjs, readSessions).
+    openSqlite: openReadOnly,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     // Only ever used to REFUSE output that contains them. Never written anywhere.
     identity: { username, home, hostname: os.hostname() },

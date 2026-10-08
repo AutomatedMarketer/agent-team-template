@@ -149,6 +149,8 @@ test('Hermes\'s folder is found the way Hermes finds it', () => {
   assert.equal(hermesHome({ home: '/h', env: {}, platform: 'linux' }), join('/h', '.hermes'))
   assert.equal(hermesHome({ home: 'C:\\h', env: { LOCALAPPDATA: 'C:\\h\\AppData\\Local' }, platform: 'win32' }), join('C:\\h\\AppData\\Local', 'hermes'))
   assert.equal(hermesHome({ home: 'C:\\h', env: {}, platform: 'win32' }), join('C:\\h', 'AppData', 'Local', 'hermes'))
+  // The tools row and the Hermes card read the same folder: HERMES_HOME set to one profile means its root.
+  assert.equal(hermesHome({ home: '/h', env: { HERMES_HOME: '/srv/hermes/profiles/coder' }, platform: 'linux' }), '/srv/hermes')
   // A relative HERMES_HOME is not a place anybody chose on purpose.
   assert.equal(hermesHome({ home: '/h', env: { HERMES_HOME: 'relative' }, platform: 'linux' }), join('/h', '.hermes'))
 })
