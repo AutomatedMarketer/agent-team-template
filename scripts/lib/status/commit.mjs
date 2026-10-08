@@ -1,7 +1,7 @@
 // Commit mode: getting the snapshot into the repo the dashboard reads, unattended.
 //
 // Two places it can commit from, and they are treated differently on purpose:
-//   - a person's own working copy: commit only the snapshot files (one per part, in one commit), whatever else is staged. Push
+//   - a person's own working copy: commit only the snapshot files (one per part, and Hermes's heartbeat when written, in one commit), whatever else is staged. Push
 //     only when that push would carry the snapshot alone to the default branch; otherwise, or if
 //     the push is refused, stop and say so. Nothing of theirs is ever reset or pushed.
 //   - the collector's dedicated clone (--clone): a folder nobody works in. It is brought level

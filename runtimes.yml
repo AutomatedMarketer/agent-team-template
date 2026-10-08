@@ -4,12 +4,23 @@
 # runs writes to; if it goes stale, the rail shows the runtime as quiet rather than pretending
 # it is fine.
 #
+# `stale_after_minutes` says how old the heartbeat may be before the rail calls the runtime
+# quiet: a whole number from 5 to 1440 (one day), default 30. Set it a little longer than the
+# gap between two heartbeats, or a healthy runtime shows as quiet between them.
+#
+# Hermes's heartbeat is written by the status collector (scripts/collect-status.mjs), which
+# runs every three hours on the Mac, and only when Hermes is alive at that moment: its gateway
+# or its scheduler stamped its own file within five minutes of the check. So its limit is 200
+# minutes - three hours and twenty minutes. `url` must start with http:// or https://; for
+# Hermes it is Hermes's own dashboard over your tailnet (it asks for a login there).
+#
 # Add entries by asking. Examples, commented out until you have them:
 
 # - name: Hermes
 #   kind: agent-runtime
-#   url: http://hermes.your-tailnet.ts.net:8080
+#   url: http://hermes.your-tailnet.ts.net:9119
 #   heartbeat: runs/heartbeat/hermes.json
+#   stale_after_minutes: 200
 #
 # - name: OpenClaw
 #   kind: gateway

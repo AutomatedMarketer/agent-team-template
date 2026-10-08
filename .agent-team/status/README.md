@@ -4,17 +4,22 @@ This folder holds small files that describe a computer, written by a script on t
 read by the dashboard. The dashboard runs in the cloud and cannot look at your machine, so the
 machine writes down what it sees and commits it here.
 
-It writes two kinds, called **parts**:
+It writes three kinds, called **parts**:
 
 - **usage** (Phase 4) - how much of your Claude and Codex plan limits are used, which plan you are
   on, and an estimate of how much Claude Code you have been using.
 - **connections** (Phase 5) - the Connections wall: which tools are installed and their versions,
   and which Claude Code and Codex servers and plugins this computer has, and whether each one
   connects. **Names only** - see [The connections file](#the-connections-file).
+- **hermes** (Phase 6) - the Hermes card: Hermes's version, whether its gateway and scheduler are
+  beating, and per profile the model, how many skills, and how many conversations and scheduled
+  runs in the last week. **Counts, times and names only** - see [The Hermes file](#the-hermes-file).
 
 ```
 .agent-team/status/usage/<computer>.json
 .agent-team/status/connections/<computer>.json
+.agent-team/status/hermes/<computer>.json
+runs/heartbeat/hermes.json                       (only when Hermes is alive - see below)
 ```
 
 One file per part per computer. `<computer>` is the label you give with `--computer`, turned into a
@@ -32,6 +37,7 @@ npm run collect:status -- --dry-run                       # print the files, wri
 npm run collect:status -- --computer "Mac Mini"           # write the files here
 npm run collect:status -- --computer "Mac Mini" --commit  # write them, commit only them, push
 npm run collect:status -- --only connections --dry-run    # one part only
+npm run collect:status -- --only hermes --dry-run         # the Hermes card only
 ```
 
 | Option | What it does |
@@ -41,7 +47,7 @@ npm run collect:status -- --only connections --dry-run    # one part only
 | `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
 | `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, is made here too |
-| `--only usage,connections` | Only these parts, in any order. `--only hermes` is refused: Hermes comes in Phase 6 |
+| `--only usage,connections,hermes` | Only these parts, in any order: one, two or all three |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
 slot was already claimed). 1 means it refused or failed after reading, or could not reach the team
@@ -306,6 +312,87 @@ The student guide is [docs/guides/connections-wall.md](../../docs/guides/connect
 is read and never kept, in detail, is
 [docs/guides/connections-wall-how-it-works.md](../../docs/guides/connections-wall-how-it-works.md).
 
+## The Hermes file
+
+What the Hermes card at the top of Connections shows. **Counts, times, states and names only.** The
+collector **never runs `hermes`** - not even `hermes --version`, which is not read-only - and it
+never starts any program for this part: everything comes from Hermes's own files.
+
+```json
+{
+  "schema": "agent-status/hermes/v1",
+  "takenAt": "2026-10-08T15:00:00Z",
+  "computer": "Mac Mini",
+  "install": { "status": "found", "version": "0.21.3", "updateAvailable": true },
+  "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:59:12Z" },
+  "profiles": {
+    "status": "found",
+    "items": [
+      {
+        "name": "default", "model": "claude-opus-5-5", "provider": "anthropic",
+        "skills": { "status": "found", "count": 89 },
+        "sessions": { "status": "found", "days": 7, "conversations": 14, "scheduled": 21, "lastActiveAt": "2026-10-08T14:40:00Z" },
+        "scheduler": { "status": "found", "beatAt": "2026-10-08T14:59:30Z" }
+      },
+      {
+        "name": "coder",
+        "skills": { "status": "not found" },
+        "sessions": { "status": "unavailable", "why": "needs a newer Node" },
+        "scheduler": { "status": "not found" }
+      }
+    ],
+    "hidden": 1, "more": 0
+  }
+}
+```
+
+Hermes's home is found the way Hermes finds it: `HERMES_HOME` (when it points at one profile,
+`<root>/profiles/<name>`, the root is used), else `%LOCALAPPDATA%\hermes` on Windows, else
+`~/.hermes`. If there is no Hermes at all, `install`, `gateway` and `profiles` are each
+`not found` and nothing else is written.
+
+| What | Read from | Kept |
+|---|---|---|
+| Version | `hermes-agent/pyproject.toml` (`[project]` `version`), else `hermes-agent/hermes_cli/__init__.py` (`__version__`) | the number |
+| Update available | `.update_check`, Hermes's own check | `true` or `false`, only when the check is under 7 days old and was made for the version installed |
+| Gateway | `gateway_state.json` | `gateway_state` (as `state`: `starting`, `running`, `degraded`, `stopped`, `startup_failed`, else `unknown`) and `updated_at` (as `beatAt`) |
+| Profiles | the home itself (`default`, always first), then each folder in `profiles/` that Hermes would list, A to Z, at most 12 profiles | the name, when it passes the name rule; otherwise counted in `hidden`. Past 12, counted in `more` |
+| Model | each profile's `config.yaml`: the top-level `model` block's `model.default` and `model.provider` only | the model's last part after the last `/` (`anthropic/claude-opus-5-5` is `claude-opus-5-5`), and the provider - each only if it passes the name rule - never `base_url` or any other key |
+| Skills | each profile's `skills/` folder, at any depth | how many files are named `SKILL.md`. None is opened |
+| Sessions | each profile's `state.db`, opened **read-only** through `node:sqlite` | how many top-level sessions started in the last 7 days - `conversations` (every source but `cron`, `delegate` and `subagent`) and `scheduled` (`cron`) - and when the newest was last active |
+| Scheduler | each profile's `cron/ticker_heartbeat` | the time in it |
+
+Sessions are one fixed question. The collector first asks which columns the `sessions` table has
+(`PRAGMA table_info`), then asks one `SELECT` built only from fixed words - never from anything read
+from the file. A table missing an optional column (`parent_session_id`, `last_activity_at`,
+`ended_at`) still answers; one missing `source` or `started_at` is `unavailable` ("not a layout this
+collector knows"). With no `node:sqlite` (Node 20, or Node 22 before 22.13) it is `unavailable`
+with "needs a newer Node" - **never 0**.
+
+**Checked to exist, never opened:** the files that make a folder a profile - `config.yaml`, `.env`,
+`SOUL.md`, `profile.yaml`, `auth.json`, `state.db` - and a profile's tombstone in
+`profiles/.deleted/`. **Never touched:** `.env`, `auth.json`, `SOUL.md` and `USER.md` contents,
+`memories`, `logs`, sessions' titles, folders and chat content, the gateway's `pid`, `argv` and
+chat apps, and everything else in the home.
+
+**Alive.** The file never says whether Hermes is alive. The dashboard works it out from the times
+in it: Hermes is **Running** when the gateway's state is `running` and its `beatAt` is within
+5 minutes of `takenAt`, or when any listed profile's scheduler `beatAt` is within 5 minutes of
+`takenAt`. Otherwise it is **Down at last check**; and a file older than 8 hours says **Not
+checked for N h** instead. The rule, with worked examples, is in `tests/fixtures/hermes-parity.json`.
+
+**Heartbeat.** When - and only when - that rule holds, the collector also writes
+`runs/heartbeat/hermes.json`, `{ "runtime": "hermes", "at": <the newest time that proved it> }`, in
+the same commit and behind the same link checks as the status files. When Hermes is down it writes
+no heartbeat and leaves the old one as it is, so the dashboard sees it go stale. The collector runs
+every three hours, so a Hermes entry in `runtimes.yml` needs `stale_after_minutes: 200` (three
+hours and twenty minutes) - see `runtimes.yml`.
+
+The contract the dashboard reads this by is `scripts/lib/status/hermes-schema.mjs` and
+`tests/fixtures/hermes-parity.json`: the states and their words, the cap, the alive rule, the
+heartbeat settings, accept and refuse examples for profile, model and provider names, a full
+sample, and the shape the board builds from it.
+
 ## What is never written
 
 Every file, receipt and printed line passes a safety check (`scripts/lib/status/safe.mjs`) before
@@ -320,6 +407,11 @@ never the value. These are never written:
 - a server's address, command, arguments, environment or headers; a project server's name; a
   plugin's install folder or where it came from beyond its marketplace name; anything a program
   prints around its version number
+- from Hermes: its memories, `SOUL.md`, `USER.md`, `.env`, `auth.json` and logs (never opened);
+  session titles, working folders, users, chat ids or any chat content; the gateway's command line
+  (`argv`) and process id, and which chat apps it serves; any `config.yaml` key but
+  `model.default` and `model.provider` - never `base_url`; a profile or model name that fails the
+  name rule
 
 ## Receipts
 
@@ -330,8 +422,10 @@ schedule) the occurrence is the three-hour slot, named by its New York date and 
 kickstart in the same slot do not both run; the second says so and skips. A run by hand in your
 own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), so asking again
 later always takes a fresh reading. It writes `receipt.json` there once the snapshots are
-written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`), and which sources
-were found - and `final.json` when it is done: the outcome and the commit id. A claim with a
+written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`, which includes
+`runs/heartbeat/hermes.json` when it was written), and which sources were found (for Hermes:
+install, gateway and profiles, and whether a heartbeat was written) - and `final.json` when it is
+done: the outcome and the commit id. A claim with a
 receipt and no final record means the outcome is unknown; look before running it again.
 
 Every collector commit is titled `Status snapshot from <computer>`. Before there were parts it was
@@ -415,6 +509,11 @@ and a rollback.
    Unattended runs need **Always Allow**. Know what that grants: any program that runs `security`
    as you can then read that one item without asking. (Whether the prompt appears, and for which
    program, is not yet verified on the Mac.)
+
+   To see the Hermes card on its own first: `... --only hermes --dry-run`. Its log lines say
+   whether the version, gateway and profiles were found, how many sessions were read, and whether
+   Hermes counted as alive - never a profile or model name. The plist below needs no change for
+   Hermes: a run with no `--only` collects every part.
 
 5. Save this as `~/Library/LaunchAgents/local.donna.agent-status-collector.plist`, replacing
    `YOUR-MAC-USER` and the node path:
@@ -532,3 +631,12 @@ These are checked on the first live run on the Mac, not assumed:
 - where every plugin keeps its servers: some plugins' servers are not listed through
   `installed_plugins.json` at all, and appear only in the live list
 - that `/usr/bin/plutil` reads each app's `Info.plist` from a LaunchAgent
+- Hermes on the Mac: that it lives in `~/.hermes` (no `HERMES_HOME` in the plist), its version and
+  `hermes-agent/pyproject.toml`, which profiles it has, whether `gateway_state.json`, each
+  profile's `state.db` and `cron/ticker_heartbeat` are there and in the shape read here, and how
+  often the gateway re-stamps its file. All of this was read from the Hermes source and the Windows
+  PC's copy only
+- the Mac's Node version: session counts need `node:sqlite` (Node 22.13 or newer); older says
+  "needs a newer Node"
+- that a read-only open of a busy `state.db` (Hermes writing at the same moment) answers within the
+  2-second wait, rather than saying `could not be read`

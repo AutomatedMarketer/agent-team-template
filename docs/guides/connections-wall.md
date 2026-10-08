@@ -23,6 +23,9 @@ Want to know how it works underneath? Read
 | **claude.ai connector** | A server you switched on at claude.ai. Claude Code can use it too |
 | **Snapshot** | A small file with the list in it. It goes into your team repo, so the dashboard can read it |
 | **Team repo** | Your own copy of this template, on GitHub. The dashboard reads from it |
+| **Hermes** | An AI agent that runs all the time on your always-on computer. It can chat with you in apps and run jobs on a schedule |
+| **Profile** | One of your Hermes agents. Each profile has its own model, skills and history. The first one is called "default" |
+| **Heartbeat** | A tiny file that says "I was alive at this time". If it gets old, the dashboard says the agent has gone quiet |
 
 ---
 
@@ -121,6 +124,47 @@ left out.
 
 ---
 
+## The Hermes card
+
+If this computer has **Hermes**, a card sits at the top of Connections. The same script fills it.
+It never starts Hermes. It only reads the files Hermes keeps.
+
+**Is it running?** The card says one of three things:
+
+| Label | What it means |
+|---|---|
+| **Running** | Hermes was busy when the script checked. Its gateway or its scheduler had written its file in the last 5 minutes |
+| **Down at last check** | At the last check, neither had written for more than 5 minutes. Hermes may be stopped |
+| **Not checked for 9 h** | The last check is old, so the card cannot say. The always-on computer may be off. The number is the hours since the check |
+
+**The version** says, for example, "Hermes 0.21.3 - update available". It says "update available"
+or "up to date" only when Hermes checked for updates itself in the last week.
+
+**Each profile** gets a row, the default one first:
+
+- the **model** it uses, like "claude-opus-5-5 via anthropic"
+- how many **skills** it has
+- how many **conversations** and **scheduled runs** it had in the last 7 days
+- when it was **last active**
+
+If the row says "Not available (needs a newer Node)", update Node.js to 22.13 or newer. The other
+parts of the card still work.
+
+**What it never reads.** Hermes keeps private things too. The script never opens them:
+
+- your Hermes **memories**, `SOUL.md` and `USER.md`
+- your keys and sign-ins: `.env` and `auth.json`
+- your chats, their titles, and the folders they ran in
+- the logs
+
+It only counts your sessions. It never reads what was said in them.
+
+**The Hermes light on the Machines list.** Each time Hermes is running, the script also writes a
+**heartbeat**. To see it as a light, ask Claude: "add Hermes to my runtimes with a 200-minute
+limit". The limit is 200 minutes because the script checks every 3 hours.
+
+---
+
 ## What it never saves
 
 The script reads Claude Code's and Codex's settings to find the names. Those settings hold much
@@ -150,6 +194,8 @@ part it stopped on.
 ## How to switch it off
 
 - To stop filling the wall, run the script with `--only usage`. That fills the usage meters only.
-- On the always-on Mac, add `--only usage` to the command in the schedule file.
+- To keep the wall but drop the Hermes card, use `--only usage,connections`.
+- On the always-on Mac, add `--only usage` (or `--only usage,connections`) to the command in the
+  schedule file.
 - To clear what is already there, delete this computer's file in `.agent-team/status/connections/`
   and commit that.

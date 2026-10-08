@@ -43,7 +43,7 @@ mark anything proved.
 | Plugin servers | the plugin's `.mcp.json`, or `.claude-plugin/plugin.json` → `mcpServers` (inline, or a path to a file **inside** the plugin's folder) | `plugin:<plugin>:<server>` | as for your servers |
 | Codex | `~/.codex/config.toml` | `[mcp_servers.<name>]` and `[plugins."<name>@<from>"]` headers, and the `enabled = true/false` line under each | every other line: commands, `env_vars`, URLs, `[hooks...]` tables (which hold folder paths), projects |
 | Tool versions | each program's `--version` (`tailscale version`) | the first number with one to three dots | the rest of what it prints |
-| Hermes version | `hermes-agent/pyproject.toml` (`version` under `[project]`), or `hermes-agent/hermes_cli/__init__.py` (`__version__`) | the number | every other line |
+| Hermes version | `hermes-agent/pyproject.toml` (`version` under `[project]`), or `hermes-agent/hermes_cli/__init__.py` (`__version__`) | the number | every other line. Everything else Hermes has is the Hermes card's - see [The Hermes card](#the-hermes-card) |
 | Mac app versions | `/Applications/<App>.app/Contents/Info.plist`, read by `/usr/bin/plutil` | `CFBundleShortVersionString`, as a number | - |
 
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `HERMES_HOME` are honoured.
@@ -141,8 +141,74 @@ The tests that hold all of this:
 
 ---
 
+## The Hermes card
+
+The card at the top of Connections is the collector's **hermes** part, written to
+`.agent-team/status/hermes/<computer>.json` (`agent-status/hermes/v1`). It comes from
+`scripts/lib/status/hermes.mjs`, which **never calls `deps.exec`**: Hermes is never run, and no
+other program is either. Everything is read from Hermes's own files.
+
+**Where Hermes is.** The way Hermes works it out (`hermes_constants.py`): `HERMES_HOME`, else
+`%LOCALAPPDATA%\hermes` on Windows, else `~/.hermes`. A `HERMES_HOME` of `<root>/profiles/<name>`
+runs one profile; its root is used. The root is the profile Hermes calls `default`.
+
+| Source | File | Kept | Never kept |
+|---|---|---|---|
+| Version | `hermes-agent/pyproject.toml`, or `hermes-agent/hermes_cli/__init__.py` | the number | every other line |
+| Update | `.update_check` (`ts`, `ver`, `behind`) | `updateAvailable`, only when `ts` is under 7 days old and `ver` is the version installed | how far behind, the commit ids |
+| Gateway | `gateway_state.json` | `gateway_state` and `updated_at` | `pid`, `argv` (the command line, with the username in its path), the chat apps and their ids, everything else |
+| Profiles | `profiles/<name>/`, listed only when it holds one of Hermes's own profile files and has no tombstone in `profiles/.deleted/`; links are not followed | the name, if it passes Hermes's own id rule and the connection-name rule; else counted in `hidden`. Default first, then A to Z, 12 at most, the rest counted in `more` | - |
+| Model | each profile's `config.yaml` | `model.default` (its last part after the last `/`) and `model.provider`, each only if it passes the connection-name rule; a provider only with a model | `base_url` and every other key. The file is read as lines: only the first-level `default` and `provider` lines of the top-level `model` block are matched |
+| Skills | each profile's `skills/` folder | how many files are named `SKILL.md`, at any depth | the files themselves - none is opened, no link is followed |
+| Sessions | each profile's `state.db`, through `node:sqlite`, **read-only** | for top-level sessions: how many started in the last 7 days (`conversations`: every source but `cron`, `delegate`, `subagent`; `scheduled`: `cron`), and the newest activity time | titles, working folders, users, chat ids, models, costs, messages - no such column is ever asked for |
+| Scheduler | each profile's `cron/ticker_heartbeat` | the time in it (one number, seconds since 1970) | anything that is not that one number |
+
+**Checked to exist, never opened:** `config.yaml`, `.env`, `SOUL.md`, `profile.yaml`, `auth.json`
+and `state.db` - only to tell a real profile from a leftover folder - and the tombstone.
+**Never touched at all:** `.env`, `auth.json`, `SOUL.md`, `USER.md`, `memories`, `logs`, the
+`sessions` folder, `pairing`, `bot_relay`, every database but `state.db`.
+
+**The one question to `state.db`.** The collector opens it read-only (SQLite itself then refuses
+any write, and a missing file is never created), asks `PRAGMA table_info(sessions)` for the column
+names, and then one `SELECT` made only of fixed words. Which fixed form it uses depends on which
+of `parent_session_id`, `last_activity_at` and `ended_at` exist; a name read from the file is
+never put into the question. A table without `source` or `started_at`, or a file that is not a
+database, is `unavailable`. Without `node:sqlite` (Node 20, or 22 before 22.13) it is
+`unavailable` with "needs a newer Node". Never 0: a zero would say Hermes was idle.
+
+**Alive.** The file has no yes/no for it; the gate refuses one. The dashboard works it out: the
+gateway is `running` with `updated_at` within 5 minutes of `takenAt`, or a listed profile's
+scheduler beat is within 5 minutes of it. The same function (`aliveFrom` in
+`scripts/lib/status/hermes-schema.mjs`) decides whether the collector writes
+`runs/heartbeat/hermes.json` - `{ runtime, at }`, `at` the newest proof - in the same commit, behind
+the same link checks. Down means no heartbeat, and the old one goes stale.
+
+The contract is `tests/fixtures/hermes-parity.json`, byte for byte the same in the dashboard's repo:
+the gateway states and their words, the alive rule with worked examples, the heartbeat settings
+(Hermes's `stale_after_minutes` is 200), name examples, a full sample and the shape the board must
+build from it.
+
+The tests that hold this:
+
+- `tests/status-hermes-contract.test.mjs` - the contract, the alive rule, the name rules, the gate.
+- `tests/status-hermes.test.mjs` - every file above: the home rule, the version and update check,
+  the gateway, which folders are profiles, the model lines, the skills count, the scheduler time,
+  and the sessions question against real SQLite files (it never writes, asks two statements only,
+  and never names a private column).
+- `tests/status-hermes-run.test.mjs` - the heartbeat only when alive, one commit with the status
+  files, the link check on `runs/heartbeat`, the log, a hostile Hermes home (keys in `.env` and
+  `auth.json`, a keyed `base_url`, the username in the gateway's `argv`, private session titles and
+  folders in `state.db`, `SOUL.md`, memories, logs) leaking nothing, and no program the exec door
+  sees ever being Hermes.
+
+---
+
 ## Not verified yet
 
+- Hermes on the Mac: that it lives in `~/.hermes`, its version, its profiles, and that
+  `gateway_state.json`, `state.db` and `cron/ticker_heartbeat` are there in the shape read here.
+  All of it was read from the Hermes source and the Windows PC's copy only.
+- The Mac's Node version: sessions need `node:sqlite`, Node 22.13 or newer.
 - How long `claude mcp list` takes on the Mac with every server, and whether it writes to
   `~/.claude.json` while it runs.
 - The exact state words it prints there, and whether claude.ai connectors appear in it from a

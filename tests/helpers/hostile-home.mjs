@@ -19,6 +19,7 @@ import {
   FAKE_USERNAME,
   FAKE_HOSTNAME
 } from './fake-home.mjs'
+import { HAVE_SQLITE, makeStateDb } from './hermes-home.mjs'
 
 export const NOW = Date.parse('2026-10-07T20:00:00Z')
 const HOUR = 3600_000
@@ -153,7 +154,57 @@ export async function hostileHome({ now = NOW } = {}) {
       'switched-off@claude-plugins': [{ scope: 'user', installPath: join(fake.home, '.claude', 'plugins', 'cache', 'switched-off'), version: '1.0.0' }]
     }
   })
+  await hostileHermes(fake, now)
   return fake
+}
+
+// Hermes's home, holding everything the Hermes card must never carry: sign-ins, keys, what Hermes
+// remembers and was told, the gateway's command line (with the username in it), chat ids, session
+// titles and folders, logs. What may come out is the version, counts, times, states, and profile
+// and model names that pass the name rule.
+const lines = (...items) => `${items.join('\n')}\n`
+
+async function hostileHermes(fake, now) {
+  const at = (relative, content) => fake.write(`.hermes/${relative}`, content)
+  await at('hermes-agent/pyproject.toml', lines('[project]', 'name = "hermes-agent"', 'version = "0.21.3"'))
+  await at('.update_check', { ts: now / 1000 - HOUR / 1000, behind: 12389, rev: null, ver: '0.21.3', head: 'f88c6fc46e', target: 'abc' })
+  await at('.env', lines(`OPENROUTER_API_KEY=${fakeClaudeToken()}`, `TELEGRAM_TOKEN=${fakeRefreshToken()}`))
+  await at('auth.json', { providers: { anthropic: { access_token: fakeClaudeToken(), email: FAKE_EMAIL } } })
+  await at('SOUL.md', lines('soul-secret-words: I work for secret-client.'))
+  await at('USER.md', lines(`user-secret-words: ${FAKE_EMAIL}`))
+  await at('memories/MEMORY.md', lines('memory-secret-words about secret-client'))
+  await at('logs/agent.log', lines(`log-secret-words ${fakeClaudeToken()} /Users/${FAKE_USERNAME}/secret-client`))
+  await at('config.yaml', lines(
+    'model:',
+    '  default: openrouter/anthropic/claude-opus-5-5',
+    '  provider: openrouter',
+    `  base_url: https://mcp.example.com/v1?key=${fakeClaudeToken()}`,
+    'secrets:',
+    `  openrouter: ${fakeClaudeToken()}`,
+    'providers:',
+    '  custom:',
+    `    api_key: ${fakeRefreshToken()}`,
+    `    default: ${FAKE_EMAIL}`
+  ))
+  await at('gateway_state.json', {
+    pid: 4242,
+    argv: [`/Users/${FAKE_USERNAME}/.hermes/hermes-agent/venv/bin/python`, '-m', 'hermes', 'gateway', '--token', fakeClaudeToken()],
+    gateway_state: 'running',
+    updated_at: new Date(now - 30_000).toISOString().replace('Z', '+00:00'),
+    platforms: { telegram: { chat_id: 'telegram-chat-77', owner: FAKE_EMAIL } }
+  })
+  await at('cron/ticker_heartbeat', String((now - 20_000) / 1000))
+  await at('skills/research/SKILL.md', lines(`skill-secret-words ${fakeClaudeToken()}`))
+  // A profile the board may name, and one named after the person, which it may not.
+  await at('profiles/donna/config.yaml', lines('model:', '  default: gpt-5.1', '  provider: openai', `  base_url: https://mcp.example.com/donna?key=${fakeRefreshToken()}`))
+  await at('profiles/donna/SOUL.md', lines('soul-secret-words for donna'))
+  await at(`profiles/${FAKE_USERNAME}/config.yaml`, lines('model: x'))
+  if (HAVE_SQLITE) {
+    await makeStateDb(join(fake.home, '.hermes', 'state.db'), [
+      { id: FAKE_UUID, source: 'telegram', user_id: FAKE_EMAIL, chat_id: 'telegram-chat-77', started_at: (now - HOUR) / 1000, last_activity_at: (now - 600_000) / 1000, title: 'secret-client roadmap', cwd: `/Users/${FAKE_USERNAME}/secret-client`, billing_base_url: 'https://mcp.example.com/bill' },
+      { id: 'cron-1', source: 'cron', started_at: (now - 2 * HOUR) / 1000, title: 'secret-client nightly' }
+    ])
+  }
 }
 
 export const FORBIDDEN = () => [
@@ -180,7 +231,21 @@ export const FORBIDDEN = () => [
   'switched-off',
   'hidden-in-a-string',
   'trust_level',
-  'oat01'
+  'oat01',
+  // What Hermes keeps beside the counts, times and names the card shows.
+  'soul-secret-words',
+  'user-secret-words',
+  'memory-secret-words',
+  'log-secret-words',
+  'skill-secret-words',
+  'OPENROUTER_API_KEY',
+  'TELEGRAM_TOKEN',
+  'telegram-chat-77',
+  'hermes-agent',
+  'venv',
+  'f88c6fc46e',
+  'roadmap',
+  'nightly'
 ]
 
 export function depsFor(fake, extra = {}) {

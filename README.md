@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 1009
+ℹ tests 1030
 ℹ fail 0
 ```
 
@@ -271,7 +271,9 @@ reset. A small script on your computer reads the numbers and saves them into thi
 ## The Connections wall
 
 The same script also lists, by name only, the AI tools, servers and plugins each computer has, and
-whether each one connects.
+whether each one connects. If the computer runs Hermes, a Hermes card sits on top: whether it is
+running, its version, and per profile the model, skills and last week's conversations - read from
+Hermes's own files, never by running Hermes.
 
 - **Set it up:** [The Connections wall on your dashboard](docs/guides/connections-wall.md) - how to
   fill it, and what each word on it means. Or ask Claude: **/snapshot**.

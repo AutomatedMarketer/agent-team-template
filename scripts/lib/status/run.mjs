@@ -4,9 +4,10 @@
 // programs, identity - so the tests can run the whole thing against a fake home with a fake
 // network, and the leak test exercises exactly the code that runs on the real machine.
 //
-// A run collects one or more parts (schema.mjs, PARTS): usage, connections. They travel together:
-// every part passes the gate before anything is written, and in commit mode every file goes into
-// one commit.
+// A run collects one or more parts (schema.mjs, PARTS): usage, connections, hermes. They travel
+// together: every part passes the gate before anything is written, and in commit mode every file
+// goes into one commit. The Hermes part can bring one more file: Hermes's heartbeat, written only
+// when the alive rule holds (hermes-schema.mjs), checked and committed with the rest.
 
 import { join } from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
@@ -24,7 +25,8 @@ import {
   FINAL_SHAPE
 } from './schema.mjs'
 import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
-import { checkUsage, checkConnections, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
+import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
+import { checkUsage, checkConnections, checkHermes, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 import { writeSnapshot, assertNoLinks, LinkedPath } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
@@ -32,6 +34,7 @@ import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
 import { collectConnections } from './connections.mjs'
+import { collectHermes } from './hermes.mjs'
 import {
   takeLock,
   releaseLock,
@@ -139,7 +142,48 @@ export function connectionStatuses(doc) {
   return { claude: doc.claude.status, codex: doc.codex.status, tools: doc.tools.filter((tool) => tool.state === 'found').length }
 }
 
+const statusDetail = (block) => (block.status === 'found' ? '' : block.why ? ` (${block.why})` : '')
+
+// Counts, statuses and the gateway's state word only - never a profile or model name, which are
+// the person's own words.
+export function summarizeHermes(doc) {
+  const update = doc.install.updateAvailable === true ? ', update available' : doc.install.updateAvailable === false ? ', up to date' : ''
+  const install = doc.install.status === 'found'
+    ? `found (${doc.install.version ? 'version read' : 'no version read'}${update})`
+    : blockDetail(doc.install)
+  const gateway = doc.gateway.status === 'found' ? `found (${doc.gateway.state}${doc.gateway.beatAt ? '' : ', no time'})` : blockDetail(doc.gateway)
+  const lines = [`- Install ${install}`, `- Gateway ${gateway}`]
+  if (doc.profiles.status !== 'found') {
+    lines.push(`- Profiles ${blockDetail(doc.profiles)}`)
+  } else {
+    const { items, hidden, more } = doc.profiles
+    lines.push(`- Profiles found: ${items.length} listed, ${hidden} hidden, ${more} more`)
+    const sessions = {}
+    for (const item of items) {
+      const word = `${item.sessions.status}${statusDetail(item.sessions)}`
+      sessions[word] = (sessions[word] ?? 0) + 1
+    }
+    lines.push(`- Sessions: ${Object.entries(sessions).map(([word, count]) => `${count} ${word}`).join(', ') || 'none'}`)
+  }
+  lines.push(aliveFrom(doc).alive ? '- Alive by the rule: yes, heartbeat written' : '- Alive by the rule: no, no heartbeat written')
+  return lines
+}
+
+export function hermesStatuses(doc) {
+  return { install: doc.install.status, gateway: doc.gateway.status, profiles: doc.profiles.status, heartbeat: aliveFrom(doc).alive }
+}
+
+// Hermes's heartbeat, { runtime, at }, when the alive rule holds; nothing otherwise. A heartbeat
+// already in the repo is then left as it is, so the board sees it go stale.
+export function hermesHeartbeat(doc) {
+  const { alive, at } = aliveFrom(doc)
+  if (!alive) return []
+  return [{ relativePath: HEARTBEAT.path, doc: { runtime: HEARTBEAT.runtime, at }, shape: HEARTBEAT_SHAPE }]
+}
+
 // Each part: where it goes, how it is collected, the gate it passes, and what the log says.
+// `alsoWrites` lists the paths a part may write besides its own file - they are link-checked before
+// anything is read, like the part's own - and `extras` builds those files from the part's document.
 const PART_TABLE = {
   usage: {
     title: 'Usage',
@@ -156,8 +200,21 @@ const PART_TABLE = {
     check: checkConnections,
     summarize: (doc) => summarizeConnections(doc),
     statuses: connectionStatuses
+  },
+  hermes: {
+    title: 'Hermes',
+    path: hermesPath,
+    alsoWrites: [HEARTBEAT.path],
+    collect: (deps, computer) => (deps.sources?.hermes ?? collectHermes)(deps, computer),
+    check: checkHermes,
+    extras: hermesHeartbeat,
+    summarize: (doc) => summarizeHermes(doc),
+    statuses: hermesStatuses
   }
 }
+
+// Every path the parts asked for may write: each part's own file, and anything it also writes.
+const pathsFor = (parts, computer) => parts.flatMap((part) => [PART_TABLE[part].path(computer), ...(PART_TABLE[part].alsoWrites ?? [])])
 
 if (JSON.stringify(Object.keys(PART_TABLE)) !== JSON.stringify(PARTS)) {
   throw new Error('run.mjs: the part table does not match PARTS')
@@ -175,8 +232,9 @@ export function partsFrom(only) {
   return { parts: PARTS.filter((part) => asked.includes(part)) }
 }
 
-// Collects every part asked for, then holds every one to the gate. Returns { snapshots } when all
-// passed, or { problems } naming each refused field with its part - nothing is written either way.
+// Collects every part asked for, then holds every one to the gate, and every extra file to its own.
+// Returns { snapshots, files } when all passed - snapshots per part, files every file to write, in
+// order - or { problems } naming each refused field with its part. Nothing is written either way.
 async function collectParts(parts, deps, computer, identity) {
   const snapshots = []
   for (const part of parts) {
@@ -186,7 +244,17 @@ async function collectParts(parts, deps, computer, identity) {
     snapshots.push({ part, entry, trail, doc, relativePath: entry.path(computer), text: `${JSON.stringify(doc, null, 2)}\n` })
   }
   const problems = snapshots.flatMap(({ part, entry, doc }) => entry.check(doc, identity).map((problem) => `${part}: ${problem}`))
-  return problems.length ? { problems } : { snapshots }
+  if (problems.length) return { problems }
+  const files = []
+  for (const snapshot of snapshots) {
+    files.push({ relativePath: snapshot.relativePath, text: snapshot.text })
+    for (const extra of snapshot.entry.extras?.(snapshot.doc) ?? []) {
+      const refused = checkAgainst(extra.doc, extra.shape, identity).map((problem) => `${snapshot.part}: ${extra.relativePath}: ${problem}`)
+      if (refused.length) return { problems: refused }
+      files.push({ relativePath: extra.relativePath, text: `${JSON.stringify(extra.doc, null, 2)}\n` })
+    }
+  }
+  return { snapshots, files }
 }
 
 function report(snapshots, say) {
@@ -197,12 +265,14 @@ function report(snapshots, say) {
 }
 
 const USAGE_TEXT = [
-  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections] [--dry-run]',
+  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes] [--dry-run]',
   '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
   'Parts (every one, unless --only picks some):',
   '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
   '  connections: installed tools, and Claude and Codex servers and plugins - names only.',
   '               It runs `claude mcp list`, which starts every server, for 2 minutes at most.',
+  "  hermes: Hermes's version, gateway and profiles - counts, times and names only, from its",
+  '          files. It never runs hermes. When Hermes is alive it also writes runs/heartbeat/hermes.json.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 
@@ -222,7 +292,7 @@ function gatedPrinter(print, identity) {
 }
 
 const LINK_REFUSAL = [
-  'Refused: part of the path a snapshot goes to (.agent-team/status/...) is a link to somewhere else.',
+  'Refused: part of the path a snapshot goes to (.agent-team/status/... or runs/heartbeat/...) is a link to somewhere else.',
   'Nothing was written. A link there would send the file outside this folder. Replace it with a real folder.'
 ]
 
@@ -240,9 +310,9 @@ async function assertNoLinksAll(target, relativePaths, options) {
   for (const relativePath of relativePaths) await assertNoLinks(target, relativePath, options)
 }
 
-async function writeAll(target, snapshots, options) {
-  await assertNoLinksAll(target, snapshots.map(({ relativePath }) => relativePath), options)
-  for (const { relativePath, text } of snapshots) await writeSnapshot(target, relativePath, text, options)
+async function writeAll(target, files, options) {
+  await assertNoLinksAll(target, files.map(({ relativePath }) => relativePath), options)
+  for (const { relativePath, text } of files) await writeSnapshot(target, relativePath, text, options)
 }
 
 export const defaultStateDir = (deps) => join(deps.home, '.local', 'state', 'agent-status-collector')
@@ -307,7 +377,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
 
   // Checked before anything is read, and again by every write.
   try {
-    if (!values['dry-run']) await assertNoLinksAll(repoRoot, parts.map((part) => PART_TABLE[part].path(computer)), { git: deps.git })
+    if (!values['dry-run']) await assertNoLinksAll(repoRoot, pathsFor(parts, computer), { git: deps.git })
   } catch (error) {
     if (!(error instanceof LinkedPath)) throw error
     LINK_REFUSAL.forEach(complain)
@@ -319,10 +389,10 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain(`Nothing written. The safety check refused: ${collected.problems.join('; ')}`)
     return 1
   }
-  const { snapshots } = collected
+  const { snapshots, files } = collected
 
   if (values['dry-run']) {
-    for (const { text, relativePath } of snapshots) {
+    for (const { text, relativePath } of files) {
       say(text.trimEnd())
       say(`Dry run for ${computer}. Nothing written. It would go to ${relativePath}`)
     }
@@ -331,13 +401,13 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   }
 
   try {
-    await writeAll(repoRoot, snapshots, { git: deps.git })
+    await writeAll(repoRoot, files, { git: deps.git })
   } catch (error) {
     if (!(error instanceof LinkedPath)) throw error
     LINK_REFUSAL.forEach(complain)
     return 1
   }
-  for (const { relativePath } of snapshots) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
+  for (const { relativePath } of files) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
   report(snapshots, say)
   return 0
 }
@@ -360,7 +430,9 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
   const { stateDir } = deps
   const mode = values.clone !== undefined ? 'clone' : 'working-copy'
   const target = mode === 'clone' ? values.clone : repoRoot
-  const relativePaths = parts.map((part) => PART_TABLE[part].path(computer))
+  // Every path this run may write: changes to these in the dedicated clone are the collector's own,
+  // and each is link-checked before anything is read.
+  const relativePaths = pathsFor(parts, computer)
   const git = mode === 'clone' ? await withoutHooks(deps.git, stateDir) : deps.git
 
   const lock = await takeLock(stateDir, deps.now)
@@ -429,8 +501,8 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
         await finish('refused by the safety check')
         return 1
       }
-      const { snapshots } = collected
-      const write = () => writeAll(target, snapshots, { git })
+      const { snapshots, files } = collected
+      const write = () => writeAll(target, files, { git })
       try {
         await write()
       } catch (error) {
@@ -445,7 +517,7 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
         claimedAt: isoSeconds(deps.now),
         computer,
         parts,
-        files: snapshots.map(({ relativePath, text }) => ({ file: relativePath, sha256: createHash('sha256').update(text).digest('hex') })),
+        files: files.map(({ relativePath, text }) => ({ file: relativePath, sha256: createHash('sha256').update(text).digest('hex') })),
         sources: Object.fromEntries(snapshots.map(({ part, entry, doc }) => [part, entry.statuses(doc)]))
       }
       const receiptProblems = checkAgainst(receipt, RECEIPT_SHAPE, identity)
@@ -455,7 +527,7 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
         return 1
       }
       await writeRecord(claim, 'receipt.json', receipt)
-      for (const { relativePath } of snapshots) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
+      for (const { relativePath } of files) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
       report(snapshots, say)
 
       let result
@@ -463,7 +535,8 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
         result = await commitAndPush({
           git,
           dir: target,
-          relativePaths,
+          // Only the files written this run: a heartbeat not written this time is not committed.
+          relativePaths: files.map(({ relativePath }) => relativePath),
           message: `${SNAPSHOT_SUBJECT}${computer}`,
           mode,
           rewrite: write

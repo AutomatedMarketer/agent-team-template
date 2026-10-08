@@ -14,7 +14,7 @@ import { checkAgainst } from '../scripts/lib/status/safe.mjs'
 import { makeFakeHome, FAKE_EMAIL } from './helpers/fake-home.mjs'
 import { depsFor, filesUnder, runIn } from './helpers/hostile-home.mjs'
 
-/* A run collects several parts - usage, connections, and Hermes later - and each part is its own
+/* A run collects several parts - usage, connections and Hermes - and each part is its own
    file. They travel together: every part passes the gate before anything is written, the files
    are committed in one commit, and the receipt lists each file with its hash. These run real git
    against a throwaway bare remote, as tests/status-commit.test.mjs does - no network. */
@@ -23,6 +23,7 @@ const execFileP = promisify(execFile)
 const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
 const USAGE = '.agent-team/status/usage/test-pc.json'
 const CONNECTIONS = '.agent-team/status/connections/test-pc.json'
+const HERMES = '.agent-team/status/hermes/test-pc.json'
 
 const relativeFiles = async (target) => (await filesUnder(target)).map((file) => file.slice(target.length + 1).replaceAll('\\', '/')).sort()
 
@@ -62,14 +63,15 @@ async function collect(fake, args, { repo, stateDir, extra = {} }) {
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') }
 }
 
-test('the parts are usage and connections, and a run with no --only writes both', async () => {
-  assert.deepEqual(PARTS, ['usage', 'connections'])
+test('the parts are usage, connections and hermes, and a run with no --only writes them all', async () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes'])
   const fake = await makeFakeHome()
   try {
     const result = await runIn(fake, ['--computer', 'Test PC'])
     assert.equal(result.code, 0, result.stderr)
-    assert.deepEqual(await relativeFiles(result.target), [CONNECTIONS, USAGE])
+    assert.deepEqual(await relativeFiles(result.target), [CONNECTIONS, HERMES, USAGE])
     assert.match(result.stdout, /\.agent-team\/status\/usage\/test-pc\.json/)
+    assert.match(result.stdout, /\.agent-team\/status\/hermes\/test-pc\.json/)
     assert.match(result.stdout, /\.agent-team\/status\/connections\/test-pc\.json/)
     const doc = JSON.parse(await readFile(join(result.target, ...CONNECTIONS.split('/')), 'utf8'))
     assert.equal(doc.schema, 'agent-status/connections/v1')
@@ -88,7 +90,9 @@ test('--only picks parts, in any order, and writes nothing else', async () => {
       ['connections', [CONNECTIONS]],
       ['connections,usage', [CONNECTIONS, USAGE]],
       ['usage, connections', [CONNECTIONS, USAGE]],
-      ['usage,usage', [USAGE]]
+      ['usage,usage', [USAGE]],
+      ['hermes', [HERMES]],
+      ['hermes,usage', [HERMES, USAGE]]
     ]) {
       const result = await runIn(fake, ['--computer', 'Test PC', '--only', only])
       assert.equal(result.code, 0, `${only}: ${result.stderr}`)
@@ -100,10 +104,10 @@ test('--only picks parts, in any order, and writes nothing else', async () => {
   }
 })
 
-test('--only refuses parts that do not exist yet, or at all, before reading anything', async () => {
+test('--only refuses parts that do not exist, before reading anything', async () => {
   const fake = await makeFakeHome()
   try {
-    for (const only of ['hermes', 'usage,hermes', 'bogus', '', ',', 'usage,,connections', FAKE_EMAIL]) {
+    for (const only of ['bogus', 'hermes,bogus', '', ',', 'usage,,connections', FAKE_EMAIL]) {
       const deps = depsFor(fake)
       const result = await runIn(fake, ['--computer', 'Test PC', '--only', only], { fetch: deps.fetch })
       assert.equal(result.code, 2, `--only ${JSON.stringify(only)} was accepted`)
@@ -112,9 +116,6 @@ test('--only refuses parts that do not exist yet, or at all, before reading anyt
       if (only.length > 3) assert.ok(!result.stderr.includes(only), 'the refusal repeated what was typed')
       await rm(result.target, { recursive: true, force: true })
     }
-    const hermes = await runIn(fake, ['--only', 'hermes'])
-    assert.match(hermes.stderr, /Hermes comes in a later phase/)
-    await rm(hermes.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()
   }
@@ -150,6 +151,7 @@ test('--dry-run prints every part it would write and writes nothing', async () =
     assert.deepEqual(await filesUnder(result.target), [])
     assert.match(result.stdout, /"schema": "agent-status\/usage\/v1"/)
     assert.match(result.stdout, /"schema": "agent-status\/connections\/v1"/)
+    assert.match(result.stdout, /"schema": "agent-status\/hermes\/v1"/)
     assert.match(result.stdout, /It would go to \.agent-team\/status\/usage\/test-pc\.json/)
     assert.match(result.stdout, /It would go to \.agent-team\/status\/connections\/test-pc\.json/)
     await rm(result.target, { recursive: true, force: true })
@@ -167,7 +169,7 @@ test('several files, one commit, with the new subject, and other staged work lef
     const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 0, result.stderr)
     const files = (await git(['show', '--name-only', '--format=', 'HEAD'], repo.work)).stdout.trim().split('\n').sort()
-    assert.deepEqual(files, [CONNECTIONS, USAGE])
+    assert.deepEqual(files, [CONNECTIONS, HERMES, USAGE])
     assert.equal(SNAPSHOT_SUBJECT, 'Status snapshot from ')
     const subjects = (await git(['log', '--format=%s', 'origin/main'], repo.work)).stdout.trim().split('\n')
     assert.deepEqual(subjects, ['Status snapshot from Test PC', 'start'], 'one commit carried both files')
@@ -246,13 +248,13 @@ test('the receipt lists every file written with its hash, and the parts', async 
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
     assert.equal(receipt.schema, 'agent-status/receipt/v2')
-    assert.deepEqual(receipt.parts, ['usage', 'connections'])
-    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes'])
+    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
       assert.equal(entry.sha256, createHash('sha256').update(bytes).digest('hex'))
     }
-    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections'])
+    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes'])
     assert.deepEqual(Object.keys(receipt.sources.connections).sort(), ['claude', 'codex', 'tools'])
     assert.deepEqual(checkAgainst(receipt, RECEIPT_SHAPE, fake.identity), [])
   } finally {
@@ -277,7 +279,7 @@ test('the receipt gate refuses a file outside the parts, or a part named twice',
     [(r) => { r.files[0].file = '.agent-team/status/secrets/mac-mini.json' }, /files\[0\]\.file/],
     [(r) => { r.files.push({ ...r.files[0] }) }, /files: names the same entry twice/],
     [(r) => { r.parts = ['usage', 'usage'] }, /parts: names the same entry twice/],
-    [(r) => { r.parts = ['hermes'] }, /parts\[0\]/],
+    [(r) => { r.parts = ['bogus'] }, /parts\[0\]/],
     [(r) => { r.sources.connections = { claude: 'found', codex: 'found', tools: 'nine' } }, /sources\.connections\.tools/],
     [(r) => { r.file = 'x' }, /^file: is not an allowed key/]
   ]

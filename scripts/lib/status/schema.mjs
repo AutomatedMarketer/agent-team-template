@@ -174,9 +174,15 @@ export const USAGE_SHAPE = {
 // Mac task policy says not to replay that blindly.
 
 // The parts one run can collect, each its own file under .agent-team/status/<part>/. A run with no
-// --only collects them all. Hermes is named so --only hermes can say when it arrives.
-export const PARTS = ['usage', 'connections']
-export const LATER_PARTS = { hermes: 'Hermes comes in a later phase (Phase 6).' }
+// --only collects them all. LATER_PARTS names a part that is planned but not built yet, so --only
+// can say when it arrives instead of calling it unknown; there is none at the moment.
+export const PARTS = ['usage', 'connections', 'hermes']
+export const LATER_PARTS = {}
+
+// The one file a run writes outside .agent-team/status: Hermes's heartbeat, written with the Hermes
+// file when the alive rule holds. The same path as hermes-schema.mjs HEARTBEAT.path (that module
+// reads this one, so the path is spelled out here; tests/status-hermes-run.test.mjs holds them equal).
+export const HEARTBEAT_FILE = 'runs/heartbeat/hermes.json'
 
 // v2: one run writes several files, so the receipt lists each with its own hash.
 export const RECEIPT_SCHEMA = 'agent-status/receipt/v2'
@@ -206,13 +212,14 @@ export const RECEIPT_SHAPE = {
       of: {
         type: 'object',
         keys: {
-          file: { type: 'pattern', pattern: new RegExp(`^\\.agent-team\\/status\\/(${PARTS.join('|')})\\/[a-z0-9-]{1,32}\\.json$`) },
+          file: { type: 'pattern', pattern: new RegExp(`^(\\.agent-team\\/status\\/(${PARTS.join('|')})\\/[a-z0-9-]{1,32}\\.json|runs\\/heartbeat\\/hermes\\.json)$`) },
           sha256: { type: 'pattern', pattern: /^[0-9a-f]{64}$/ }
         },
         required: ['file', 'sha256']
       },
       min: 1,
-      max: PARTS.length,
+      // One file per part, and the heartbeat.
+      max: PARTS.length + 1,
       unique: ['file']
     },
     sources: {
@@ -227,6 +234,11 @@ export const RECEIPT_SHAPE = {
           type: 'object',
           keys: { claude: statusWord, codex: statusWord, tools: { type: 'count' } },
           required: ['claude', 'codex', 'tools']
+        },
+        hermes: {
+          type: 'object',
+          keys: { install: statusWord, gateway: statusWord, profiles: statusWord, heartbeat: { type: 'boolean' } },
+          required: ['install', 'gateway', 'profiles', 'heartbeat']
         }
       }
     }

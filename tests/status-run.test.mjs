@@ -35,7 +35,7 @@ test('LEAK TEST: nothing from the hostile home reaches the file, stdout or stder
     const usageFile = (result) => join(result.target, '.agent-team', 'status', 'usage', 'test-pc.json')
     for (const result of [written, hostile]) {
       const files = await filesUnder(result.target)
-      assert.equal(files.length, 2, 'exactly one file per part is written')
+      assert.equal(files.length, 4, 'exactly one file per part is written, and the Hermes heartbeat')
       outputs.push(await readFile(usageFile(result), 'utf8'))
     }
     for (const result of [written, hostile]) {
@@ -209,7 +209,7 @@ test('--dry-run prints the file it would write and writes nothing', async () => 
 test('options it does not know, and --only for a part that does not exist, are refused', async () => {
   const fake = await makeFakeHome()
   try {
-    for (const args of [['--bogus'], ['--only', 'hermes'], ['--only', 'everything'], ['--computer']]) {
+    for (const args of [['--bogus'], ['--only', 'everything'], ['--computer']]) {
       const result = await runIn(fake, args)
       assert.notEqual(result.code, 0, `${args.join(' ')} was accepted`)
       assert.deepEqual(await filesUnder(result.target), [])
