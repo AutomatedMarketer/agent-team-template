@@ -5,22 +5,19 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { runCollector } from '../scripts/lib/status/run.mjs'
 import { PARTS, RECEIPT_SHAPE } from '../scripts/lib/status/schema.mjs'
 import { SNAPSHOT_SUBJECT, SNAPSHOT_SUBJECTS } from '../scripts/lib/status/commit.mjs'
 import { checkAgainst } from '../scripts/lib/status/safe.mjs'
 import { makeFakeHome, FAKE_EMAIL } from './helpers/fake-home.mjs'
 import { depsFor, filesUnder, runIn } from './helpers/hostile-home.mjs'
+import { git } from './helpers/git.mjs'
 
 /* A run collects several parts - usage, connections and Hermes - and each part is its own
    file. They travel together: every part passes the gate before anything is written, the files
    are committed in one commit, and the receipt lists each file with its hash. These run real git
    against a throwaway bare remote, as tests/status-commit.test.mjs does - no network. */
 
-const execFileP = promisify(execFile)
-const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
 const USAGE = '.agent-team/status/usage/test-pc.json'
 const CONNECTIONS = '.agent-team/status/connections/test-pc.json'
 const HERMES = '.agent-team/status/hermes/test-pc.json'

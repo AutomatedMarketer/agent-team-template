@@ -16,6 +16,7 @@ import { makeFakeHome, execStub, FAKE_USERNAME } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder } from './helpers/hostile-home.mjs'
 import { writeHermes, hermesFolderFor } from './helpers/hermes-home.mjs'
 import { repoRoot } from './helpers/repo.mjs'
+import { git } from './helpers/git.mjs'
 
 /* The Hermes part inside a run: --only hermes, the heartbeat written when (and only when) the alive
    rule holds, in the same commit as the status files and behind the same link checks, the log and
@@ -24,7 +25,6 @@ import { repoRoot } from './helpers/repo.mjs'
    against a throwaway bare remote, as tests/status-commit.test.mjs does; no network. */
 
 const execFileP = promisify(execFile)
-const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
 const HERMES = '.agent-team/status/hermes/test-pc.json'
 const USAGE = '.agent-team/status/usage/test-pc.json'
 const CONNECTIONS = '.agent-team/status/connections/test-pc.json'

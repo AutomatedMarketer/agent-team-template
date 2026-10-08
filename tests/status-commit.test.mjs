@@ -5,20 +5,18 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { runCollector } from '../scripts/lib/status/run.mjs'
 import { slotStamp } from '../scripts/lib/status/commit.mjs'
 import { makeFakeHome, setMtime } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
 import { repoRoot } from './helpers/repo.mjs'
+import { git } from './helpers/git.mjs'
 
 /* Commit mode is the part that touches somebody's repo unattended, every three hours. Two rules
    carry it: it commits only its own file, whatever else is staged; and a refused push in a
    person's own working copy stops and says so, while only the collector's dedicated clone may be
    reset and retried. These run real git against a throwaway bare remote - no network. */
 
-const execFileP = promisify(execFile)
-const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
 const OWN = '.agent-team/status/usage/test-pc.json'
 const OWN_CONNECTIONS = '.agent-team/status/connections/test-pc.json'
 const OWN_HERMES = '.agent-team/status/hermes/test-pc.json'
