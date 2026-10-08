@@ -17,20 +17,39 @@ import { spawn } from 'node:child_process'
 import { runTap, shellFor } from './lib/status/tap.mjs'
 
 const STDIN_CAP = 2_000_000
+// Claude Code writes the JSON and closes stdin at once. A caller that never closes it would
+// otherwise leave the tap - and the status bar - waiting forever.
+const STDIN_TIMEOUT_MS = 3_000
 // Claude Code cancels a status line that is still running when the next update arrives, so this
 // only matters for an earlier command that hangs on its own.
 const EARLIER_TIMEOUT_MS = 10_000
+// After the earlier command's shell exits, how long to wait for the last of its output. A
+// background job it started can hold the output open for as long as it lives; we do not wait.
+const AFTER_EXIT_MS = 150
 
-async function readStdin() {
-  if (process.stdin.isTTY) return ''
-  const chunks = []
-  let size = 0
-  for await (const chunk of process.stdin) {
-    size += chunk.length
-    if (size > STDIN_CAP) break
-    chunks.push(chunk)
-  }
-  return Buffer.concat(chunks).toString('utf8')
+function readStdin() {
+  if (process.stdin.isTTY) return Promise.resolve('')
+  return new Promise((resolve) => {
+    const chunks = []
+    let size = 0
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      process.stdin.removeAllListeners('data')
+      process.stdin.destroy()
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    }
+    const timer = setTimeout(finish, STDIN_TIMEOUT_MS)
+    process.stdin.on('data', (chunk) => {
+      size += chunk.length
+      if (size > STDIN_CAP) finish()
+      else chunks.push(chunk)
+    })
+    process.stdin.on('end', finish)
+    process.stdin.on('error', finish)
+  })
 }
 
 // The earlier status line runs through the shell the installer recorded for it (--then-shell),
@@ -46,15 +65,29 @@ function runEarlier(command, input, dialect) {
     const [shell, flags] = chosen
     let child
     try {
-      child = spawn(shell, [...flags, command], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, timeout: EARLIER_TIMEOUT_MS })
+      // stderr is piped and passed on, not inherited: a background job inheriting it would keep
+      // Claude Code's own stderr open after the tap had finished.
+      child = spawn(shell, [...flags, command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, timeout: EARLIER_TIMEOUT_MS })
     } catch {
       resolve('')
       return
     }
     const out = []
+    let settled = false
+    const finish = (text) => {
+      if (settled) return
+      settled = true
+      // Let go of the pipes, so a background job still holding them cannot keep this process alive.
+      child.stdout.destroy()
+      child.stderr.destroy()
+      resolve(text)
+    }
     child.stdout.on('data', (chunk) => out.push(chunk))
-    child.on('error', () => resolve(''))
-    child.on('close', () => resolve(Buffer.concat(out).toString('utf8')))
+    child.stderr.on('data', (chunk) => process.stderr.write(chunk))
+    child.on('error', () => finish(''))
+    child.on('close', () => finish(Buffer.concat(out).toString('utf8')))
+    // 'close' waits for every holder of the output to let go; 'exit' is the shell itself ending.
+    child.on('exit', () => setTimeout(() => finish(Buffer.concat(out).toString('utf8')), AFTER_EXIT_MS))
     child.stdin.on('error', () => {})
     child.stdin.end(input)
   })

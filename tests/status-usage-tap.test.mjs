@@ -509,3 +509,45 @@ test('the real script chains a real earlier status line through the shell', { sk
     await fake.cleanup()
   }
 })
+
+// --- it always finishes ----------------------------------------------------------------------------
+//
+// Found in review: a stdin that never closes left the tap waiting forever, and an earlier command
+// that left a background process holding its output made the tap wait for that process too - the
+// 10-second limit only stopped the shell. Claude Code would cancel it on the next update, but a
+// status line that never finishes is a status line that never shows.
+
+function spawnTapTimed(fake, args, { input = null, env = fakeEnv(fake) } = {}) {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const child = execFile(process.execPath, [join('scripts', 'usage-tap.mjs'), ...args], { cwd: repoRoot, env, encoding: 'utf8', timeout: 20_000 }, (error, stdout) => {
+      resolve({ code: error ? error.code ?? error.signal : 0, stdout, ms: Date.now() - started })
+    })
+    // input null: stdin is left open, the way a stuck caller would leave it.
+    if (input !== null) child.stdin.end(input)
+  })
+}
+
+test('a stdin that never closes is given up on after about 3 seconds', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const result = await spawnTapTimed(fake, [])
+    assert.equal(result.code, 0)
+    assert.equal(result.stdout, '')
+    assert.ok(result.ms < 8000, `the tap waited ${result.ms} ms for stdin`)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('an earlier command that leaves a background process holding its output does not hold the tap', { skip: process.platform === 'win32' && !gitBash ? 'no Git Bash at the usual place on this Windows computer' : false }, async () => {
+  const fake = await makeFakeHome()
+  try {
+    // A shell background job inherits the shell's stdout and outlives it by 12 seconds.
+    const result = await spawnTapTimed(fake, ['--then-shell', 'sh', '--then', 'sleep 12 & echo earlier line'], { input: JSON.stringify(statusLineInput()) })
+    assert.equal(result.stdout.trim(), 'earlier line')
+    assert.ok(result.ms < 8000, `the tap waited ${result.ms} ms for a background process`)
+  } finally {
+    await fake.cleanup()
+  }
+})

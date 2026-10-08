@@ -156,8 +156,9 @@ environment). So the installer decides once, the same way, and writes it into th
 - **No new trust.** The earlier command is your own, and it ran through a shell before. Nothing new
   gets to run.
 
-An earlier command that hangs is stopped after 10 seconds. If it fails, the bar is left empty
-rather than showing an error.
+An earlier command that hangs is stopped after 10 seconds, and the tap does not wait for any
+background job it leaves running. A stdin that never closes is given up on after 3 seconds. If the
+earlier command fails, the bar is left empty rather than showing an error.
 
 ---
 
