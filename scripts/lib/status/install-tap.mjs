@@ -7,8 +7,8 @@
 // exactly what was there. The earlier status line is carried inside the new command itself
 // (--then64, see tap.mjs), so there is no second record that could drift from it.
 
-import { join, dirname } from 'node:path'
-import { readFile, writeFile, rename, rm, copyFile } from 'node:fs/promises'
+import { join, dirname, basename } from 'node:path'
+import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod } from 'node:fs/promises'
 import { isPlainObject } from './util.mjs'
 import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
 
@@ -166,7 +166,6 @@ export async function installTap(deps) {
 }
 
 async function writeSettings(path, plan, originalText, deps) {
-
   // The backup first. If that fails, nothing is changed.
   let backup = null
   if (originalText !== null) {
@@ -174,10 +173,17 @@ async function writeSettings(path, plan, originalText, deps) {
     await copyFile(path, backup)
   }
   // Written beside the file and renamed over it, so Claude Code never reads half a settings file.
-  const temporary = `${path}.usage-tap-${process.pid}.tmp`
+  // Beside the REAL file: when settings.json is a link (a dotfiles repo), renaming over the link
+  // would replace it with a plain file. And with the file's own permissions: a settings file the
+  // person made private (0600) must not come back readable by everyone.
+  const target = originalText === null ? path : await realpath(path)
+  const mode = originalText === null ? null : (await stat(target)).mode & 0o777
+  const temporary = join(dirname(target), `.${basename(target)}.usage-tap-${process.pid}.tmp`)
   try {
-    await writeFile(temporary, serialise(plan.next, originalText))
-    await rename(temporary, path)
+    await writeFile(temporary, serialise(plan.next, originalText), mode === null ? undefined : { mode })
+    // writeFile's mode passes through the umask; chmod sets exactly the original.
+    if (mode !== null) await chmod(temporary, mode)
+    await rename(temporary, target)
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {})
     throw error

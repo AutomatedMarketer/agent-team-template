@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, writeFile, mkdtemp, rm, readdir, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdtemp, rm, readdir, mkdir, symlink, lstat, chmod, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { join, sep, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
@@ -237,6 +237,45 @@ test('--dry-run says what would change and writes nothing at all', async () => {
     assert.ok(result.next.statusLine.command.includes('usage-tap.mjs'))
     assert.equal(await readFile(temp.settings, 'utf8'), original)
     assert.deepEqual(await filesIn(join(temp.home, '.claude')), ['settings.json'])
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+// Dotfile setups keep settings.json in a repo of their own and link it into ~/.claude. Renaming a
+// new file over the link would replace the link with a plain file and quietly cut them off.
+test('a settings.json that is a link stays a link, and the file it points to is the one changed', async (t) => {
+  const temp = await tempHome()
+  try {
+    const real = join(temp.root, 'dotfiles', 'claude-settings.json')
+    await mkdir(dirname(real), { recursive: true })
+    await writeFile(real, JSON.stringify(someSettings, null, 2))
+    try {
+      await symlink(real, temp.settings, 'file')
+    } catch (error) {
+      t.skip(`this computer does not let a test make a file link (${error.code}) - NOT CHECKED here`)
+      return
+    }
+    const result = await installTap(deps(temp))
+    assert.equal(result.action, 'install')
+    assert.ok((await lstat(temp.settings)).isSymbolicLink(), 'the link was replaced by a plain file')
+    assert.ok(JSON.parse(await readFile(real, 'utf8')).statusLine.command.includes('usage-tap.mjs'), 'the linked file was not changed')
+    assert.deepEqual((await readdir(dirname(real))).sort(), ['claude-settings.json'], 'a temporary file was left beside the real file')
+    await installTap(deps(temp, { remove: true, now: STAMP + 60_000 }))
+    assert.ok((await lstat(temp.settings)).isSymbolicLink())
+    assert.deepEqual(JSON.parse(await readFile(real, 'utf8')), someSettings)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a private settings.json stays private: its permissions are kept', { skip: process.platform === 'win32' ? 'Windows has no Unix file modes - checked on a Mac or Linux' : false }, async () => {
+  const temp = await tempHome()
+  try {
+    await writeFile(temp.settings, JSON.stringify(someSettings, null, 2))
+    await chmod(temp.settings, 0o600)
+    await installTap(deps(temp))
+    assert.equal((await stat(temp.settings)).mode & 0o777, 0o600)
   } finally {
     await temp.cleanup()
   }

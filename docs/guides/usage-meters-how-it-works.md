@@ -152,7 +152,9 @@ rather than showing an error.
 `scripts/install-usage-tap.mjs` (the logic is in `scripts/lib/status/install-tap.mjs`).
 
 - **One key only.** It changes the `statusLine` key in `~/.claude/settings.json` (or the folder
-  `CLAUDE_CONFIG_DIR` names), and nothing else. Your indentation is kept.
+  `CLAUDE_CONFIG_DIR` names), and nothing else. Your indentation is kept. If `settings.json` is a
+  link (a dotfiles repo), the file it points to is changed and the link stays a link; the file's
+  permissions are kept, so a private (0600) file stays private.
 - **Backup first.** Before any change it copies the file to
   `settings.json.before-usage-tap-<UTC time>.bak` beside it.
 - **It runs a copy, never your repo.** The status line runs after every Claude reply, with no
