@@ -1,8 +1,10 @@
 // The Claude plan-limits meter: how much of the 5-hour and weekly windows is used.
 //
-// Order: the live answer from the address the /usage screen uses, then the reading Claude Code
-// saved in ~/.claude.json, then "unavailable". Both are undocumented, which is why the file names
-// its source and the board labels it "unofficial".
+// Order: the official reading Claude Code hands its status line, saved on this computer by the
+// status line tap (scripts/usage-tap.mjs, read in tap.mjs); then the live answer from the address
+// the /usage screen uses; then the reading Claude Code saved in ~/.claude.json; then
+// "unavailable". The last two are undocumented, which is why the file names its source and the
+// board labels it "unofficial".
 //
 // The sign-in token is read into one variable, sent to one address, and dropped. It is never
 // returned, logged or refreshed - refreshing it could sign Claude Code out on this machine.
@@ -10,6 +12,7 @@
 import { join } from 'node:path'
 import { isPlainObject, isoSeconds, toIsoTime, cleanPercent, readJson } from './util.mjs'
 import { MAX_WINDOWS } from './schema.mjs'
+import { readTapReading } from './tap.mjs'
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USER_AGENT = 'agent-team-collector/1'
@@ -275,12 +278,23 @@ export function untrustedConnection(env = {}, execArgv = []) {
   return null
 }
 
+// What was tried, for the run's log: a source name, its status and its reason. Never a value.
+const triedEntry = (source, block) => (block.why ? { source, status: block.status, why: block.why } : { source, status: block.status })
+
 // deps: { home, env, execArgv, platform, now (ms), fetch, exec }
-// Returns { limits, account }. `account` holds the two plan words from the sign-in, for plans.mjs
-// to turn into a name; it is never written as-is.
+// Returns { limits, account, tried }. `account` holds the two plan words from the sign-in, for
+// plans.mjs to turn into a name; it is never written as-is. `tried` lists each source attempted,
+// in order, for the run's log - it is never written into the snapshot.
+//
+// When the tap's reading is fresh the token never leaves this computer: the live call is skipped.
 export async function collectClaudeLimits(deps) {
+  const tried = []
   const credentials = await readCredentials(deps)
   const account = credentials.status === 'found' ? credentials.account : null
+
+  const tap = await readTapReading(deps)
+  tried.push(triedEntry('status line', tap))
+  if (tap.status === 'found') return { limits: tap, account, tried }
 
   let live = null
   if (credentials.status === 'found' && credentials.token) {
@@ -289,16 +303,20 @@ export async function collectClaudeLimits(deps) {
     if (expired) live = unavailable('sign-in expired')
     else if (untrusted) live = unavailable(untrusted)
     else live = await readLive(deps, credentials.token)
-    if (live.status === 'found') return { limits: live, account }
+    tried.push(triedEntry('live', live))
+    if (live.status === 'found') return { limits: live, account, tried }
   }
 
   const saved = await readSaved(deps)
-  if (saved.status === 'found') return { limits: saved, account }
+  tried.push(triedEntry('saved', saved))
+  if (saved.status === 'found') return { limits: saved, account, tried }
 
-  // Neither worked. The live reason is the more useful one to show, because it is what the person
-  // can fix; the saved reason only matters when there was no sign-in to try.
-  if (live) return { limits: live, account }
-  if (saved.status === 'unavailable') return { limits: saved, account }
-  if (credentials.status === 'unavailable') return { limits: unavailable('credentials not understood'), account }
-  return { limits: { status: 'not found' }, account }
+  // Nothing worked. The live reason is the most useful one to show, because it is what the person
+  // can fix; then the tap's, which says whether Claude Code has been used here lately; the saved
+  // reason only matters when neither of the others had anything to say.
+  if (live) return { limits: live, account, tried }
+  if (tap.status === 'unavailable') return { limits: tap, account, tried }
+  if (saved.status === 'unavailable') return { limits: saved, account, tried }
+  if (credentials.status === 'unavailable') return { limits: unavailable('credentials not understood'), account, tried }
+  return { limits: { status: 'not found' }, account, tried }
 }

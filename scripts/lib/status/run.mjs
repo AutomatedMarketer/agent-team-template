@@ -55,7 +55,9 @@ async function safely(read, deps) {
   }
 }
 
-export async function collectUsage(deps, computer) {
+// `trail`, when given, collects which Claude limit sources were tried and what each said - for the
+// log only. It is a separate list so nothing in it can reach the snapshot by accident.
+export async function collectUsage(deps, computer, trail = null) {
   const sources = { ...DEFAULT_SOURCES, ...deps.sources }
   const [claude, activity, codexLimits, codexPlan] = await Promise.all([
     safely(sources.claudeLimits, deps),
@@ -66,6 +68,7 @@ export async function collectUsage(deps, computer) {
   // claudeLimits answers { limits, account }; a thrown source answered a bare status instead.
   const limits = claude?.limits ?? claude
   const account = claude?.limits ? claude.account : null
+  if (Array.isArray(trail) && Array.isArray(claude?.tried)) trail.push(...claude.tried)
   return {
     schema: USAGE_SCHEMA,
     takenAt: isoSeconds(deps.now),
@@ -83,14 +86,18 @@ const SUMMARY_ROWS = [
   ['Codex limits', (doc) => doc.codex.limits]
 ]
 
-// Statuses and sources only - never a value. This is what a scheduled run's log shows.
-export function summarize(doc) {
-  return SUMMARY_ROWS.map(([label, pick]) => {
+// Statuses and sources only - never a value. This is what a scheduled run's log shows. Under the
+// Claude limits row it lists every source tried, in order, so "claude-code-saved" can be told
+// apart (status line or ~/.claude.json) and a failure shows each reason, not only the last.
+export function summarize(doc, trail = []) {
+  return SUMMARY_ROWS.flatMap(([label, pick]) => {
     const block = pick(doc)
     const detail = block.status === 'found'
       ? block.source ? ` (${block.source})` : block.estimate ? ' (estimate)' : ''
       : block.why ? ` (${block.why})` : ''
-    return `- ${label} ${block.status}${detail}`
+    const row = `- ${label} ${block.status}${detail}`
+    if (label !== 'Claude limits') return [row]
+    return [row, ...trail.map((entry) => `  - ${entry.source}: ${entry.status}${entry.why ? ` (${entry.why})` : ''}`)]
   })
 }
 
@@ -190,7 +197,8 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
 
   if (values.commit) return commitRun({ values, computer, deps, repoRoot, say, complain })
 
-  const doc = await collectUsage(deps, computer)
+  const trail = []
+  const doc = await collectUsage(deps, computer, trail)
   const problems = checkUsage(doc, identity)
   if (problems.length) {
     complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
@@ -202,7 +210,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   if (values['dry-run']) {
     say(text.trimEnd())
     say(`Dry run for ${computer}. Nothing written. It would go to ${relativePath}`)
-    summarize(doc).forEach(say)
+    summarize(doc, trail).forEach(say)
     return 0
   }
 
@@ -214,7 +222,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     return 1
   }
   say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
-  summarize(doc).forEach(say)
+  summarize(doc, trail).forEach(say)
   return 0
 }
 
@@ -299,7 +307,8 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         return 1
       }
 
-      const doc = await collectUsage(deps, computer)
+      const trail = []
+      const doc = await collectUsage(deps, computer, trail)
       const problems = checkUsage(doc, identity)
       if (problems.length) {
         complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
@@ -333,7 +342,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       }
       await writeRecord(claim, 'receipt.json', receipt)
       say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
-      summarize(doc).forEach(say)
+      summarize(doc, trail).forEach(say)
 
       let result
       try {

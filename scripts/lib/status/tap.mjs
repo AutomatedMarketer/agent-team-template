@@ -24,6 +24,11 @@ export const TAP_SCHEMA = 'agent-status/claude-statusline/v1'
 // An unchanged reading is rewritten at most once a minute. The status line runs after every reply,
 // so without this a busy session would rewrite the same two numbers many times a minute.
 export const REWRITE_AFTER_MS = 60_000
+// The collector trusts a tap reading for this long. Older than that, the person has not used
+// Claude Code on this computer for a while, and another source is tried.
+export const TAP_MAX_AGE_HOURS = 6
+// A reading stamped further ahead than this is a clock that cannot be trusted.
+const FUTURE_SLACK_MS = 5 * 60_000
 // Status line JSON is a few kilobytes. Anything far bigger is not what Claude Code sends.
 const STDIN_LIMIT = 1_000_000
 
@@ -192,4 +197,27 @@ export async function runTap({ input, argv = [], home, env = {}, platform, now, 
   }
   const wrote = await saving
   return { stdout, wrote }
+}
+
+// --- the collector's side -------------------------------------------------------------------------
+
+const unavailable = (why) => ({ status: 'unavailable', why })
+
+// Reads the tap file back as a limits block. The file is re-checked here from scratch: it sits in
+// a folder anything running as this person can write to, so it is treated as outside input.
+// The source is `claude-code-saved` - it IS a reading Claude Code produced and this computer
+// saved - because the contract's source list is shared with the dashboard and fixed.
+export async function readTapReading(deps) {
+  const file = await readJson(tapFilePath({ home: deps.home, env: deps.env ?? {}, platform: deps.platform }))
+  if (file.state === 'missing') return { status: 'not found' }
+  if (file.state === 'broken') return unavailable('status line reading not understood')
+  if (checkAgainst(file.value, TAP_SHAPE, {}).length) return unavailable('status line reading not understood')
+  const capturedAt = Date.parse(file.value.capturedAt)
+  const age = deps.now - capturedAt
+  if (age < -FUTURE_SLACK_MS) return unavailable('status line reading not trusted')
+  if (age > TAP_MAX_AGE_HOURS * 3600_000) return unavailable('status line reading too old')
+  const windows = file.value.windows.map((window) => ({ ...window }))
+  const stillOpen = windows.filter((window) => !window.resetsAt || Date.parse(window.resetsAt) > deps.now)
+  if (stillOpen.length === 0) return unavailable('status line reading is from before the reset')
+  return { status: 'found', source: 'claude-code-saved', readAt: isoSeconds(Math.min(capturedAt, deps.now)), windows }
 }
