@@ -11,7 +11,7 @@
 
 import { join } from 'node:path'
 import { isPlainObject, isoSeconds, toIsoTime, cleanPercent, readJson } from './util.mjs'
-import { MAX_WINDOWS } from './schema.mjs'
+import { MAX_WINDOWS, MAX_STRING_LENGTH } from './schema.mjs'
 import { readTapReading } from './tap.mjs'
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -155,40 +155,54 @@ export function parseClaudeUsage(answer) {
 // --- reading the sign-in ------------------------------------------------------------------------------
 
 // The Keychain answer is the credentials JSON itself. It goes straight into JSON.parse and is never
-// printed; a failure (no entry, a locked Keychain, no `security` binary) falls back to the file.
+// printed; a failure (no entry, a locked Keychain, a refused prompt, no `security` binary) falls
+// back to the file. `security -w` prints an item as hex when it holds bytes it will not print as
+// text, so an answer of hex digits alone is decoded first - JSON never consists of hex digits
+// alone, so this cannot misread a plain answer. (Whether Claude Code's item is ever printed that
+// way is not verified.)
+// Returns { text } when the Keychain answered, or { keychain: why } when it did not or could not.
 async function readKeychain(deps) {
-  if (deps.platform !== 'darwin' || typeof deps.exec !== 'function') return null
+  if (deps.platform !== 'darwin' || typeof deps.exec !== 'function') return { keychain: null }
+  let text
   try {
     const [file, args] = KEYCHAIN_COMMAND
     const { stdout } = await deps.exec(file, args, { timeout: LIVE_TIMEOUT_MS, encoding: 'utf8' })
-    const text = String(stdout ?? '').trim()
-    return text || null
+    text = String(stdout ?? '').trim()
   } catch {
-    return null
+    return { keychain: 'no Keychain answer' }
+  }
+  if (!text) return { keychain: 'no Keychain answer' }
+  const decoded = /^(?:[0-9a-fA-F]{2})+$/.test(text) ? Buffer.from(text, 'hex').toString('utf8') : text
+  try {
+    return { parsed: JSON.parse(decoded) }
+  } catch {
+    return { keychain: 'Keychain unreadable' }
   }
 }
 
+// Where the sign-in came from, for the reasons. Off a Mac there is no Keychain, so "file" alone.
+// On a Mac the file is only read when the Keychain gave nothing usable, and the reason says which.
+function originOf(fromKeychain) {
+  if (fromKeychain.parsed !== undefined) return 'Keychain'
+  return fromKeychain.keychain ? `file, ${fromKeychain.keychain}` : 'file'
+}
+
 async function readCredentials(deps) {
-  let parsed = null
   const fromKeychain = await readKeychain(deps)
-  if (fromKeychain) {
-    try {
-      parsed = JSON.parse(fromKeychain)
-    } catch {
-      parsed = null
-    }
-  }
-  if (!parsed) {
+  const origin = originOf(fromKeychain)
+  let parsed = fromKeychain.parsed
+  if (parsed === undefined) {
     const file = await readJson(join(claudeConfigDir(deps), '.credentials.json'))
-    if (file.state === 'missing') return { status: 'not found' }
-    if (file.state === 'broken') return { status: 'unavailable' }
+    if (file.state === 'missing') return { status: 'not found', origin, noFile: true }
+    if (file.state === 'broken') return { status: 'unavailable', origin }
     parsed = file.value
   }
   const oauth = isPlainObject(parsed) ? parsed.claudeAiOauth : null
   // No subscription sign-in at all (an API-key setup) is "not found", not broken.
-  if (!isPlainObject(oauth)) return { status: 'not found' }
+  if (!isPlainObject(oauth)) return { status: 'not found', origin }
   return {
     status: 'found',
+    origin,
     token: typeof oauth.accessToken === 'string' && oauth.accessToken ? oauth.accessToken : null,
     expiresAt: Number.isFinite(oauth.expiresAt) ? oauth.expiresAt : null,
     account: {
@@ -196,6 +210,17 @@ async function readCredentials(deps) {
       rateLimitTier: typeof oauth.rateLimitTier === 'string' ? oauth.rateLimitTier : null
     }
   }
+}
+
+// "sign-in expired (file, no Keychain answer)". The whole origin when it fits the gate's length
+// limit, the short one ("Keychain" or "file") when it does not, the bare reason as a last resort -
+// a reason the gate refuses would stop the whole snapshot.
+export function reasonWithOrigin(why, origin) {
+  const short = origin.startsWith('Keychain') ? 'Keychain' : 'file'
+  for (const candidate of [`${why} (${origin})`, `${why} (${short})`]) {
+    if (candidate.length <= MAX_STRING_LENGTH) return candidate
+  }
+  return why
 }
 
 async function readLive(deps, token) {
@@ -297,14 +322,25 @@ export async function collectClaudeLimits(deps) {
   if (tap.status === 'found') return { limits: tap, account, tried }
 
   let live = null
-  if (credentials.status === 'found' && credentials.token) {
+  if (credentials.status === 'found') {
     const expired = credentials.expiresAt !== null && credentials.expiresAt <= deps.now
     const untrusted = untrustedConnection(deps.env, deps.execArgv)
-    if (expired) live = unavailable('sign-in expired')
+    // A sign-in with a plan but no key is still a sign-in: say so, rather than letting a fallback's
+    // reason ("saved reading too old") stand in for it. That is what the first Mac run showed.
+    if (!credentials.token) live = unavailable('sign-in found but holds no key')
+    else if (expired) live = unavailable('sign-in expired')
     else if (untrusted) live = unavailable(untrusted)
     else live = await readLive(deps, credentials.token)
+    // On a Mac it matters where the sign-in came from: the Keychain, or the file because the
+    // Keychain gave nothing usable. Off a Mac only the no-key reason says "file", for the same form.
+    if (live.status !== 'found' && (deps.platform === 'darwin' || !credentials.token)) {
+      live = unavailable(reasonWithOrigin(live.why, credentials.origin))
+    }
     tried.push(triedEntry('live', live))
     if (live.status === 'found') return { limits: live, account, tried }
+  } else if (credentials.noFile && credentials.origin.startsWith('file, ')) {
+    // Log only: on a Mac with no sign-in anywhere, say the Keychain was asked and gave nothing.
+    tried.push({ source: 'live', status: 'not found', why: `no sign-in (${credentials.origin.slice('file, '.length)}, no file)` })
   }
 
   const saved = await readSaved(deps)
