@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 957
+ℹ tests 974
 ℹ fail 0
 ```
 
@@ -267,6 +267,16 @@ reset. A small script on your computer reads the numbers and saves them into thi
   guide, no coding needed. Or ask Claude: **set up my usage meters**.
 - **How it works:** [How the usage meters work](docs/guides/usage-meters-how-it-works.md) - the
   data flow, every source, and what is never written.
+
+## The Connections wall
+
+The same script also lists, by name only, the AI tools, servers and plugins each computer has, and
+whether each one connects.
+
+- **Set it up:** [The Connections wall on your dashboard](docs/guides/connections-wall.md) - how to
+  fill it, and what each word on it means. Or ask Claude: **/snapshot**.
+- **How it works:** [How the Connections wall works](docs/guides/connections-wall-how-it-works.md) -
+  every file it reads, what it keeps, and what is never kept.
 
 ---
 

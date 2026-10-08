@@ -198,7 +198,12 @@ function report(snapshots, say) {
 
 const USAGE_TEXT = [
   'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections] [--dry-run]',
-  '                                       [--commit [--clone <dir>] [--state-dir <dir>]]'
+  '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
+  'Parts (every one, unless --only picks some):',
+  '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
+  '  connections: installed tools, and Claude and Codex servers and plugins - names only.',
+  '               It runs `claude mcp list`, which starts every server, for 2 minutes at most.',
+  'What each part reads and never writes: .agent-team/status/README.md'
 ]
 
 const OPTIONS = {

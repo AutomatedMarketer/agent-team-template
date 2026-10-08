@@ -4,34 +4,44 @@ This folder holds small files that describe a computer, written by a script on t
 read by the dashboard. The dashboard runs in the cloud and cannot look at your machine, so the
 machine writes down what it sees and commits it here.
 
-Phase 4 writes one kind: **usage** - how much of your Claude and Codex plan limits are used, which
-plan you are on, and an estimate of how much Claude Code you have been using.
+It writes two kinds, called **parts**:
+
+- **usage** (Phase 4) - how much of your Claude and Codex plan limits are used, which plan you are
+  on, and an estimate of how much Claude Code you have been using.
+- **connections** (Phase 5) - the Connections wall: which tools are installed and their versions,
+  and which Claude Code and Codex servers and plugins this computer has, and whether each one
+  connects. **Names only** - see [The connections file](#the-connections-file).
 
 ```
 .agent-team/status/usage/<computer>.json
+.agent-team/status/connections/<computer>.json
 ```
 
-One file per computer. `<computer>` is the label you give with `--computer`, turned into a file
-name: `--computer "Mac Mini"` writes `mac-mini.json`. With no label the file is
+One file per part per computer. `<computer>` is the label you give with `--computer`, turned into a
+file name: `--computer "Mac Mini"` writes `mac-mini.json`. With no label the file is
 `this-computer.json`. The label is never the computer's own name, because a computer's name is
 often its owner's name.
+
+A run collects every part unless `--only` picks some. The parts travel together: every part passes
+the safety check before **any** file is written, and `--commit` puts all of them in one commit.
 
 ## Run it
 
 ```bash
-npm run collect:status -- --dry-run                       # print the file, write nothing
-npm run collect:status -- --computer "Mac Mini"           # write the file here
-npm run collect:status -- --computer "Mac Mini" --commit  # write it, commit only it, push
+npm run collect:status -- --dry-run                       # print the files, write nothing
+npm run collect:status -- --computer "Mac Mini"           # write the files here
+npm run collect:status -- --computer "Mac Mini" --commit  # write them, commit only them, push
+npm run collect:status -- --only connections --dry-run    # one part only
 ```
 
 | Option | What it does |
 |---|---|
 | `--computer "<label>"` | The name shown on the dashboard. Up to 60 characters: letters, numbers, spaces and `. , ' ’ ( ) + & : _ -` only, no stretch of 24 or more without a space, and not this computer's own name |
-| `--dry-run` | Prints the file it would write. Writes nothing, commits nothing |
-| `--commit` | Writes, commits only the snapshot file (anything else you have staged stays staged), pushes it if that is safe - see below |
+| `--dry-run` | Prints the files it would write. Writes nothing, commits nothing |
+| `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
-| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector` |
-| `--only usage` | Only usage exists so far. Connections and Hermes are later phases |
+| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, is made here too |
+| `--only usage,connections` | Only these parts, in any order. `--only hermes` is refused: Hermes comes in Phase 6 |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
 slot was already claimed). 1 means it refused or failed after reading, or could not reach the team
@@ -62,7 +72,7 @@ otherwise nothing is pushed and it tells you to fetch or pull, then take the sna
 never pushes HEAD, never a bare `git push`, and never anything but that one commit. Either way
 the snapshot stays committed locally and nothing of yours is touched.
 
-## The file
+## The usage file
 
 ```json
 {
@@ -188,6 +198,114 @@ where the sign-in came from: the Keychain, or the file because the Keychain gave
 summary lists every Claude source tried, in order, with its status and reason (`- status line:
 found`, `- live: unavailable (...)`, `- saved: not found`); that list is printed only, never written.
 
+## The connections file
+
+What the Connections wall shows: installed tools, and the servers and plugins this computer has.
+**Names only.** A server's address, command, arguments, environment and headers have no place in
+this file - the shape has no key for them, so the safety check refuses any file that tries.
+
+```json
+{
+  "schema": "agent-status/connections/v1",
+  "takenAt": "2026-10-08T15:00:00Z",
+  "computer": "Mac Mini",
+  "tools": [
+    { "name": "Claude Code", "state": "found", "version": "2.1.293" },
+    { "name": "GitHub CLI", "state": "not found" },
+    { "name": "ChatGPT app", "state": "could not check" }
+  ],
+  "claude": {
+    "status": "found", "live": "checked",
+    "servers": [
+      { "name": "github", "scope": "user", "transport": "local", "state": "connected" },
+      { "name": "plugin:marketing:supermetrics", "scope": "plugin", "transport": "web", "state": "needs sign-in" },
+      { "name": "claude.ai Gmail", "scope": "claude.ai", "transport": "web", "state": "seen before" }
+    ],
+    "projectServers": 4, "hidden": 1, "more": 0
+  },
+  "codex": {
+    "status": "found",
+    "servers": [ { "name": "docs-search", "enabled": true } ],
+    "plugins": [ { "name": "github", "from": "openai-curated", "enabled": true } ],
+    "hidden": 0, "more": 0
+  }
+}
+```
+
+- **tools** - always these nine, in this order: Claude Code, Codex, Hermes, Node.js, Git, GitHub CLI,
+  Claude app, ChatGPT app, Tailscale. `found` (with a version when it gave one), `not found`, or
+  `could not check` (it is there, but would not answer, or could not be run safely).
+- **claude.servers** - `scope` is `user` (your own servers in `~/.claude.json`), `plugin` (named
+  `plugin:<plugin>:<server>`), `claude.ai` (connectors from claude.ai) or `other`. `transport` is
+  `local` (a program on this computer) or `web` (a web service), worked out from which keys the entry
+  has, never from what is in them. `state` is `connected`, `needs sign-in`, `failed`,
+  `waiting for approval`, `not checked`, `seen before` or `unknown`.
+- **projectServers** - servers that belong to one project folder. **Counted, never named**: the
+  names, like the folders, are often a client's.
+- **hidden** - names that failed the name rule and were dropped. **more** - names past the cap
+  (100 Claude servers, 50 Codex servers, 60 Codex plugins) that were not written.
+- **codex** - `[mcp_servers.<name>]` and `[plugins."<name>@<from>"]` from `~/.codex/config.toml`, with
+  `enabled` when the file says it.
+
+The contract the dashboard reads this by is `scripts/lib/status/connections-schema.mjs` and
+`tests/fixtures/connections-parity.json`, which also holds the name rule with examples, a full
+sample, and the shape the board builds from it. A name is held to the dashboard's characters, at
+most 60 of them, none of `@ / \ eyJ sk- bearer`, no id, nothing of yours (username, computer name,
+home folder), and no stretch of 24 or more characters between `:` `.` `_` `-` or a space - so
+`plugin:marketing:supermetrics` is a name and a 40-character token is not.
+
+### Where each name comes from
+
+| What | Read from | Kept |
+|---|---|---|
+| Your servers | `~/.claude.json` `mcpServers` | each key (the name), and whether it has a `command` or a `url` |
+| Project servers | `~/.claude.json` `projects[*].mcpServers` | how many, nothing else |
+| Plugin servers | `~/.claude/settings.json` `enabledPlugins`, then `~/.claude/plugins/installed_plugins.json` for where each plugin is, then that plugin's `.mcp.json` or `.claude-plugin/plugin.json` | `plugin:<plugin>:<server>` |
+| claude.ai connectors | `~/.claude.json` `claudeAiMcpEverConnected` | each name |
+| Needs sign-in | `~/.claude/mcp-needs-auth-cache.json` | which names are in it |
+| Live state | `claude mcp list` (below) | each line's name and state |
+| Codex | `~/.codex/config.toml` | the table headers above and their `enabled` line - no other line is read |
+| Tool versions | each program's `--version`; Hermes's own files; a Mac app's `Info.plist` | the number only |
+
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `HERMES_HOME` are honoured.
+
+### The live check: `claude mcp list`
+
+`claude mcp list` asks every server whether it connects. To answer, it **starts every local
+server** on its list, and it prints each server's command or address. So the collector:
+
+- runs the `claude` it found itself (below), by its full path - never one inside `--clone`;
+- runs it from `<state-dir>/empty-cwd`, emptied first, so no project's own servers or settings load;
+- stops it after **2 minutes**, or if it prints more than **256 KB** - and stops everything it
+  started with it - and then uses the file list instead, saying why (`live` is `timed out`,
+  `could not read`, `could not run` or `program not found`);
+- keeps from each line only the name, up to the first `": "`, and the state, after the last
+  `" - "`. Everything between - the command, the address - is dropped in memory. Its exit code is
+  ignored: it exits 0 even when servers fail;
+- adds a server only the live list shows when its name starts `plugin:` or `claude.ai `; any other
+  such name could be a project's own server, so it is counted in `hidden`, never named.
+
+On the Mac this runs every three hours with the schedule. A local server that does something when
+it starts does it then too.
+
+### Installed tools
+
+Programs are found by the collector's own lookup, not the shell's: only absolute `PATH` entries,
+then `~/.local/bin` (where Claude Code installs itself), `~/.claude/local`, and on a Mac
+`/opt/homebrew/bin` and `/usr/local/bin`. A program inside `--clone` is refused. On Windows only a
+real `.exe` runs: a `.cmd` (how npm installs Codex there) needs a shell, so that tool shows
+`could not check`. Each runs from the empty folder for at most 10 seconds.
+
+The collector **never runs `hermes`**: `hermes --version` is not read-only (run once to read its
+version, it tried to finish an update instead). Hermes's version is read from
+`hermes-agent/pyproject.toml` (or `hermes-agent/hermes_cli/__init__.py`) under `HERMES_HOME`,
+`%LOCALAPPDATA%\hermes` on Windows, or `~/.hermes`. On a Mac the Claude, ChatGPT and Tailscale apps
+are read from their `Info.plist` with `/usr/bin/plutil`; on Windows the apps say `could not check`.
+
+The student guide is [docs/guides/connections-wall.md](../../docs/guides/connections-wall.md); what
+is read and never kept, in detail, is
+[docs/guides/connections-wall-how-it-works.md](../../docs/guides/connections-wall-how-it-works.md).
+
 ## What is never written
 
 Every file, receipt and printed line passes a safety check (`scripts/lib/status/safe.mjs`) before
@@ -199,6 +317,9 @@ never the value. These are never written:
 - your username, home folder, or any file path outside this repo
 - project folder names, working folders, session ids, or anything you or Claude typed
 - the computer name - the label you choose is used instead
+- a server's address, command, arguments, environment or headers; a project server's name; a
+  plugin's install folder or where it came from beyond its marketplace name; anything a program
+  prints around its version number
 
 ## Receipts
 
@@ -208,10 +329,14 @@ schedule) the occurrence is the three-hour slot, named by its New York date and 
 `2026-10-07T15-00-new-york.claim/` covers 15:00 to 18:00 - so a run on waking and a manual
 kickstart in the same slot do not both run; the second says so and skips. A run by hand in your
 own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), so asking again
-later always takes a fresh reading. It writes `receipt.json` there once the snapshot is
-written - which sources were found, the file name and its hash - and `final.json` when it is done:
-the outcome and the commit id. A claim with a receipt and no final record means the outcome is
-unknown; look before running it again.
+later always takes a fresh reading. It writes `receipt.json` there once the snapshots are
+written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`), and which sources
+were found - and `final.json` when it is done: the outcome and the commit id. A claim with a
+receipt and no final record means the outcome is unknown; look before running it again.
+
+Every collector commit is titled `Status snapshot from <computer>`. Before there were parts it was
+`Usage snapshot from <computer>`; a dedicated clone still treats an unpushed commit with either
+title as its own.
 
 ## The Mac schedule (phase 4, task T14)
 
@@ -316,7 +441,7 @@ and a rollback.
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/YOUR-MAC-USER/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StartCalendarInterval</key>
   <array>
@@ -399,3 +524,11 @@ These are checked on the first live run on the Mac, not assumed:
 - whether Claude Code saves its reading in `~/.claude.json` on the Mac
 - whether Codex keeps `auth.json` as a file on the Mac, or in a keyring (then the plan says `not found`)
 - the team repo name, and push access from the Mac
+- how long `claude mcp list` takes with every server on the Mac, whether it writes to
+  `~/.claude.json`, the exact state words it prints there, and whether claude.ai connectors appear
+  in it from a LaunchAgent
+- where Claude Code and Codex are installed on the Mac, and that `~/.local/bin` on the plist's
+  `PATH` (or the collector's own lookup) finds them
+- where every plugin keeps its servers: some plugins' servers are not listed through
+  `installed_plugins.json` at all, and appear only in the live list
+- that `/usr/bin/plutil` reads each app's `Info.plist` from a LaunchAgent
