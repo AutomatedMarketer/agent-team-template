@@ -8,7 +8,7 @@
 // (--then64, see tap.mjs), so there is no second record that could drift from it.
 
 import { join, dirname, basename } from 'node:path'
-import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod } from 'node:fs/promises'
+import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod, mkdir } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { isPlainObject } from './util.mjs'
 import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
@@ -104,11 +104,18 @@ export function planRemove({ settings }) {
   return { action: 'remove', earlier, before: current, next }
 }
 
-// The person's own indentation, and their trailing newline, are kept.
+// A byte-order mark some Windows editors put first. JSON.parse refuses it, so it is set aside to
+// read the file and put back on write - nothing but statusLine changes.
+const BOM = '﻿'
+const withoutBom = (text) => (text?.startsWith(BOM) ? text.slice(1) : text)
+
+// The person's own indentation, trailing newline and byte-order mark are kept.
 function serialise(value, originalText) {
-  const indent = /^\{\s*\n([ \t]+)"/.exec(originalText ?? '')?.[1] ?? '  '
-  const ending = originalText === null || originalText === undefined || originalText.endsWith('\n') ? '\n' : ''
-  return `${JSON.stringify(value, null, indent)}${ending}`
+  const body = withoutBom(originalText)
+  const indent = /^\{\s*\n([ \t]+)"/.exec(body ?? '')?.[1] ?? '  '
+  const ending = body === null || body === undefined || body.endsWith('\n') ? '\n' : ''
+  const mark = originalText?.startsWith(BOM) ? BOM : ''
+  return `${mark}${JSON.stringify(value, null, indent)}${ending}`
 }
 
 const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-')
@@ -144,7 +151,7 @@ export async function installTap(deps) {
   let settings = null
   if (originalText !== null) {
     try {
-      settings = JSON.parse(originalText)
+      settings = JSON.parse(withoutBom(originalText))
     } catch {
       return { ...refuse('settings.json is not plain JSON (a comment or a stray comma?), so it was not touched'), path }
     }
@@ -188,6 +195,8 @@ async function writeSettings(path, plan, originalText, deps) {
   // Beside the REAL file: when settings.json is a link (a dotfiles repo), renaming over the link
   // would replace it with a plain file. And with the file's own permissions: a settings file the
   // person made private (0600) must not come back readable by everyone.
+  // No settings file yet, and perhaps no ~/.claude folder either (Claude Code never opened here).
+  if (originalText === null) await mkdir(dirname(path), { recursive: true })
   const target = originalText === null ? path : await realpath(path)
   const mode = originalText === null ? null : (await stat(target)).mode & 0o777
   const temporary = join(dirname(target), `.${basename(target)}.usage-tap-${process.pid}.tmp`)

@@ -219,6 +219,37 @@ test('running it twice writes nothing the second time and makes no second backup
   }
 })
 
+// Windows editors sometimes save a byte-order mark at the start. JSON.parse refuses it, so the
+// file looked "not plain JSON" when it was. The mark is set aside to read the file, and kept, so
+// nothing but statusLine changes.
+test('a settings.json that starts with a byte-order mark is read, and the mark is kept', async () => {
+  const temp = await tempHome()
+  try {
+    await writeFile(temp.settings, `﻿${JSON.stringify(someSettings, null, 2)}\n`)
+    const result = await installTap(deps(temp))
+    assert.equal(result.action, 'install')
+    const text = await readFile(temp.settings, 'utf8')
+    assert.ok(text.startsWith('﻿{'), 'the byte-order mark was dropped')
+    assert.ok(JSON.parse(text.slice(1)).statusLine.command.includes('usage-tap.mjs'))
+    await installTap(deps(temp, { remove: true, now: STAMP + 60_000 }))
+    assert.deepEqual(JSON.parse((await readFile(temp.settings, 'utf8')).slice(1)), someSettings)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('with no ~/.claude folder at all, it makes the folder rather than stopping on an error', async () => {
+  const temp = await tempHome()
+  try {
+    await rm(join(temp.home, '.claude'), { recursive: true, force: true })
+    const result = await installTap(deps(temp))
+    assert.equal(result.action, 'install')
+    assert.ok(JSON.parse(await readFile(temp.settings, 'utf8')).statusLine)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
 // Found in review: install then --remove within one second made the same backup name twice, and
 // the second copy overwrote the first - the only copy of the original file.
 test('two runs in the same second keep both backups, and the first still holds the original', async () => {
