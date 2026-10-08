@@ -338,7 +338,12 @@ test('the explainer covers chaining, and the trade-off of running the earlier co
   assert.match(doc, /`--then <command>`/)
   assert.match(doc, /`--then64 <code>`/)
   assert.match(doc, /\*\*The trade-off of running the earlier command through a shell\.\*\*/)
-  for (const cost of ['**Time.**', '**A guess on Windows.**', '**No new trust.**']) assert.ok(doc.includes(cost), `the trade-off leaves out ${cost}`)
+  for (const cost of ['**Time.**', '**One guess, written down.**', '**No new trust.**']) assert.ok(doc.includes(cost), `the trade-off leaves out ${cost}`)
+  // The tap never trusts SHELL on Windows any more: the installer records the shell.
+  const flat = doc.replace(/\s+/g, ' ')
+  assert.match(flat, /`--then-shell sh` or `--then-shell powershell`/)
+  assert.doesNotMatch(flat, /names in `SHELL`/, 'the explainer still says the tap trusts SHELL')
+  assert.match(flat, /not run at all/)
 })
 
 test('the explainer says what is never written and names the checks that enforce it, which exist', async () => {

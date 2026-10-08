@@ -12,6 +12,7 @@ import {
   planRemove,
   tapCommand,
   earlierFrom,
+  tapPathFrom,
   dialectFor,
   settingsPathFor
 } from '../scripts/lib/status/install-tap.mjs'
@@ -86,13 +87,30 @@ test('an earlier status line rides along encoded, so no shell can mangle its quo
   assert.equal(earlierFrom(tapCommand({ nodePath: NODE, tapPath: TAP, dialect: 'sh' })), null)
 })
 
+// The tap must run the earlier command in the shell it was written for, and on Windows it cannot
+// learn that from its environment (Claude Code passes no SHELL). So the installer writes it down.
+test('the command records which shell the earlier status line is for', () => {
+  const sh = tapCommand({ nodePath: NODE, tapPath: TAP, dialect: 'sh', earlier: 'old' })
+  const ps = tapCommand({ nodePath: NODE, tapPath: TAP, dialect: 'powershell', earlier: 'old' })
+  assert.match(sh, / --then-shell sh --then64 [A-Za-z0-9_-]+$/)
+  assert.match(ps, / --then-shell powershell --then64 [A-Za-z0-9_-]+$/)
+  assert.equal(earlierFrom(sh), 'old')
+  assert.equal(earlierFrom(ps), 'old')
+  assert.equal(tapPathFrom(ps), TAP)
+  // No earlier status line, nothing to run, nothing to record.
+  assert.doesNotMatch(tapCommand({ nodePath: NODE, tapPath: TAP, dialect: 'sh' }), /--then-shell/)
+  // Recognised as its own on the next run, so it never wraps itself.
+  const plan = planInstall({ settings: { statusLine: { type: 'command', command: ps } }, nodePath: NODE, tapPath: TAP, dialect: 'powershell' })
+  assert.equal(plan.action, 'unchanged')
+})
+
 test('on Windows it writes for Git Bash when Git Bash is there, PowerShell when it is not', () => {
   const bash = 'C:\\Program Files\\Git\\bin\\bash.exe'
   assert.equal(dialectFor('darwin', {}, () => false), 'sh')
   assert.equal(dialectFor('linux', {}, () => false), 'sh')
   assert.equal(dialectFor('win32', { SHELL: bash }, (path) => path === bash), 'sh')
   assert.equal(dialectFor('win32', { CLAUDE_CODE_GIT_BASH_PATH: 'E:\\Git\\bin\\bash.exe' }, (path) => path === 'E:\\Git\\bin\\bash.exe'), 'sh')
-  assert.equal(dialectFor('win32', { ProgramFiles: 'C:\\Program Files' }, (path) => path === join('C:\\Program Files', 'Git', 'bin', 'bash.exe')), 'sh')
+  assert.equal(dialectFor('win32', { ProgramFiles: 'D:\\Programs' }, (path) => path === 'D:\\Programs\\Git\\bin\\bash.exe'), 'sh')
   assert.equal(dialectFor('win32', { SHELL: bash }, () => false), 'powershell')
   assert.equal(dialectFor('win32', {}, () => false), 'powershell')
 })
@@ -342,8 +360,10 @@ async function runThroughShell(shell, flags, command, input, env) {
   })
 }
 
+// The outer shell plays Claude Code. Neither run gets a SHELL variable: Claude Code's own
+// environment has none, and the tap must find the right shell from the command alone.
 const gitBash = process.platform === 'win32'
-  ? [process.env.SHELL, 'C:\\Program Files\\Git\\bin\\bash.exe'].find((candidate) => candidate && /bash(\.exe)?$/i.test(candidate) && existsSync(candidate))
+  ? ['C:\\Program Files\\Git\\bin\\bash.exe'].find((candidate) => existsSync(candidate))
   : '/bin/sh'
 const powershell = process.platform === 'win32' ? 'powershell.exe' : null
 
@@ -363,7 +383,7 @@ for (const [name, shell, flags, dialect] of [
       const earlier = `${dialect === 'powershell' ? '& ' : ''}${quoted(process.execPath)} ${quoted(earlierScript)}`
       const command = tapCommand({ nodePath: process.execPath, tapPath: join(repoRoot, 'scripts', 'usage-tap.mjs'), dialect, earlier })
       const env = { ...tempEnv(temp), LOCALAPPDATA: join(temp.home, 'AppData', 'Local') }
-      if (dialect === 'sh' && process.platform === 'win32') env.SHELL = shell
+      assert.equal(env.SHELL, undefined, 'this run must have no SHELL, as Claude Code has none')
       const input = JSON.stringify({ model: { display_name: 'Opus' }, rate_limits: { five_hour: { used_percentage: 18, resets_at: Math.floor(Date.now() / 1000) + 3600 } } })
       const result = await runThroughShell(shell, flags, command, input, env)
       assert.equal(result.stdout.trim(), 'earlier: Opus', result.stderr)

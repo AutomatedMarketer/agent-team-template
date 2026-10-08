@@ -132,13 +132,17 @@ quote differently, and status lines often hold quotes (`jq` one-liners do). Enco
 passes through any shell untouched.
 
 **The trade-off of running the earlier command through a shell.** The tap starts a shell to run it:
-`/bin/sh -c` on a Mac or Linux; on Windows, the Git Bash that Claude Code names in `SHELL`, or
-PowerShell when there is none - the same shell Claude Code would have used. That costs:
+`/bin/sh -c` on a Mac or Linux. On Windows, Claude Code uses Git Bash when it is installed and
+PowerShell when it is not, and it does not tell the status line which (there is no `SHELL` in its
+environment). So the installer decides once, the same way, and writes it into the command:
+`--then-shell sh` or `--then-shell powershell`. The tap uses exactly that. That costs:
 
 - **Time.** One more shell start per update: a few milliseconds for `sh`, more for PowerShell.
-- **A guess on Windows.** If Claude Code used a different shell from the one the tap picks, an
-  earlier command written for the other shell may fail. Then the bar goes blank, and
-  `node scripts/install-usage-tap.mjs --remove` puts the old line back.
+- **One guess, written down.** The installer's choice is still a guess at Claude Code's. If Git Bash
+  is later removed, an earlier command recorded for `sh` is not run at all - a bash command handed
+  to PowerShell fails anyway, and a blank bar is more honest than a wrong one. Run the installer
+  again after installing or removing Git Bash, or `node scripts/install-usage-tap.mjs --remove` to
+  put the old line back.
 - **No new trust.** The earlier command is your own, and it ran through a shell before. Nothing new
   gets to run.
 

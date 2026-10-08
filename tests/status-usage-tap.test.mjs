@@ -12,7 +12,9 @@ import {
   readingFromStatusLine,
   shortLine,
   TAP_SCHEMA,
-  REWRITE_AFTER_MS
+  REWRITE_AFTER_MS,
+  earlierShell,
+  shellFor
 } from '../scripts/lib/status/tap.mjs'
 import { makeFakeHome, fakeClaudeToken, FAKE_EMAIL, FAKE_UUID, FAKE_USERNAME } from './helpers/fake-home.mjs'
 import { repoRoot } from './helpers/repo.mjs'
@@ -428,13 +430,68 @@ test('the real script exits 0 with nothing printed on rubbish input', async () =
   }
 })
 
-// Through a real shell: /bin/sh on a Mac or Linux, Git Bash on Windows. A Windows machine
-// without Git Bash would chain through PowerShell, which this command is not written for.
-const gitBash = process.platform === 'win32'
-  ? [process.env.SHELL, 'C:\\Program Files\\Git\\bin\\bash.exe'].find((candidate) => candidate && /bash(\.exe)?$/i.test(candidate) && existsSync(candidate))
-  : null
+// --- which shell runs the earlier command ---------------------------------------------------------
+//
+// Found in review: on Windows the tap trusted only SHELL to find Git Bash, and Claude Code's
+// environment has no SHELL - so an earlier command written for bash went to PowerShell and the
+// person's old status line vanished. The installer now writes the shell it chose into the command
+// (--then-shell), and the tap uses exactly that.
 
-test('the real script chains a real earlier status line through the shell', { skip: process.platform === 'win32' && !gitBash }, async () => {
+const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe'
+const onlyGitBash = (path) => path === GIT_BASH
+
+test('--then-shell is read from the command line, and only sh or powershell', () => {
+  assert.equal(earlierShell(['--then-shell', 'sh', '--then64', 'eA']), 'sh')
+  assert.equal(earlierShell(['--then-shell', 'powershell']), 'powershell')
+  assert.equal(earlierShell(['--then-shell', 'cmd']), null)
+  assert.equal(earlierShell([]), null)
+})
+
+test('on Windows, "sh" means Git Bash, found WITHOUT a SHELL variable', () => {
+  assert.deepEqual(shellFor('win32', {}, onlyGitBash, 'sh'), [GIT_BASH, ['-c']])
+  assert.deepEqual(shellFor('win32', { ProgramFiles: 'C:\\Program Files' }, onlyGitBash, 'sh'), [GIT_BASH, ['-c']])
+  const custom = 'E:\\tools\\Git\\bin\\bash.exe'
+  assert.deepEqual(shellFor('win32', { CLAUDE_CODE_GIT_BASH_PATH: custom }, (path) => path === custom, 'sh'), [custom, ['-c']])
+})
+
+test('on Windows, a command written for bash is never handed to PowerShell', () => {
+  // No Git Bash to be found: the earlier line is not run at all, rather than run in the wrong shell.
+  assert.equal(shellFor('win32', {}, () => false, 'sh'), null)
+})
+
+test('on Windows, "powershell" means PowerShell even when Git Bash is there', () => {
+  assert.deepEqual(shellFor('win32', { SHELL: GIT_BASH }, onlyGitBash, 'powershell')[0], 'powershell.exe')
+})
+
+test('on a Mac or Linux the earlier command runs with /bin/sh', () => {
+  assert.deepEqual(shellFor('darwin', {}, () => false, 'sh'), ['/bin/sh', ['-c']])
+  assert.deepEqual(shellFor('linux', {}, () => false, null), ['/bin/sh', ['-c']])
+})
+
+test('a hand-wired --then with no --then-shell: Git Bash if it can be found, else PowerShell', () => {
+  assert.deepEqual(shellFor('win32', {}, onlyGitBash, null), [GIT_BASH, ['-c']])
+  assert.equal(shellFor('win32', {}, () => false, null)[0], 'powershell.exe')
+})
+
+test('the tap hands the recorded shell to whatever runs the earlier command', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const seen = []
+    await tapIn(fake, statusLineInput(), {
+      argv: ['--then-shell', 'powershell', '--then', 'x'],
+      runThen: async (command, input, dialect) => { seen.push(dialect); return '' }
+    })
+    assert.deepEqual(seen, ['powershell'])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// Through a real shell: /bin/sh on a Mac or Linux, Git Bash on Windows - with NO SHELL variable,
+// as in Claude Code's own environment.
+const gitBash = process.platform === 'win32' ? [GIT_BASH].find((candidate) => existsSync(candidate)) : null
+
+test('the real script chains a real earlier status line through the shell', { skip: process.platform === 'win32' && !gitBash ? 'no Git Bash at the usual place on this Windows computer' : false }, async () => {
   const fake = await makeFakeHome()
   const scratch = await mkdtemp(join(tmpdir(), 'agent-status-then-'))
   try {
@@ -442,8 +499,9 @@ test('the real script chains a real earlier status line through the shell', { sk
     await writeFile(earlier, "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const d=JSON.parse(s);console.log('earlier saw '+d.model.display_name)})\n")
     const quote = (text) => `'${text.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`
     const command = `${quote(process.execPath)} ${quote(earlier)}`
-    const env = fakeEnv(fake, gitBash ? { SHELL: gitBash } : {})
-    const result = await spawnTap(fake, ['--then', command], JSON.stringify(statusLineInput()), env)
+    const env = fakeEnv(fake)
+    assert.equal(env.SHELL, undefined, 'this test must run without SHELL, as Claude Code does')
+    const result = await spawnTap(fake, ['--then-shell', 'sh', '--then', command], JSON.stringify(statusLineInput()), env)
     assert.equal(result.code, 0, result.stderr)
     assert.equal(result.stdout.trim(), 'earlier saw Opus')
   } finally {

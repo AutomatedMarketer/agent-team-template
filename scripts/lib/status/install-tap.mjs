@@ -11,6 +11,7 @@ import { join, dirname, basename } from 'node:path'
 import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod } from 'node:fs/promises'
 import { isPlainObject } from './util.mjs'
 import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
+import { findGitBash } from './tap.mjs'
 
 export const TAP_SCRIPT_NAME = 'usage-tap.mjs'
 
@@ -21,14 +22,11 @@ export function settingsPathFor({ home, env = {} }) {
 // Which shell will run the command. Claude Code uses /bin/sh on a Mac or Linux; on Windows it uses
 // Git Bash when it is installed and PowerShell when it is not. The two quote differently, and
 // PowerShell only runs a quoted path with the call operator `&`.
+// The dialect it picks is also written into the command (--then-shell), so the tap runs the
+// earlier status line in that same shell without having to guess again.
 export function dialectFor(platform, env = {}, exists = () => false) {
   if (platform !== 'win32') return 'sh'
-  const candidates = [
-    env.CLAUDE_CODE_GIT_BASH_PATH,
-    typeof env.SHELL === 'string' && /bash(\.exe)?$/i.test(env.SHELL) ? env.SHELL : null,
-    join(env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe')
-  ]
-  return candidates.some((candidate) => typeof candidate === 'string' && candidate && exists(candidate)) ? 'sh' : 'powershell'
+  return findGitBash(env, exists) ? 'sh' : 'powershell'
 }
 
 // Forward slashes everywhere: Git Bash treats a backslash as an escape and drops it.
@@ -42,7 +40,7 @@ export function tapCommand({ nodePath, tapPath, dialect, earlier = null }) {
   const quote = QUOTE[dialect] ?? QUOTE.sh
   let command = `${quote(forward(nodePath))} ${quote(forward(tapPath))}`
   if (dialect === 'powershell') command = `& ${command}`
-  if (earlier) command += ` --then64 ${Buffer.from(earlier, 'utf8').toString('base64url')}`
+  if (earlier) command += ` --then-shell ${dialect === 'powershell' ? 'powershell' : 'sh'} --then64 ${Buffer.from(earlier, 'utf8').toString('base64url')}`
   return command
 }
 
@@ -50,7 +48,7 @@ export function tapCommand({ nodePath, tapPath, dialect, earlier = null }) {
 // ending in usage-tap.mjs), an optional --then64. Anything else that mentions the tap was written
 // by hand, and is left alone.
 const QUOTED = String.raw`'(?:[^']|'\\''|'')*'`
-const OUR_FORM = new RegExp(String.raw`^(&? ?)${QUOTED} '((?:[^']|'\\''|'')*/${TAP_SCRIPT_NAME.replace('.', '\\.')})'(?: --then64 ([A-Za-z0-9_-]+))?$`)
+const OUR_FORM = new RegExp(String.raw`^(&? ?)${QUOTED} '((?:[^']|'\\''|'')*/${TAP_SCRIPT_NAME.replace('.', '\\.')})'(?: --then-shell (?:sh|powershell) --then64 ([A-Za-z0-9_-]+))?$`)
 
 const mentionsTap = (statusLine) => isPlainObject(statusLine) && typeof statusLine.command === 'string' && statusLine.command.includes(TAP_SCRIPT_NAME)
 const isOurs = (statusLine) => mentionsTap(statusLine) && OUR_FORM.test(statusLine.command)

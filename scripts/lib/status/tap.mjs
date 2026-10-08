@@ -15,7 +15,7 @@
 // This module owns the file format both ways - the tap writes it, the collector reads it - so the
 // two can never disagree about where it is or what it holds.
 
-import { join, dirname } from 'node:path'
+import { join, dirname, win32 } from 'node:path'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
 import { isPlainObject, isoSeconds, toIsoTime, cleanPercent, readJson } from './util.mjs'
 import { checkAgainst } from './safe.mjs'
@@ -160,19 +160,44 @@ export function earlierCommand(argv = []) {
   return null
 }
 
-// The shell the earlier command was written for. Claude Code runs status lines with /bin/sh on a
-// Mac or Linux, and on Windows with Git Bash when it is installed (then SHELL names its bash.exe
-// in the environment Claude Code passes down) or PowerShell when it is not.
-export function shellFor(platform, env = {}, exists = () => false) {
-  if (platform === 'win32') {
-    const bash = env.SHELL
-    if (typeof bash === 'string' && /bash(\.exe)?$/i.test(bash) && exists(bash)) return [bash, ['-c']]
-    return ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command']]
-  }
-  return ['/bin/sh', ['-c']]
+// `--then-shell sh|powershell`: the shell the earlier command was written for, as the installer
+// decided it. Anything else is ignored.
+export function earlierShell(argv = []) {
+  const index = argv.indexOf('--then-shell')
+  const value = index >= 0 ? argv[index + 1] : null
+  return value === 'sh' || value === 'powershell' ? value : null
+}
+
+// Git Bash on Windows, found the way the installer finds it - never from SHELL alone, which
+// Claude Code's environment does not have. Windows paths are joined the Windows way whatever
+// computer the code runs on, so the tests can check them anywhere.
+export function findGitBash(env = {}, exists = () => false) {
+  const candidates = [
+    env.CLAUDE_CODE_GIT_BASH_PATH,
+    typeof env.SHELL === 'string' && /bash(\.exe)?$/i.test(env.SHELL) ? env.SHELL : null,
+    win32.join(env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
+    env.LOCALAPPDATA ? win32.join(env.LOCALAPPDATA, 'Programs', 'Git', 'bin', 'bash.exe') : null
+  ]
+  return candidates.find((candidate) => typeof candidate === 'string' && candidate && exists(candidate)) ?? null
+}
+
+const POWERSHELL = ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command']]
+
+// The shell to run the earlier command with, or null to not run it. On a Mac or Linux, /bin/sh.
+// On Windows, exactly the dialect the installer recorded: "sh" is Git Bash, and when Git Bash
+// cannot be found the earlier command is NOT run - a bash command handed to PowerShell fails, and
+// a blank bar is more honest than a wrong one. With no recorded dialect (a --then typed by hand),
+// Git Bash if it can be found, else PowerShell, as Claude Code itself chooses.
+export function shellFor(platform, env = {}, exists = () => false, dialect = null) {
+  if (platform !== 'win32') return ['/bin/sh', ['-c']]
+  if (dialect === 'powershell') return POWERSHELL
+  const bash = findGitBash(env, exists)
+  if (bash) return [bash, ['-c']]
+  return dialect === 'sh' ? null : POWERSHELL
 }
 
 // deps: { input, argv, home, env, platform, now, runThen? }
+// runThen(command, input, dialect) runs the earlier status line; dialect is from --then-shell.
 // Returns { stdout, wrote }. The caller prints stdout as it is and nothing else.
 export async function runTap({ input, argv = [], home, env = {}, platform, now, runThen }) {
   let windows = []
@@ -188,7 +213,7 @@ export async function runTap({ input, argv = [], home, env = {}, platform, now, 
     // The earlier line, exactly as it printed it. If it fails, the bar is left empty rather than
     // filled with an error message that may name a folder.
     stdout = await Promise.resolve()
-      .then(() => runThen(command, input ?? ''))
+      .then(() => runThen(command, input ?? '', earlierShell(argv)))
       .then((text) => (typeof text === 'string' ? text : ''))
       .catch(() => '')
   } else {

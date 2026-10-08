@@ -33,11 +33,17 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-// The earlier status line runs through a shell, the way Claude Code would have run it. Its
-// stderr goes to ours (Claude Code shows that only with --debug); its stdout is what we print.
-function runEarlier(command, input) {
+// The earlier status line runs through the shell the installer recorded for it (--then-shell),
+// the way Claude Code would have run it. Its stderr goes to ours (Claude Code shows that only with
+// --debug); its stdout is what we print.
+function runEarlier(command, input, dialect) {
   return new Promise((resolve) => {
-    const [shell, flags] = shellFor(process.platform, process.env, existsSync)
+    const chosen = shellFor(process.platform, process.env, existsSync, dialect)
+    if (!chosen) {
+      resolve('')
+      return
+    }
+    const [shell, flags] = chosen
     let child
     try {
       child = spawn(shell, [...flags, command], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, timeout: EARLIER_TIMEOUT_MS })
