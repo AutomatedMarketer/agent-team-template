@@ -26,6 +26,7 @@ import { claudeConfigDir, claudeStatePath } from './claude-limits.mjs'
 import { codexHomeDir } from './codex-limits.mjs'
 import { isInsideFolder } from './commit.mjs'
 import { liveCheck } from './claude-live.mjs'
+import { collectTools } from './tools.mjs'
 
 const UNREADABLE = { status: 'unavailable', why: 'could not be read' }
 const SCOPE_ORDER = Object.keys(SERVER_SCOPES)
@@ -320,11 +321,14 @@ async function safely(read, deps) {
 
 export async function collectConnections(deps, computer) {
   const [claude, codex] = await Promise.all([safely(claudeServers, deps), safely(codexFromConfig, deps)])
+  // After the live check, never beside it: every program run empties the folder the next one
+  // runs in, so programs run one at a time.
+  const tools = await collectTools(deps)
   return {
     schema: CONNECTIONS_SCHEMA,
     takenAt: isoSeconds(deps.now),
     computer,
-    tools: [],
+    tools,
     claude,
     codex
   }

@@ -169,13 +169,13 @@ test('a claude inside the --clone folder is never run', async () => {
   }
 })
 
-test('without the Claude files, nothing is started at all', async () => {
+test('without the Claude files, no server is started (only the version check runs)', async () => {
   const { fake } = await homeWithClaude()
   try {
     const exec = execStub(() => sampleOutput())
     const doc = await collectConnections({ ...depsFor(fake), stateDir: join(fake.root, 'state'), exec }, 'Test PC')
     assert.deepEqual(doc.claude, { status: 'not found' })
-    assert.equal(exec.calls.length, 0)
+    assert.deepEqual(exec.calls.map((call) => call.args), [['--version']])
   } finally {
     await fake.cleanup()
   }
