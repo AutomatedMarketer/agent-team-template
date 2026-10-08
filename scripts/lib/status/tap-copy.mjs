@@ -10,6 +10,7 @@
 
 import { readFile, mkdir, writeFile, rm, rename, readdir, rmdir, realpath, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'node:path'
 
 export const COPY_NAME = /^[0-9a-f]{16}-[0-9a-f]{8}$/
@@ -19,14 +20,58 @@ export function tapCopyRoot({ home, env = {}, platform }) {
   return join(home, '.local', 'share', 'agent-status', 'tap')
 }
 
-// Every static `import ... from '...'`, `export ... from '...'`, bare `import '...'` and dynamic
-// `import('...')`. The tap's files are ours and plain, so this does not need a full parser; what it
-// must never do is miss an import and leave one pointing back into the repo, which is why the copy
-// is checked again after it is made.
-const SPECIFIERS = /\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|^\s*import\s*['"]([^'"]+)['"]/gm
+// What a copied file may load must be known before it is copied, or the copy could reach back into
+// the team repo at run time. Two rules:
+//
+// 1. Static imports are listed by V8 itself - the same parser that will run the file - so a comment
+//    between `from` and the path, or an import spread over lines, cannot hide one. vm's module
+//    parser needs a flag, so it runs in a short-lived child Node; the child parses, never runs.
+// 2. Every way of loading code that is not a static import is refused outright, wherever the words
+//    appear - comments included. Telling a comment from code is exactly what a hand-made scanner
+//    gets wrong, and a comment is cheap to reword.
+const DYNAMIC_LOADS = [
+  [/\bimport\s*\(/, 'import()'],
+  [/\brequire\s*\(/, 'require()'],
+  [/\bcreateRequire\b/, 'createRequire'],
+  [/\bimport\.meta\.resolve\b/, 'import.meta.resolve']
+]
 
-function specifiersIn(text) {
-  return [...text.matchAll(SPECIFIERS)].map((match) => match[1] ?? match[2] ?? match[3])
+const LISTER = [
+  "const vm = require('node:vm')",
+  "let source = ''",
+  "process.stdin.on('data', (chunk) => { source += chunk })",
+  "process.stdin.on('end', () => {",
+  '  try {',
+  '    const parsed = new vm.SourceTextModule(source)',
+  '    const specifiers = parsed.moduleRequests ? parsed.moduleRequests.map((request) => request.specifier) : parsed.dependencySpecifiers',
+  '    process.stdout.write(JSON.stringify({ ok: true, specifiers }))',
+  '  } catch {',
+  "    process.stdout.write(JSON.stringify({ ok: false }))",
+  '  }',
+  '})'
+].join('\n')
+
+function staticImportsOf(text) {
+  return new Promise((resolvePromise, reject) => {
+    const child = execFile(process.execPath, ['--experimental-vm-modules', '--no-warnings', '-e', LISTER], { encoding: 'utf8', timeout: 20_000, windowsHide: true }, (error, stdout) => {
+      let answer = null
+      try {
+        answer = JSON.parse(stdout)
+      } catch {
+        answer = null
+      }
+      if (error || !answer?.ok || !Array.isArray(answer.specifiers)) reject(new Error('a tap file could not be parsed, so its imports are not known'))
+      else resolvePromise(answer.specifiers)
+    })
+    child.stdin.end(text)
+  })
+}
+
+async function specifiersIn(text) {
+  for (const [pattern, name] of DYNAMIC_LOADS) {
+    if (pattern.test(text)) throw new Error(`the tap uses ${name}, which could load code from outside the copy; only plain static imports can be copied`)
+  }
+  return staticImportsOf(text)
 }
 
 const inside = (base, path) => {
@@ -45,7 +90,7 @@ export async function collectTapFiles(entry) {
     if (found.has(path)) continue
     const content = await readFile(path)
     found.set(path, content)
-    for (const specifier of specifiersIn(content.toString('utf8'))) {
+    for (const specifier of await specifiersIn(content.toString('utf8'))) {
       if (specifier.startsWith('node:')) continue
       if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
         throw new Error(`the tap imports a package (${specifier}); only node: modules and its own files can be copied`)

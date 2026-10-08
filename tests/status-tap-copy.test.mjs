@@ -80,6 +80,45 @@ test('an import that reaches outside scripts/, or a package, is refused', async 
   }
 })
 
+// Found in re-review: the import scan was a regular expression over `from '...'`, so a static import
+// written across a comment, or any dynamic way of loading code, slipped past it - and the copy would
+// then load that file from the team repo after all. Static imports are now listed by V8 itself, and
+// every dynamic form is refused outright, wherever it appears (comments too: they are cheap to
+// reword, and a scanner that tries to tell a comment from code is the thing that was fooled).
+const HIDDEN_LOADS = {
+  'a static import with a comment before the path': "import { x } from /* note */ '../../../outside.mjs'\n",
+  'a static import across lines': "import {\n  x\n} from\n  '../../../outside.mjs'\n",
+  'an import() with a template literal': 'const dir = "../../.."\nawait import(`${dir}/outside.mjs`)\n',
+  'an import() of a new URL': "await import(new URL('../../../outside.mjs', import.meta.url))\n",
+  'an import() of a plain string': "await import('./util.mjs')\n",
+  'createRequire': "import { createRequire } from 'node:module'\nconst load = createRequire(import.meta.url)\nload('../../../outside.cjs')\n",
+  'require()': "const x = require('../../../outside.cjs')\n",
+  'import.meta.resolve': "const where = import.meta.resolve('../../../outside.mjs')\n",
+  'a commented-out import()': "// await import('../../../outside.mjs')\n"
+}
+
+for (const [name, line] of Object.entries(HIDDEN_LOADS)) {
+  test(`the copy refuses code that could load from outside it: ${name}`, async () => {
+    const fake = await fakeRepoAndHome()
+    try {
+      const tapModule = join(fake.repo, 'scripts', 'lib', 'status', 'tap.mjs')
+      await writeFile(tapModule, `${line}${await readFile(tapModule, 'utf8')}`)
+      await writeFile(join(fake.repo, 'outside.mjs'), 'export const x = 1\n')
+      await assert.rejects(collectTapFiles(join(fake.repo, 'scripts', 'usage-tap.mjs')))
+      const result = await installTap(deps(fake))
+      assert.equal(result.action, 'refuse')
+      assert.equal(existsSync(fake.settings), false, 'settings.json was written anyway')
+    } finally {
+      await fake.cleanup()
+    }
+  })
+}
+
+test('the tap as shipped passes the stricter scan', async () => {
+  const files = await collectTapFiles(join(repoRoot, 'scripts', 'usage-tap.mjs'))
+  assert.equal(files.length, 5)
+})
+
 test('the status line points at a hash-named copy, never at the team repo', async () => {
   const fake = await fakeRepoAndHome()
   try {
