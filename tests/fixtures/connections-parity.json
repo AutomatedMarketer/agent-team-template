@@ -1,0 +1,229 @@
+{
+  "about": "Shared contract for the connections snapshot (the Connections wall). The same bytes live in agent-team-template and agent-cockpit; a test in each repo checks they match. The collector writes `sample`-shaped files; the board reads them and, given `expectedShape.now`, must produce `expectedShape` from `sample` exactly.",
+  "schema": "agent-status/connections/v1",
+  "folder": ".agent-team/status/connections",
+  "computerSlug": "^[a-z0-9-]{1,32}$",
+  "staleAfterHours": 8,
+  "maxFilesRead": 5,
+  "maxFileBytes": 65536,
+  "maxComputersShown": 3,
+  "statuses": [
+    "found",
+    "not found",
+    "unavailable"
+  ],
+  "caps": {
+    "claudeServers": 100,
+    "codexServers": 50,
+    "codexPlugins": 60,
+    "tools": 12
+  },
+  "tools": [
+    "Claude Code",
+    "Codex",
+    "Hermes",
+    "Node.js",
+    "Git",
+    "GitHub CLI",
+    "Claude app",
+    "ChatGPT app",
+    "Tailscale"
+  ],
+  "toolStates": {
+    "found": "Found",
+    "not found": "Not found",
+    "could not check": "Could not check"
+  },
+  "versionPattern": "^\\d+(\\.\\d+){1,3}$",
+  "maxVersionLength": 32,
+  "scopes": {
+    "user": "Your server",
+    "plugin": "Plugin server",
+    "claude.ai": "claude.ai connector",
+    "other": "Other"
+  },
+  "transports": {
+    "local": "Local program",
+    "web": "Web service",
+    "unknown": "Not known"
+  },
+  "serverStates": {
+    "connected": "Connected",
+    "needs sign-in": "Needs sign-in",
+    "failed": "Failed",
+    "waiting for approval": "Waiting for approval",
+    "not checked": "Not checked",
+    "seen before": "Seen before",
+    "unknown": "Unknown"
+  },
+  "liveStates": {
+    "checked": "Checked live",
+    "timed out": "Live check took too long",
+    "could not run": "Live check could not run",
+    "could not read": "Live check answer not understood",
+    "program not found": "Claude Code not found"
+  },
+  "codexStates": {
+    "found": "Found",
+    "turned off": "Turned off"
+  },
+  "connectionName": {
+    "characters": "^[\\p{L}\\p{N} .,'’()+&:_-]+$",
+    "flags": "u",
+    "maxLength": 60,
+    "never": [
+      "@",
+      "/",
+      "\\",
+      "eyJ",
+      "sk-",
+      "bearer"
+    ],
+    "neverIgnoresCase": true,
+    "uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}",
+    "segmentSeparators": ":._- ",
+    "maxSegmentLength": 23,
+    "accept": [
+      "github",
+      "plugin:marketing:supermetrics",
+      "plugin:context7:context7",
+      "claude.ai Google Drive",
+      "n8n-mcp",
+      "perplexity-ask",
+      "Büro Server (2)",
+      "Mac's tools + more",
+      "abcdefghijklmnopqrstuvw",
+      "abcdefghijklmnopqrstuvw:abcdefghijklmnopqrstuvw",
+      "a b c d e f g h i j k l m n o p q r s t u v w x y z 1 2 3 4"
+    ],
+    "refuse": [
+      { "name": "", "why": "empty" },
+      { "name": " github", "why": "space at the start or end" },
+      { "name": "github ", "why": "space at the start or end" },
+      { "name": "abcdefghijklmnopqrstuvwx", "why": "a stretch of 24 or more characters without a separator" },
+      { "name": "f3a9c1d7e5b2a8c4d6e0f1a3b5c7d9e2f4a6b8c0", "why": "a 40-character token" },
+      { "name": "plugin:marketing:abcdefghijklmnopqrstuvwxyz", "why": "one segment of 24 or more characters" },
+      { "name": "0f0e0d0c-1111-2222-3333-444455556666", "why": "a uuid" },
+      { "name": "name@marketplace", "why": "an at sign" },
+      { "name": "github/github-mcp", "why": "a slash" },
+      { "name": "C:\\servers", "why": "a backslash" },
+      { "name": "eyJhbGciOi", "why": "the start of a signed token" },
+      { "name": "my-sk-server", "why": "the start of a key (sk-)" },
+      { "name": "desk-helper", "why": "contains sk- by accident, refused all the same" },
+      { "name": "Bearer abc", "why": "an authorization header" },
+      { "name": "server#1", "why": "a character the board does not show" },
+      { "name": "github\n", "why": "a line break" },
+      { "name": "‮github", "why": "a direction control character" },
+      { "name": "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij", "why": "longer than 60 characters" }
+    ]
+  },
+  "rules": [
+    "a block (claude, codex) with any status other than found carries only status and an optional why",
+    "a tool carries a version only when its state is found",
+    "a name that fails connectionName is dropped and counted in hidden; the board re-checks every name and adds what it drops to hidden",
+    "servers beyond the cap are not written; how many is in more",
+    "project-level Claude servers are counted in projectServers, never named",
+    "a Codex server or plugin with enabled false is Turned off; with enabled true or missing it is Found",
+    "found never becomes proved: Proved comes only from the connections register, matched by name",
+    "a file older than staleAfterHours is shown as stale with its age, never as current",
+    "the board shows at most maxComputersShown computers, newest takenAt first"
+  ],
+  "sample": {
+    "schema": "agent-status/connections/v1",
+    "takenAt": "2026-10-08T15:00:00Z",
+    "computer": "Mac Mini",
+    "tools": [
+      { "name": "Claude Code", "state": "found", "version": "2.1.293" },
+      { "name": "Codex", "state": "found", "version": "0.154.0" },
+      { "name": "Hermes", "state": "found", "version": "0.21.3" },
+      { "name": "Node.js", "state": "found", "version": "24.9.0" },
+      { "name": "Git", "state": "found", "version": "2.47.1" },
+      { "name": "GitHub CLI", "state": "not found" },
+      { "name": "Claude app", "state": "found", "version": "1.0.211" },
+      { "name": "ChatGPT app", "state": "could not check" },
+      { "name": "Tailscale", "state": "found", "version": "1.76.6" }
+    ],
+    "claude": {
+      "status": "found",
+      "live": "checked",
+      "servers": [
+        { "name": "github", "scope": "user", "transport": "local", "state": "connected" },
+        { "name": "n8n-mcp", "scope": "user", "transport": "web", "state": "failed" },
+        { "name": "plugin:context7:context7", "scope": "plugin", "transport": "local", "state": "connected" },
+        { "name": "plugin:marketing:supermetrics", "scope": "plugin", "transport": "web", "state": "needs sign-in" },
+        { "name": "claude.ai Gmail", "scope": "claude.ai", "transport": "web", "state": "connected" },
+        { "name": "claude.ai Google Drive", "scope": "claude.ai", "transport": "web", "state": "seen before" },
+        { "name": "team-tools", "scope": "other", "transport": "unknown", "state": "waiting for approval" }
+      ],
+      "projectServers": 4,
+      "hidden": 1,
+      "more": 0
+    },
+    "codex": {
+      "status": "found",
+      "servers": [
+        { "name": "docs-search", "enabled": true },
+        { "name": "playwright" },
+        { "name": "old-crm", "enabled": false }
+      ],
+      "plugins": [
+        { "name": "canva", "from": "openai-curated", "enabled": false },
+        { "name": "github", "from": "openai-curated", "enabled": true }
+      ],
+      "hidden": 0,
+      "more": 0
+    }
+  },
+  "expectedShape": {
+    "now": "2026-10-08T16:00:00Z",
+    "computers": [
+      {
+        "computer": "Mac Mini",
+        "takenAt": "2026-10-08T15:00:00Z",
+        "freshness": "fresh",
+        "tools": [
+          { "name": "Claude Code", "state": "found", "label": "Found", "version": "2.1.293" },
+          { "name": "Codex", "state": "found", "label": "Found", "version": "0.154.0" },
+          { "name": "Hermes", "state": "found", "label": "Found", "version": "0.21.3" },
+          { "name": "Node.js", "state": "found", "label": "Found", "version": "24.9.0" },
+          { "name": "Git", "state": "found", "label": "Found", "version": "2.47.1" },
+          { "name": "GitHub CLI", "state": "not found", "label": "Not found", "version": null },
+          { "name": "Claude app", "state": "found", "label": "Found", "version": "1.0.211" },
+          { "name": "ChatGPT app", "state": "could not check", "label": "Could not check", "version": null },
+          { "name": "Tailscale", "state": "found", "label": "Found", "version": "1.76.6" }
+        ],
+        "claude": {
+          "status": "found",
+          "live": "checked",
+          "liveLabel": "Checked live",
+          "servers": [
+            { "name": "github", "scope": "user", "scopeLabel": "Your server", "transport": "local", "transportLabel": "Local program", "state": "connected", "stateLabel": "Connected" },
+            { "name": "n8n-mcp", "scope": "user", "scopeLabel": "Your server", "transport": "web", "transportLabel": "Web service", "state": "failed", "stateLabel": "Failed" },
+            { "name": "plugin:context7:context7", "scope": "plugin", "scopeLabel": "Plugin server", "transport": "local", "transportLabel": "Local program", "state": "connected", "stateLabel": "Connected" },
+            { "name": "plugin:marketing:supermetrics", "scope": "plugin", "scopeLabel": "Plugin server", "transport": "web", "transportLabel": "Web service", "state": "needs sign-in", "stateLabel": "Needs sign-in" },
+            { "name": "claude.ai Gmail", "scope": "claude.ai", "scopeLabel": "claude.ai connector", "transport": "web", "transportLabel": "Web service", "state": "connected", "stateLabel": "Connected" },
+            { "name": "claude.ai Google Drive", "scope": "claude.ai", "scopeLabel": "claude.ai connector", "transport": "web", "transportLabel": "Web service", "state": "seen before", "stateLabel": "Seen before" },
+            { "name": "team-tools", "scope": "other", "scopeLabel": "Other", "transport": "unknown", "transportLabel": "Not known", "state": "waiting for approval", "stateLabel": "Waiting for approval" }
+          ],
+          "projectServers": 4,
+          "hidden": 1,
+          "more": 0
+        },
+        "codex": {
+          "status": "found",
+          "servers": [
+            { "name": "docs-search", "state": "found", "label": "Found" },
+            { "name": "playwright", "state": "found", "label": "Found" },
+            { "name": "old-crm", "state": "turned off", "label": "Turned off" }
+          ],
+          "plugins": [
+            { "name": "canva", "from": "openai-curated", "state": "turned off", "label": "Turned off" },
+            { "name": "github", "from": "openai-curated", "state": "found", "label": "Found" }
+          ],
+          "hidden": 0,
+          "more": 0
+        }
+      }
+    ]
+  }
+}

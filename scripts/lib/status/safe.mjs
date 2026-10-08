@@ -8,6 +8,7 @@
 // is the thing that might be the secret.
 
 import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, MAX_PERCENT, computerSlug } from './schema.mjs'
+import { CONNECTIONS_SHAPE, CONNECTION_NAME, VERSION_PATTERN, MAX_VERSION_LENGTH } from './connections-schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -149,6 +150,18 @@ function walk(value, shape, path, identity, problems) {
     case 'true':
       if (value !== true) problems.push(`${path}: must be true`)
       return
+    case 'boolean':
+      if (typeof value !== 'boolean') problems.push(`${path}: is not true or false`)
+      return
+    case 'version':
+      // Digits and dots only: a version banner ("2.1.293 (Claude Code)") can carry a path or a name.
+      if (typeof value !== 'string' || value.length > MAX_VERSION_LENGTH || !VERSION_PATTERN.test(value)) {
+        problems.push(`${path}: is not a version number`)
+      }
+      return
+    case 'connName':
+      problems.push(...checkConnectionName(value, path, identity))
+      return
     case 'array':
       if (!Array.isArray(value)) {
         problems.push(`${path}: is not a list`)
@@ -157,9 +170,25 @@ function walk(value, shape, path, identity, problems) {
       if (value.length < (shape.min ?? 0)) problems.push(`${path}: has too few entries`)
       if (value.length > shape.max) problems.push(`${path}: has more than ${shape.max} entries`)
       value.slice(0, shape.max).forEach((item, index) => walk(item, shape.of, `${path}[${index}]`, identity, problems))
+      if (shape.unique) {
+        // The same name twice is a reading nobody can trust, and the board would show it twice.
+        const seen = new Set()
+        for (const item of value) {
+          if (!isPlainObject(item)) continue
+          const key = JSON.stringify(shape.unique.map((field) => item[field]))
+          if (seen.has(key)) {
+            problems.push(`${path}: names the same entry twice`)
+            break
+          }
+          seen.add(key)
+        }
+      }
       return
     case 'object':
       walkObject(value, shape.keys, shape.required ?? [], path, identity, problems)
+      if (shape.rule && isPlainObject(value)) {
+        for (const [key, says] of shape.rule(value)) problems.push(`${join(path, key)}: ${says}`)
+      }
       if (shape.modelWindow && isPlainObject(value)) {
         if (value.kind === 'weekly_model' && value.model === undefined) {
           problems.push(`${join(path, 'model')}: is missing for a model window`)
@@ -215,6 +244,12 @@ function walkBlock(value, shape, path, identity, problems) {
 export function checkUsage(doc, identity) {
   const problems = []
   walk(doc, USAGE_SHAPE, '', identity, problems)
+  return problems
+}
+
+export function checkConnections(doc, identity) {
+  const problems = []
+  walk(doc, CONNECTIONS_SHAPE, '', identity, problems)
   return problems
 }
 
@@ -285,3 +320,35 @@ export function checkComputerLabel(label, identity) {
   if (hostSlug && computerSlug(label) === hostSlug) problems.push('computer: is the computer name')
   return problems
 }
+
+// The connection-name rule (connections-schema.mjs, CONNECTION_NAME; the board holds the same rule
+// from tests/fixtures/connections-parity.json). A server name is whatever someone typed into a
+// config file, so it is held to the board's characters, the gate's refusals, no id, and no stretch
+// of 24 or more characters between separators - long enough to be a token. Like every gate
+// problem, it names the field and never the value.
+// Each character is matched one at a time, so no character in the list is ever read as a range.
+const isSeparator = (character) => CONNECTION_NAME.segmentSeparators.includes(character)
+const longestSegment = (value) => {
+  let longest = 0
+  let current = 0
+  for (const character of value) {
+    current = isSeparator(character) ? 0 : current + 1
+    longest = Math.max(longest, current)
+  }
+  return longest
+}
+
+export function checkConnectionName(value, path, identity) {
+  if (typeof value !== 'string') return [`${path}: is not text`]
+  if (!value) return [`${path}: is empty`]
+  const problems = stringProblems(value, path, identity)
+  if (value !== value.trim()) problems.push(`${path}: starts or ends with a space`)
+  if (!CONNECTION_NAME.characters.test(value)) problems.push(`${path}: has a character the dashboard does not show`)
+  if (CONNECTION_NAME.uuid.test(value.toLowerCase())) problems.push(`${path}: looks like an id`)
+  if (longestSegment(value) > CONNECTION_NAME.maxSegmentLength) {
+    problems.push(`${path}: has ${CONNECTION_NAME.maxSegmentLength + 1} or more characters without a separator`)
+  }
+  return problems
+}
+
+export const isConnectionName = (value, identity) => checkConnectionName(value, 'name', identity).length === 0
