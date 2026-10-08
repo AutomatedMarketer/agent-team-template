@@ -1,7 +1,7 @@
 // Commit mode: getting the snapshot into the repo the dashboard reads, unattended.
 //
 // Two places it can commit from, and they are treated differently on purpose:
-//   - a person's own working copy: commit only the snapshot file, whatever else is staged. Push
+//   - a person's own working copy: commit only the snapshot files (one per part, in one commit), whatever else is staged. Push
 //     only when that push would carry the snapshot alone to the default branch; otherwise, or if
 //     the push is refused, stop and say so. Nothing of theirs is ever reset or pushed.
 //   - the collector's dedicated clone (--clone): a folder nobody works in. It is brought level
@@ -19,8 +19,12 @@ import { isoSeconds } from './util.mjs'
 export const LOCK_STALE_MS = 3600_000
 
 // Every collector commit starts with this, which is how a dedicated clone tells its own unpushed
-// commits from anybody else's.
-export const SNAPSHOT_SUBJECT = 'Usage snapshot from '
+// commits from anybody else's. Before a run could write more than the usage file its commits said
+// "Usage snapshot from"; a clone may still hold one of those unpushed, and it is still the
+// collector's own.
+export const SNAPSHOT_SUBJECT = 'Status snapshot from '
+export const SNAPSHOT_SUBJECTS = [SNAPSHOT_SUBJECT, 'Usage snapshot from ']
+const isSnapshotSubject = (subject) => SNAPSHOT_SUBJECTS.some((prefix) => subject.startsWith(prefix))
 
 // A run by hand is named after its own second: a person asking twice wants two readings.
 export function claimStamp(now) {
@@ -137,7 +141,8 @@ export async function isInsideFolder(inner, outer) {
 // Returns null when the folder is fit to be used, or a short reason when it is not. The
 // collector's own code never lives in this folder (run.mjs refuses that before it gets here):
 // this folder is reset to whatever the remote holds, and the remote is not who chooses the code.
-export async function prepareClone({ git, cloneDir, relativePath }) {
+export async function prepareClone({ git, cloneDir, relativePaths }) {
+  const own = new Set(relativePaths)
   let top
   try {
     top = (await git(['rev-parse', '--show-toplevel'], cloneDir)).stdout.trim()
@@ -146,7 +151,7 @@ export async function prepareClone({ git, cloneDir, relativePath }) {
   }
   if (!(await sameFolder(top, cloneDir))) return 'it is a folder inside a clone, not the clone itself'
   const status = (await git(['status', '--porcelain', '--untracked-files=all'], cloneDir)).stdout
-  const others = status.split('\n').filter((line) => line.trim() && line.slice(3).trim() !== relativePath)
+  const others = status.split('\n').filter((line) => line.trim() && !own.has(line.slice(3).trim()))
   if (others.length) return 'it has changes in it that the collector did not make'
   // A clean folder can still hold somebody's work in commits never pushed. Resetting would lose
   // them, so only the collector's own unpushed snapshots are allowed to be there.
@@ -156,7 +161,7 @@ export async function prepareClone({ git, cloneDir, relativePath }) {
   } catch {
     return 'it has no remote branch to follow'
   }
-  if (ahead.split('\n').some((subject) => subject.trim() && !subject.startsWith(SNAPSHOT_SUBJECT))) {
+  if (ahead.split('\n').some((subject) => subject.trim() && !isSnapshotSubject(subject))) {
     return 'it has unpushed commits the collector did not make'
   }
   try {
@@ -272,7 +277,7 @@ async function workingCopyPushTarget(run) {
 //   - carries a lease on `expected`, so it lands only if the remote's branch is still exactly
 //     that commit. A lease is a force push in git's terms, which is why the fast-forward check
 //     comes first: together they mean "add this one commit, or do nothing".
-export async function commitAndPush({ git, dir, relativePath, message, mode, rewrite }) {
+export async function commitAndPush({ git, dir, relativePaths, message, mode, rewrite }) {
   const run = (args) => git(args, dir)
   const succeeds = async (args) => {
     try {
@@ -283,10 +288,10 @@ export async function commitAndPush({ git, dir, relativePath, message, mode, rew
     }
   }
   const commitOwnFile = async () => {
-    await run(['add', '--', relativePath])
-    if (await succeeds(['diff', '--cached', '--quiet', '--', relativePath])) return null
-    // --only with a path commits that path alone; anything else staged stays staged.
-    await run(['commit', '--quiet', '--only', '-m', message, '--', relativePath])
+    await run(['add', '--', ...relativePaths])
+    if (await succeeds(['diff', '--cached', '--quiet', '--', ...relativePaths])) return null
+    // --only with paths commits those paths alone, in one commit; anything else staged stays staged.
+    await run(['commit', '--quiet', '--only', '-m', message, '--', ...relativePaths])
     return (await run(['rev-parse', 'HEAD'])).stdout.trim()
   }
 

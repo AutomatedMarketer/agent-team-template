@@ -173,7 +173,13 @@ export const USAGE_SHAPE = {
 // happened to it). A claim with a receipt and no final record is an outcome nobody knows, and the
 // Mac task policy says not to replay that blindly.
 
-export const RECEIPT_SCHEMA = 'agent-status/receipt/v1'
+// The parts one run can collect, each its own file under .agent-team/status/<part>/. A run with no
+// --only collects them all. Hermes is named so --only hermes can say when it arrives.
+export const PARTS = ['usage', 'connections']
+export const LATER_PARTS = { hermes: 'Hermes comes in a later phase (Phase 6).' }
+
+// v2: one run writes several files, so the receipt lists each with its own hash.
+export const RECEIPT_SCHEMA = 'agent-status/receipt/v2'
 export const FINAL_SCHEMA = 'agent-status/final/v1'
 export const OUTCOMES = [
   'pushed',
@@ -194,15 +200,38 @@ export const RECEIPT_SHAPE = {
     schema: { type: 'const', value: RECEIPT_SCHEMA },
     claimedAt: { type: 'iso' },
     computer: text,
-    file: { type: 'pattern', pattern: /^\.agent-team\/status\/usage\/[a-z0-9-]{1,32}\.json$/ },
-    sha256: { type: 'pattern', pattern: /^[0-9a-f]{64}$/ },
+    parts: { type: 'array', of: { type: 'enum', values: PARTS }, min: 1, max: PARTS.length, unique: [] },
+    files: {
+      type: 'array',
+      of: {
+        type: 'object',
+        keys: {
+          file: { type: 'pattern', pattern: new RegExp(`^\\.agent-team\\/status\\/(${PARTS.join('|')})\\/[a-z0-9-]{1,32}\\.json$`) },
+          sha256: { type: 'pattern', pattern: /^[0-9a-f]{64}$/ }
+        },
+        required: ['file', 'sha256']
+      },
+      min: 1,
+      max: PARTS.length,
+      unique: ['file']
+    },
     sources: {
       type: 'object',
-      keys: { claudePlan: statusWord, claudeLimits: statusWord, claudeActivity: statusWord, codexPlan: statusWord, codexLimits: statusWord },
-      required: ['claudePlan', 'claudeLimits', 'claudeActivity', 'codexPlan', 'codexLimits']
+      keys: {
+        usage: {
+          type: 'object',
+          keys: { claudePlan: statusWord, claudeLimits: statusWord, claudeActivity: statusWord, codexPlan: statusWord, codexLimits: statusWord },
+          required: ['claudePlan', 'claudeLimits', 'claudeActivity', 'codexPlan', 'codexLimits']
+        },
+        connections: {
+          type: 'object',
+          keys: { claude: statusWord, codex: statusWord, tools: { type: 'count' } },
+          required: ['claude', 'codex', 'tools']
+        }
+      }
     }
   },
-  required: ['schema', 'claimedAt', 'computer', 'file', 'sha256', 'sources']
+  required: ['schema', 'claimedAt', 'computer', 'parts', 'files', 'sources']
 }
 
 export const FINAL_SHAPE = {

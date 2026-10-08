@@ -270,21 +270,21 @@ test('a short username or hostname does not make every word suspicious', () => {
 
 
 const validReceipt = () => ({
-  schema: 'agent-status/receipt/v1',
+  schema: 'agent-status/receipt/v2',
   claimedAt: '2026-10-07T20:00:00Z',
   computer: 'Mac Mini',
-  file: '.agent-team/status/usage/mac-mini.json',
-  sha256: 'a'.repeat(64),
-  sources: { claudePlan: 'found', claudeLimits: 'found', claudeActivity: 'found', codexPlan: 'not found', codexLimits: 'unavailable' }
+  parts: ['usage'],
+  files: [{ file: '.agent-team/status/usage/mac-mini.json', sha256: 'a'.repeat(64) }],
+  sources: { usage: { claudePlan: 'found', claudeLimits: 'found', claudeActivity: 'found', codexPlan: 'not found', codexLimits: 'unavailable' } }
 })
 
 test('a receipt holds statuses and a hash, and the gate holds it to exactly that', () => {
   assert.deepEqual(checkAgainst(validReceipt(), RECEIPT_SHAPE, identity), [])
   const cases = [
-    [(receipt) => { receipt.file = '/Users/fakeperson/repo/.agent-team/status/usage/mac-mini.json' }, /^file: /],
-    [(receipt) => { receipt.file = '.agent-team/status/usage/../../secret.json' }, /^file: /],
-    [(receipt) => { receipt.sha256 = 'A'.repeat(64) }, /^sha256: /],
-    [(receipt) => { receipt.sources.claudeLimits = 18 }, /sources\.claudeLimits/],
+    [(receipt) => { receipt.files[0].file = '/Users/fakeperson/repo/.agent-team/status/usage/mac-mini.json' }, /^files\[0\]\.file: /],
+    [(receipt) => { receipt.files[0].file = '.agent-team/status/usage/../../secret.json' }, /^files\[0\]\.file: /],
+    [(receipt) => { receipt.files[0].sha256 = 'A'.repeat(64) }, /^files\[0\]\.sha256: /],
+    [(receipt) => { receipt.sources.usage.claudeLimits = 18 }, /sources\.usage\.claudeLimits/],
     [(receipt) => { receipt.sources.email = 'found' }, /sources\.email/],
     [(receipt) => { receipt.token = 'x' }, /^token: /]
   ]

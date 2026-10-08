@@ -1,8 +1,12 @@
-// The collector run: read every source, put them in one file, pass the gate, write.
+// The collector run: read every source, put each part in its own file, pass the gate, write.
 //
 // Every input is handed in through `deps` - home folder, environment, clock, network, Keychain,
-// identity - so the tests can run the whole thing against a fake home with a fake network, and
-// the leak test exercises exactly the code that runs on the real machine.
+// programs, identity - so the tests can run the whole thing against a fake home with a fake
+// network, and the leak test exercises exactly the code that runs on the real machine.
+//
+// A run collects one or more parts (schema.mjs, PARTS): usage, connections. They travel together:
+// every part passes the gate before anything is written, and in commit mode every file goes into
+// one commit.
 
 import { join } from 'node:path'
 import { mkdir, rm } from 'node:fs/promises'
@@ -11,19 +15,23 @@ import { createHash } from 'node:crypto'
 import {
   USAGE_SCHEMA,
   DEFAULT_COMPUTER,
+  PARTS,
+  LATER_PARTS,
   usagePath,
   RECEIPT_SCHEMA,
   RECEIPT_SHAPE,
   FINAL_SCHEMA,
   FINAL_SHAPE
 } from './schema.mjs'
-import { checkUsage, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
+import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
+import { checkUsage, checkConnections, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 import { writeSnapshot, assertNoLinks, LinkedPath } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
+import { collectConnections } from './connections.mjs'
 import {
   takeLock,
   releaseLock,
@@ -111,8 +119,85 @@ export function sourceStatuses(doc) {
   }
 }
 
+const blockDetail = (block) => `${block.status}${block.why ? ` (${block.why})` : ''}`
+
+// Counts and statuses only - never a server name, which is the person's own words.
+export function summarizeConnections(doc) {
+  const states = {}
+  for (const tool of doc.tools) states[tool.state] = (states[tool.state] ?? 0) + 1
+  const tools = Object.entries(states).map(([state, count]) => `${count} ${state}`).join(', ') || 'none listed'
+  const claude = doc.claude.status === 'found'
+    ? `found: ${doc.claude.servers.length} named, ${doc.claude.projectServers} project servers counted, ${doc.claude.hidden} hidden, ${doc.claude.more} more (${LIVE_STATES[doc.claude.live]})`
+    : blockDetail(doc.claude)
+  const codex = doc.codex.status === 'found'
+    ? `found: ${doc.codex.servers.length} servers, ${doc.codex.plugins.length} plugins, ${doc.codex.hidden} hidden, ${doc.codex.more} more`
+    : blockDetail(doc.codex)
+  return [`- Tools: ${tools}`, `- Claude servers ${claude}`, `- Codex ${codex}`]
+}
+
+export function connectionStatuses(doc) {
+  return { claude: doc.claude.status, codex: doc.codex.status, tools: doc.tools.filter((tool) => tool.state === 'found').length }
+}
+
+// Each part: where it goes, how it is collected, the gate it passes, and what the log says.
+const PART_TABLE = {
+  usage: {
+    title: 'Usage',
+    path: usagePath,
+    collect: (deps, computer, trail) => collectUsage(deps, computer, trail),
+    check: checkUsage,
+    summarize: (doc, trail) => summarize(doc, trail),
+    statuses: sourceStatuses
+  },
+  connections: {
+    title: 'Connections',
+    path: connectionsPath,
+    collect: (deps, computer) => (deps.sources?.connections ?? collectConnections)(deps, computer),
+    check: checkConnections,
+    summarize: (doc) => summarizeConnections(doc),
+    statuses: connectionStatuses
+  }
+}
+
+if (JSON.stringify(Object.keys(PART_TABLE)) !== JSON.stringify(PARTS)) {
+  throw new Error('run.mjs: the part table does not match PARTS')
+}
+
+// --only takes a comma-separated list. Returns { parts } in the contract's order, or { refusal }.
+// What was typed is never repeated back: it is free text, and could be anything.
+export function partsFrom(only) {
+  if (only === undefined) return { parts: [...PARTS] }
+  const asked = only.split(',').map((part) => part.trim())
+  if (asked.some((part) => !part)) return { refusal: '--only needs part names separated by commas, with nothing empty between them.' }
+  const later = asked.find((part) => Object.hasOwn(LATER_PARTS, part))
+  if (later) return { refusal: LATER_PARTS[later] }
+  if (asked.some((part) => !PARTS.includes(part))) return { refusal: `--only takes ${PARTS.join(', ')}, or several of them separated by commas.` }
+  return { parts: PARTS.filter((part) => asked.includes(part)) }
+}
+
+// Collects every part asked for, then holds every one to the gate. Returns { snapshots } when all
+// passed, or { problems } naming each refused field with its part - nothing is written either way.
+async function collectParts(parts, deps, computer, identity) {
+  const snapshots = []
+  for (const part of parts) {
+    const entry = PART_TABLE[part]
+    const trail = []
+    const doc = await entry.collect(deps, computer, trail)
+    snapshots.push({ part, entry, trail, doc, relativePath: entry.path(computer), text: `${JSON.stringify(doc, null, 2)}\n` })
+  }
+  const problems = snapshots.flatMap(({ part, entry, doc }) => entry.check(doc, identity).map((problem) => `${part}: ${problem}`))
+  return problems.length ? { problems } : { snapshots }
+}
+
+function report(snapshots, say) {
+  for (const { entry, doc, trail } of snapshots) {
+    say(`${entry.title}:`)
+    entry.summarize(doc, trail).forEach(say)
+  }
+}
+
 const USAGE_TEXT = [
-  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage] [--dry-run]',
+  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections] [--dry-run]',
   '                                       [--commit [--clone <dir>] [--state-dir <dir>]]'
 ]
 
@@ -132,7 +217,7 @@ function gatedPrinter(print, identity) {
 }
 
 const LINK_REFUSAL = [
-  'Refused: part of the path the snapshot goes to (.agent-team/status/usage) is a link to somewhere else.',
+  'Refused: part of the path a snapshot goes to (.agent-team/status/...) is a link to somewhere else.',
   'Nothing was written. A link there would send the file outside this folder. Replace it with a real folder.'
 ]
 
@@ -143,6 +228,16 @@ const OUTCOME_LINES = {
     line: 'The first push was refused, so the clone caught up with the remote, rewrote the snapshot and retried. Pushed.'
   },
   'nothing to commit': { code: 0, line: 'Nothing changed since the last snapshot, so nothing was committed.' }
+}
+
+// Every path is checked before any file is written, so a link in one part's folder stops them all.
+async function assertNoLinksAll(target, relativePaths, options) {
+  for (const relativePath of relativePaths) await assertNoLinks(target, relativePath, options)
+}
+
+async function writeAll(target, snapshots, options) {
+  await assertNoLinksAll(target, snapshots.map(({ relativePath }) => relativePath), options)
+  for (const { relativePath, text } of snapshots) await writeSnapshot(target, relativePath, text, options)
 }
 
 // args: { argv, deps, repoRoot, out, err }
@@ -165,8 +260,9 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     USAGE_TEXT.forEach(say)
     return 0
   }
-  if (values.only !== undefined && values.only !== 'usage') {
-    complain('Only --only usage exists so far. Connections and Hermes come in later phases.')
+  const { parts, refusal } = partsFrom(values.only)
+  if (refusal) {
+    complain(refusal)
     return 2
   }
   if (values['dry-run'] && values.commit) {
@@ -195,34 +291,42 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     return 2
   }
 
-  if (values.commit) return commitRun({ values, computer, deps, repoRoot, say, complain })
+  if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
 
-  const trail = []
-  const doc = await collectUsage(deps, computer, trail)
-  const problems = checkUsage(doc, identity)
-  if (problems.length) {
-    complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
-    return 1
-  }
-  const relativePath = usagePath(computer)
-  const text = `${JSON.stringify(doc, null, 2)}\n`
-
-  if (values['dry-run']) {
-    say(text.trimEnd())
-    say(`Dry run for ${computer}. Nothing written. It would go to ${relativePath}`)
-    summarize(doc, trail).forEach(say)
-    return 0
-  }
-
+  // Checked before anything is read, and again by every write.
   try {
-    await writeSnapshot(repoRoot, relativePath, text)
+    if (!values['dry-run']) await assertNoLinksAll(repoRoot, parts.map((part) => PART_TABLE[part].path(computer)), { git: deps.git })
   } catch (error) {
     if (!(error instanceof LinkedPath)) throw error
     LINK_REFUSAL.forEach(complain)
     return 1
   }
-  say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
-  summarize(doc, trail).forEach(say)
+
+  const collected = await collectParts(parts, deps, computer, identity)
+  if (collected.problems) {
+    complain(`Nothing written. The safety check refused: ${collected.problems.join('; ')}`)
+    return 1
+  }
+  const { snapshots } = collected
+
+  if (values['dry-run']) {
+    for (const { text, relativePath } of snapshots) {
+      say(text.trimEnd())
+      say(`Dry run for ${computer}. Nothing written. It would go to ${relativePath}`)
+    }
+    report(snapshots, say)
+    return 0
+  }
+
+  try {
+    await writeAll(repoRoot, snapshots, { git: deps.git })
+  } catch (error) {
+    if (!(error instanceof LinkedPath)) throw error
+    LINK_REFUSAL.forEach(complain)
+    return 1
+  }
+  for (const { relativePath } of snapshots) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
+  report(snapshots, say)
   return 0
 }
 
@@ -239,12 +343,12 @@ async function withoutHooks(git, stateDir) {
 
 // The unattended path: lock, claim, catch the clone up, collect, gate, write, receipt, commit,
 // push, final record, unlock. Every exit after the claim leaves a final record saying why.
-async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
+async function commitRun({ values, parts, computer, deps, repoRoot, say, complain }) {
   const identity = deps.identity ?? {}
   const stateDir = values['state-dir'] ?? join(deps.home, '.local', 'state', 'agent-status-collector')
   const mode = values.clone !== undefined ? 'clone' : 'working-copy'
   const target = mode === 'clone' ? values.clone : repoRoot
-  const relativePath = usagePath(computer)
+  const relativePaths = parts.map((part) => PART_TABLE[part].path(computer))
   const git = mode === 'clone' ? await withoutHooks(deps.git, stateDir) : deps.git
 
   const lock = await takeLock(stateDir, deps.now)
@@ -278,7 +382,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
       if (mode === 'clone') {
         let reason
         try {
-          reason = await prepareClone({ git, cloneDir: target, relativePath })
+          reason = await prepareClone({ git, cloneDir: target, relativePaths })
         } catch (error) {
           if (error instanceof RemoteUnreachable) {
             complain('Could not reach the team repo to bring the dedicated clone up to date, so nothing was collected or written.')
@@ -299,7 +403,7 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
 
       // Checked before anything is read, and again by every write.
       try {
-        await assertNoLinks(target, relativePath, { git })
+        await assertNoLinksAll(target, relativePaths, { git })
       } catch (error) {
         if (!(error instanceof LinkedPath)) throw error
         LINK_REFUSAL.forEach(complain)
@@ -307,16 +411,14 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         return 1
       }
 
-      const trail = []
-      const doc = await collectUsage(deps, computer, trail)
-      const problems = checkUsage(doc, identity)
-      if (problems.length) {
-        complain(`Nothing written. The safety check refused: ${problems.join('; ')}`)
+      const collected = await collectParts(parts, deps, computer, identity)
+      if (collected.problems) {
+        complain(`Nothing written. The safety check refused: ${collected.problems.join('; ')}`)
         await finish('refused by the safety check')
         return 1
       }
-      const text = `${JSON.stringify(doc, null, 2)}\n`
-      const write = () => writeSnapshot(target, relativePath, text, { git })
+      const { snapshots } = collected
+      const write = () => writeAll(target, snapshots, { git })
       try {
         await write()
       } catch (error) {
@@ -330,9 +432,9 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         schema: RECEIPT_SCHEMA,
         claimedAt: isoSeconds(deps.now),
         computer,
-        file: relativePath,
-        sha256: createHash('sha256').update(text).digest('hex'),
-        sources: sourceStatuses(doc)
+        parts,
+        files: snapshots.map(({ relativePath, text }) => ({ file: relativePath, sha256: createHash('sha256').update(text).digest('hex') })),
+        sources: Object.fromEntries(snapshots.map(({ part, entry, doc }) => [part, entry.statuses(doc)]))
       }
       const receiptProblems = checkAgainst(receipt, RECEIPT_SHAPE, identity)
       if (receiptProblems.length) {
@@ -341,15 +443,15 @@ async function commitRun({ values, computer, deps, repoRoot, say, complain }) {
         return 1
       }
       await writeRecord(claim, 'receipt.json', receipt)
-      say(`Usage snapshot for ${computer}. Wrote ${relativePath}`)
-      summarize(doc, trail).forEach(say)
+      for (const { relativePath } of snapshots) say(`Snapshot for ${computer}. Wrote ${relativePath}`)
+      report(snapshots, say)
 
       let result
       try {
         result = await commitAndPush({
           git,
           dir: target,
-          relativePath,
+          relativePaths,
           message: `${SNAPSHOT_SUBJECT}${computer}`,
           mode,
           rewrite: write

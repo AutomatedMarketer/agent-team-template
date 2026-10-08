@@ -173,9 +173,10 @@ function walk(value, shape, path, identity, problems) {
       if (shape.unique) {
         // The same name twice is a reading nobody can trust, and the board would show it twice.
         const seen = new Set()
+        // An empty list of fields means the entries are plain values, compared whole.
         for (const item of value) {
-          if (!isPlainObject(item)) continue
-          const key = JSON.stringify(shape.unique.map((field) => item[field]))
+          if (shape.unique.length && !isPlainObject(item)) continue
+          const key = JSON.stringify(shape.unique.length ? shape.unique.map((field) => item[field]) : item)
           if (seen.has(key)) {
             problems.push(`${path}: names the same entry twice`)
             break

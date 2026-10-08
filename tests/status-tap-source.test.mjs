@@ -329,7 +329,7 @@ test('LEAK TEST: a hostile tap file next to the hostile home leaks nothing into 
       cwd: `/Users/${FAKE_USERNAME}/secret-client`,
       token: fakeClaudeToken()
     })
-    const written = await runIn(fake, ['--computer', 'Test PC'])
+    const written = await runIn(fake, ['--computer', 'Test PC', '--only', 'usage'])
     assert.equal(written.code, 0, written.stderr)
     const [file] = await filesUnder(written.target)
     const outputs = [written.stdout, written.stderr, await readFile(file, 'utf8')]

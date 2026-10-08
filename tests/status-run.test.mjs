@@ -32,10 +32,14 @@ test('LEAK TEST: nothing from the hostile home reaches the file, stdout or stder
     assert.equal(hostile.code, 0, hostile.stderr)
 
     const outputs = [written.stdout, written.stderr, dry.stdout, dry.stderr, hostile.stdout, hostile.stderr]
+    const usageFile = (result) => join(result.target, '.agent-team', 'status', 'usage', 'test-pc.json')
     for (const result of [written, hostile]) {
       const files = await filesUnder(result.target)
-      assert.equal(files.length, 1, 'exactly one file is written')
-      outputs.push(await readFile(files[0], 'utf8'))
+      assert.equal(files.length, 2, 'exactly one file per part is written')
+      outputs.push(await readFile(usageFile(result), 'utf8'))
+    }
+    for (const result of [written, hostile]) {
+      for (const file of await filesUnder(result.target)) outputs.push(await readFile(file, 'utf8'))
     }
     for (const output of outputs) {
       for (const needle of FORBIDDEN()) {
@@ -162,8 +166,7 @@ test('a source that throws becomes "unavailable", and the message never reaches 
     }
     const result = await runIn(fake, ['--computer', 'Test PC'], { fetch: throwing, sources: { codexLimits: throwing } })
     assert.equal(result.code, 0, result.stderr)
-    const [file] = await filesUnder(result.target)
-    const doc = JSON.parse(await readFile(file, 'utf8'))
+    const doc = JSON.parse(await readFile(join(result.target, '.agent-team', 'status', 'usage', 'test-pc.json'), 'utf8'))
     assert.deepEqual(doc.codex.limits, { status: 'unavailable', why: 'could not be read' })
     assert.ok(!(result.stdout + result.stderr).includes(FAKE_EMAIL))
     await rm(result.target, { recursive: true, force: true })
@@ -192,7 +195,7 @@ test('if the gate refuses, nothing is written and the exit is not zero', async (
 test('--dry-run prints the file it would write and writes nothing', async () => {
   const fake = await hostileHome()
   try {
-    const result = await runIn(fake, ['--computer', 'Test PC', '--dry-run'])
+    const result = await runIn(fake, ['--computer', 'Test PC', '--dry-run', '--only', 'usage'])
     assert.equal(result.code, 0, result.stderr)
     assert.deepEqual(await filesUnder(result.target), [])
     const printed = JSON.parse(result.stdout.slice(result.stdout.indexOf('{'), result.stdout.lastIndexOf('}') + 1))
@@ -203,10 +206,10 @@ test('--dry-run prints the file it would write and writes nothing', async () => 
   }
 })
 
-test('options it does not know, and --only for anything but usage, are refused', async () => {
+test('options it does not know, and --only for a part that does not exist, are refused', async () => {
   const fake = await makeFakeHome()
   try {
-    for (const args of [['--bogus'], ['--only', 'connections'], ['--computer']]) {
+    for (const args of [['--bogus'], ['--only', 'hermes'], ['--only', 'everything'], ['--computer']]) {
       const result = await runIn(fake, args)
       assert.notEqual(result.code, 0, `${args.join(' ')} was accepted`)
       assert.deepEqual(await filesUnder(result.target), [])
