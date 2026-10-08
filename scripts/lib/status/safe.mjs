@@ -9,6 +9,7 @@
 
 import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, MAX_PERCENT, computerSlug } from './schema.mjs'
 import { CONNECTIONS_SHAPE, CONNECTION_NAME, VERSION_PATTERN, MAX_VERSION_LENGTH } from './connections-schema.mjs'
+import { HERMES_SHAPE, PROFILE_NAME } from './hermes-schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -162,6 +163,9 @@ function walk(value, shape, path, identity, problems) {
     case 'connName':
       problems.push(...checkConnectionName(value, path, identity))
       return
+    case 'profileName':
+      problems.push(...checkProfileName(value, path, identity))
+      return
     case 'array':
       if (!Array.isArray(value)) {
         problems.push(`${path}: is not a list`)
@@ -251,6 +255,12 @@ export function checkUsage(doc, identity) {
 export function checkConnections(doc, identity) {
   const problems = []
   walk(doc, CONNECTIONS_SHAPE, '', identity, problems)
+  return problems
+}
+
+export function checkHermes(doc, identity) {
+  const problems = []
+  walk(doc, HERMES_SHAPE, '', identity, problems)
   return problems
 }
 
@@ -353,3 +363,20 @@ export function checkConnectionName(value, path, identity) {
 }
 
 export const isConnectionName = (value, identity) => checkConnectionName(value, 'name', identity).length === 0
+
+// A Hermes profile name: Hermes's own id rule (hermes-schema.mjs, PROFILE_NAME), and the
+// connection-name rule on top, so the board never receives a name it would refuse.
+export function checkProfileName(value, path, identity) {
+  const problems = checkConnectionName(value, path, identity)
+  if (typeof value === 'string' && value && !PROFILE_NAME.test(value)) problems.push(`${path}: is not a Hermes profile name`)
+  return problems
+}
+
+// A Hermes model is often written "provider/model", or deeper. Only the last segment after the last
+// slash is ever shown, and only when it passes the connection-name rule; anything else is null, and
+// the board says "Model not known".
+export function modelShown(raw, identity) {
+  if (typeof raw !== 'string') return null
+  const last = raw.split('/').pop().trim()
+  return last && isConnectionName(last, identity) ? last : null
+}

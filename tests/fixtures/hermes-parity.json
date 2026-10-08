@@ -1,0 +1,246 @@
+{
+  "about": "Shared contract for the Hermes snapshot (the Hermes card at the top of Connections, and the #hermes page). The same bytes live in agent-team-template and agent-cockpit; a test in each repo checks they match. The collector writes `sample`-shaped files; the board reads them and, given `expectedShape.now`, must produce `expectedShape` from `sample` exactly. The board works out Running or Down itself, by `alive.rule`, and ignores - the gate refuses - any yes/no flag a file carries.",
+  "schema": "agent-status/hermes/v1",
+  "folder": ".agent-team/status/hermes",
+  "computerSlug": "^[a-z0-9-]{1,32}$",
+  "staleAfterHours": 8,
+  "maxFilesRead": 5,
+  "maxFileBytes": 65536,
+  "maxComputersShown": 3,
+  "statuses": [
+    "found",
+    "not found",
+    "unavailable"
+  ],
+  "caps": {
+    "profiles": 12
+  },
+  "defaultProfile": "default",
+  "sessionDays": 7,
+  "updateCheckMaxAgeDays": 7,
+  "gatewayStates": {
+    "starting": "Starting",
+    "running": "Running",
+    "degraded": "Running with problems",
+    "stopped": "Stopped",
+    "startup_failed": "Failed to start",
+    "unknown": "Unknown"
+  },
+  "alive": {
+    "rule": "Alive when the gateway is found, its state is running and its beatAt is within withinSeconds of takenAt; or when any listed profile's scheduler beatAt is within withinSeconds of takenAt. Within means the difference either way. The board works this out itself; a file with any yes/no flag for it is refused.",
+    "withinSeconds": 300,
+    "gatewayStates": [
+      "running"
+    ],
+    "words": {
+      "running": "Running",
+      "down": "Down at last check",
+      "stale": "Not checked for {hours} h"
+    }
+  },
+  "heartbeat": {
+    "path": "runs/heartbeat/hermes.json",
+    "runtime": "hermes",
+    "at": "the newest beatAt that proves the alive rule",
+    "writtenOnlyWhenAlive": true,
+    "staleAfterMinutes": {
+      "default": 30,
+      "min": 5,
+      "max": 1440,
+      "hermes": 200
+    }
+  },
+  "words": {
+    "install": {
+      "version": "Hermes {version}",
+      "noVersion": "Hermes, version not known",
+      "updateAvailable": "{label} - update available",
+      "upToDate": "{label} - up to date",
+      "not found": "Hermes not found",
+      "unavailable": "Hermes could not be read"
+    },
+    "model": {
+      "both": "{model} via {provider}",
+      "modelOnly": "{model}",
+      "none": "Model not known"
+    },
+    "sessions": {
+      "not found": "No sessions recorded",
+      "unavailable": "Not available ({why})"
+    }
+  },
+  "names": {
+    "profile": "^[a-z0-9][a-z0-9_-]{0,63}$",
+    "profileRule": "Hermes's own profile id rule (lowercase letters, numbers, - and _, starting with a letter or number), and the connection-name rule from tests/fixtures/connections-parity.json on top. A profile whose name fails is not written; it is counted in profiles.hidden.",
+    "profileAccept": [
+      "default",
+      "donna",
+      "coder",
+      "work_2",
+      "my-work",
+      "a",
+      "research-team"
+    ],
+    "profileRefuse": [
+      { "name": "", "why": "empty" },
+      { "name": "Donna", "why": "a capital letter - Hermes keeps profile ids in lowercase" },
+      { "name": ".deleted", "why": "starts with a dot - Hermes's own tombstone folder" },
+      { "name": "-work", "why": "does not start with a letter or number" },
+      { "name": "my work", "why": "a space" },
+      { "name": "work@home", "why": "an at sign" },
+      { "name": "über", "why": "a letter Hermes does not allow in a profile id" },
+      { "name": "abcdefghijklmnopqrstuvwx", "why": "a stretch of 24 or more characters without a separator" },
+      { "name": "0f0e0d0c-1111-2222-3333-444455556666", "why": "a uuid" },
+      { "name": "desk-helper", "why": "contains sk- by accident, refused all the same" },
+      { "name": "bearer-bot", "why": "an authorization header word" },
+      { "name": "a-very-long-profile-name-that-keeps-going-past-sixty-characters", "why": "longer than 60 characters" }
+    ],
+    "modelRule": "The model is model.default from the profile's config.yaml. Only the last segment after the last / is kept, and only when it passes the connection-name rule; otherwise no model is written and the board says Model not known. The provider is model.provider, held to the connection-name rule as it is, and written only with a model.",
+    "modelAccept": [
+      { "raw": "claude-opus-5-5", "shown": "claude-opus-5-5" },
+      { "raw": "anthropic/claude-sonnet-4.5", "shown": "claude-sonnet-4.5" },
+      { "raw": "openrouter/anthropic/claude-opus-4.1", "shown": "claude-opus-4.1" },
+      { "raw": "gpt-5.1", "shown": "gpt-5.1" },
+      { "raw": "qwen3:32b", "shown": "qwen3:32b" },
+      { "raw": " gpt-5 ", "shown": "gpt-5" }
+    ],
+    "modelRefuse": [
+      { "raw": "", "why": "empty" },
+      { "raw": "anthropic/", "why": "nothing after the last slash" },
+      { "raw": "https://api.example.com/v1?key=abc", "why": "an address: its last segment has characters the board does not show" },
+      { "raw": "models/eyJhbGciOi", "why": "the start of a signed token" },
+      { "raw": "custom/sk-live-model", "why": "the start of a key" },
+      { "raw": "C:\\models\\local.gguf", "why": "a backslash" },
+      { "raw": "local/0f0e0d0c-1111-2222-3333-444455556666", "why": "a uuid" },
+      { "raw": "hf/abcdefghijklmnopqrstuvwxyz0123", "why": "a stretch of 24 or more characters without a separator" }
+    ],
+    "providerAccept": [
+      "anthropic",
+      "openrouter",
+      "openai",
+      "custom",
+      "ollama",
+      "nous"
+    ],
+    "providerRefuse": [
+      { "name": "", "why": "empty" },
+      { "name": "https://api.example.com", "why": "an address" },
+      { "name": "sk-proj-abc", "why": "the start of a key" },
+      { "name": "my@provider", "why": "an at sign" }
+    ]
+  },
+  "rules": [
+    "a block (install, gateway, profiles, and each profile's skills, sessions and scheduler) with any status other than found carries only status and an optional why",
+    "the collector always writes a why when a profile's sessions are unavailable; without node:sqlite it is: needs a newer Node",
+    "when Hermes is not on the computer at all, install, gateway and profiles are each not found, and nothing else is written",
+    "the default profile is the Hermes home itself; it is always first, then the other profiles A to Z, at most caps.profiles; how many more is in profiles.more",
+    "a profile whose name fails names.profileRule is not written and is counted in profiles.hidden; the board re-checks every name and adds what it drops to hidden",
+    "updateAvailable is written only from Hermes's own .update_check when it is younger than updateCheckMaxAgeDays and was made for the version installed",
+    "sessions count the top-level sessions (no parent) that started in the last sessionDays days: conversations are every source except cron, delegate and subagent; scheduled are cron; lastActiveAt is the newest activity of any top-level session",
+    "the file never says whether Hermes is alive; the board works it out by alive.rule from takenAt, gateway.beatAt and each profile's scheduler.beatAt",
+    "a file older than staleAfterHours is shown as Not checked for N h (N whole hours since takenAt), never as Running or Down",
+    "the collector writes heartbeat.path as { runtime, at } only when alive.rule holds, in the same commit as the Hermes file; the board reads it like any runtimes.yml heartbeat, with stale_after_minutes",
+    "the board shows at most maxComputersShown computers, newest takenAt first"
+  ],
+  "aliveExamples": [
+    { "why": "the gateway is running and stamped 48 seconds before the check", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:59:12Z" }, "schedulerBeats": [null, null, null], "alive": true, "at": "2026-10-08T14:59:12Z" },
+    { "why": "the gateway says running, but its last stamp is six minutes old", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:54:00Z" }, "schedulerBeats": [null, null, null], "alive": false, "at": null },
+    { "why": "exactly five minutes is still within", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:55:00Z" }, "schedulerBeats": [null, null, null], "alive": true, "at": "2026-10-08T14:55:00Z" },
+    { "why": "five minutes and one second after the check is not", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T15:05:01Z" }, "schedulerBeats": [null, null, null], "alive": false, "at": null },
+    { "why": "a stopped gateway with a fresh stamp is not proof", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "stopped", "beatAt": "2026-10-08T14:59:50Z" }, "schedulerBeats": [null, null, null], "alive": false, "at": null },
+    { "why": "only running counts for the gateway, not degraded", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "degraded", "beatAt": "2026-10-08T14:59:50Z" }, "schedulerBeats": [null, null, null], "alive": false, "at": null },
+    { "why": "a running gateway with no stamp is not proof", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running" }, "schedulerBeats": [null, null, null], "alive": false, "at": null },
+    { "why": "no gateway, but one profile's scheduler beat two minutes before the check", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "not found" }, "schedulerBeats": [null, "2026-10-08T14:58:00Z", null], "alive": true, "at": "2026-10-08T14:58:00Z" },
+    { "why": "both prove it; the newer time is the heartbeat", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:59:12Z" }, "schedulerBeats": ["2026-10-08T14:59:30Z", null, null], "alive": true, "at": "2026-10-08T14:59:30Z" },
+    { "why": "a scheduler beat four minutes after the check (it beat while the collector was reading) still counts", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "unavailable", "why": "could not be read" }, "schedulerBeats": [null, null, "2026-10-08T15:04:00Z"], "alive": true, "at": "2026-10-08T15:04:00Z" },
+    { "why": "scheduler beats three hours old are not proof", "takenAt": "2026-10-08T15:00:00Z", "gateway": { "status": "not found" }, "schedulerBeats": ["2026-10-08T12:00:00Z", "2026-10-08T12:00:05Z", null], "alive": false, "at": null }
+  ],
+  "wordExamples": [
+    { "why": "the gateway is stopped and no scheduler beat is near the check", "takenAt": "2026-10-08T15:00:00Z", "now": "2026-10-08T16:00:00Z", "down": true, "freshness": "fresh", "aliveLabel": "Down at last check" },
+    { "why": "exactly staleAfterHours old is still a reading, so it says Down, not Not checked", "takenAt": "2026-10-08T07:00:00Z", "now": "2026-10-08T15:00:00Z", "down": true, "freshness": "fresh", "aliveLabel": "Down at last check" },
+    { "why": "the newest reading is nine and a half hours old: whole hours, rounded down", "takenAt": "2026-10-08T06:00:00Z", "now": "2026-10-08T15:30:00Z", "down": false, "freshness": "stale", "aliveLabel": "Not checked for 9 h" }
+  ],
+  "sample": {
+    "schema": "agent-status/hermes/v1",
+    "takenAt": "2026-10-08T15:00:00Z",
+    "computer": "Mac Mini",
+    "install": { "status": "found", "version": "0.21.3", "updateAvailable": true },
+    "gateway": { "status": "found", "state": "running", "beatAt": "2026-10-08T14:59:12Z" },
+    "profiles": {
+      "status": "found",
+      "items": [
+        {
+          "name": "default",
+          "model": "claude-opus-5-5",
+          "provider": "anthropic",
+          "skills": { "status": "found", "count": 89 },
+          "sessions": { "status": "found", "days": 7, "conversations": 14, "scheduled": 21, "lastActiveAt": "2026-10-08T14:40:00Z" },
+          "scheduler": { "status": "found", "beatAt": "2026-10-08T14:59:30Z" }
+        },
+        {
+          "name": "donna",
+          "model": "gpt-5.1",
+          "skills": { "status": "found", "count": 12 },
+          "sessions": { "status": "found", "days": 7, "conversations": 0, "scheduled": 56 },
+          "scheduler": { "status": "found", "beatAt": "2026-10-08T12:00:05Z" }
+        },
+        {
+          "name": "coder",
+          "skills": { "status": "not found" },
+          "sessions": { "status": "unavailable", "why": "needs a newer Node" },
+          "scheduler": { "status": "not found" }
+        }
+      ],
+      "hidden": 1,
+      "more": 0
+    }
+  },
+  "expectedShape": {
+    "now": "2026-10-08T16:00:00Z",
+    "computers": [
+      {
+        "computer": "Mac Mini",
+        "takenAt": "2026-10-08T15:00:00Z",
+        "freshness": "fresh",
+        "alive": "running",
+        "aliveLabel": "Running",
+        "install": { "status": "found", "version": "0.21.3", "updateAvailable": true, "label": "Hermes 0.21.3 - update available" },
+        "gateway": { "status": "found", "state": "running", "stateLabel": "Running", "beatAt": "2026-10-08T14:59:12Z" },
+        "profiles": {
+          "status": "found",
+          "items": [
+            {
+              "name": "default",
+              "model": "claude-opus-5-5",
+              "provider": "anthropic",
+              "modelLabel": "claude-opus-5-5 via anthropic",
+              "skills": 89,
+              "sessions": { "status": "found", "days": 7, "conversations": 14, "scheduled": 21, "lastActiveAt": "2026-10-08T14:40:00Z" },
+              "schedulerBeatAt": "2026-10-08T14:59:30Z"
+            },
+            {
+              "name": "donna",
+              "model": "gpt-5.1",
+              "provider": null,
+              "modelLabel": "gpt-5.1",
+              "skills": 12,
+              "sessions": { "status": "found", "days": 7, "conversations": 0, "scheduled": 56, "lastActiveAt": null },
+              "schedulerBeatAt": "2026-10-08T12:00:05Z"
+            },
+            {
+              "name": "coder",
+              "model": null,
+              "provider": null,
+              "modelLabel": "Model not known",
+              "skills": null,
+              "sessions": { "status": "unavailable", "label": "Not available (needs a newer Node)" },
+              "schedulerBeatAt": null
+            }
+          ],
+          "hidden": 1,
+          "more": 0
+        }
+      }
+    ]
+  }
+}
