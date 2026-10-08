@@ -108,9 +108,16 @@ Each number on the dashboard has a small label. Here is what each label means.
 **The best label to see.** The tap's numbers come straight from Claude Code. They are the official
 ones, so the dashboard shows them as **from Claude Code’s status line**, with no "unofficial" label.
 
-**Why "older than 6 hours" matters.** The tap only gets numbers while you are using Claude Code.
-If you have not used it on this computer for over 6 hours, the snapshot uses a backup method
-instead. That backup is the one marked **unofficial**.
+**Which reading wins.** The tap only gets numbers while you are using Claude Code.
+
+- Used Claude Code in the last 30 minutes? The tap's numbers are used.
+- Longer ago? The snapshot tries a backup method first, because it is more up to date. That
+  backup is marked **unofficial**.
+- If the backup fails, the tap's numbers are still used, up to 6 hours old.
+- Over 6 hours? Only the backup methods are left.
+
+**What the tap shows.** It has only the 5-hour and weekly limits. Some plans also have a
+per-model weekly limit, like "Weekly, Fable only". Only the backup methods can show that one.
 
 ---
 

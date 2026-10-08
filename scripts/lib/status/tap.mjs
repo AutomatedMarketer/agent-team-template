@@ -24,8 +24,12 @@ export const TAP_SCHEMA = 'agent-status/claude-statusline/v1'
 // An unchanged reading is rewritten at most once a minute. The status line runs after every reply,
 // so without this a busy session would rewrite the same two numbers many times a minute.
 export const REWRITE_AFTER_MS = 60_000
-// The collector trusts a tap reading for this long. Older than that, the person has not used
-// Claude Code on this computer for a while, and another source is tried.
+// The tap's reading wins outright while it is this young. The status line only updates while
+// Claude Code is in use, so an older reading may be behind what the live call would say; then
+// the live call goes first and the tap is the fallback.
+export const TAP_FRESH_MINUTES = 30
+// The collector trusts a tap reading at all for this long. Older than that, the person has not
+// used Claude Code on this computer for a while, and another source is tried.
 export const TAP_MAX_AGE_HOURS = 6
 // A reading stamped further ahead than this is a clock that cannot be trusted.
 const FUTURE_SLACK_MS = 5 * 60_000

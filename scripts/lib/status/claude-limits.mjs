@@ -1,10 +1,11 @@
 // The Claude plan-limits meter: how much of the 5-hour and weekly windows is used.
 //
 // Order: the official reading Claude Code hands its status line, saved on this computer by the
-// status line tap (scripts/usage-tap.mjs, read in tap.mjs); then the live answer from the address
-// the /usage screen uses; then the reading Claude Code saved in ~/.claude.json; then
-// "unavailable". The last two are undocumented, which is why the file names its source and the
-// board labels it "unofficial".
+// status line tap (scripts/usage-tap.mjs, read in tap.mjs), if under 30 minutes old; then the
+// live answer from the address the /usage screen uses; then the tap's reading again, up to 6
+// hours old; then the reading Claude Code saved in ~/.claude.json; then "unavailable". The live
+// answer and the saved reading are undocumented, which is why the file names its source and the
+// board labels them "unofficial".
 //
 // The sign-in token is read into one variable, sent to one address, and dropped. It is never
 // returned, logged or refreshed - refreshing it could sign Claude Code out on this machine.
@@ -12,7 +13,7 @@
 import { join } from 'node:path'
 import { isPlainObject, isoSeconds, toIsoTime, cleanPercent, readJson } from './util.mjs'
 import { MAX_WINDOWS, MAX_STRING_LENGTH } from './schema.mjs'
-import { readTapReading } from './tap.mjs'
+import { readTapReading, TAP_FRESH_MINUTES } from './tap.mjs'
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USER_AGENT = 'agent-team-collector/1'
@@ -317,9 +318,16 @@ export async function collectClaudeLimits(deps) {
   const credentials = await readCredentials(deps)
   const account = credentials.status === 'found' ? credentials.account : null
 
+  // The tap wins outright only while it is under TAP_FRESH_MINUTES old. Older (up to 6 hours), it
+  // waits behind the live call and is used if that fails.
   const tap = await readTapReading(deps)
-  tried.push(triedEntry('status line', tap))
-  if (tap.status === 'found') return { limits: tap, account, tried }
+  const tapFresh = tap.status === 'found' && deps.now - Date.parse(tap.readAt) <= TAP_FRESH_MINUTES * 60_000
+  if (tap.status === 'found' && !tapFresh) {
+    tried.push({ source: 'status line', status: 'found', why: `over ${TAP_FRESH_MINUTES} minutes old, so the live call went first` })
+  } else {
+    tried.push(triedEntry('status line', tap))
+  }
+  if (tapFresh) return { limits: tap, account, tried }
 
   let live = null
   if (credentials.status === 'found') {
@@ -342,6 +350,9 @@ export async function collectClaudeLimits(deps) {
     // Log only: on a Mac with no sign-in anywhere, say the Keychain was asked and gave nothing.
     tried.push({ source: 'live', status: 'not found', why: `no sign-in (${credentials.origin.slice('file, '.length)}, no file)` })
   }
+
+  // The official reading, a little older, beats the undocumented saved one.
+  if (tap.status === 'found') return { limits: tap, account, tried }
 
   const saved = await readSaved(deps)
   tried.push(triedEntry('saved', saved))

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile, rm } from 'node:fs/promises'
 import { collectClaudeLimits } from '../scripts/lib/status/claude-limits.mjs'
-import { readTapReading, TAP_SCHEMA, TAP_MAX_AGE_HOURS } from '../scripts/lib/status/tap.mjs'
+import { readTapReading, TAP_SCHEMA, TAP_MAX_AGE_HOURS, TAP_FRESH_MINUTES } from '../scripts/lib/status/tap.mjs'
 import { collectUsage } from '../scripts/lib/status/run.mjs'
 import { checkUsage } from '../scripts/lib/status/safe.mjs'
 import { CLAUDE_LIMIT_SOURCES } from '../scripts/lib/status/schema.mjs'
@@ -173,9 +173,12 @@ test('on Windows the tap file is read from LOCALAPPDATA', async () => {
 
 // --- the order ----------------------------------------------------------------------------------------
 
-test('a fresh tap reading wins, and the token is never sent', async () => {
+// The decided order: the tap wins outright only while it is under 30 minutes old - the status line
+// only updates while Claude Code is in use, so an older tap reading may be behind what the live
+// call would say. Then the live call. Then the tap again, up to 6 hours. Then ~/.claude.json.
+test(`a tap reading under ${TAP_FRESH_MINUTES} minutes old wins, and the token is never sent`, async () => {
   const fake = await makeFakeHome({
-    [TAP_PATH]: tapDoc(NOW - HOUR),
+    [TAP_PATH]: tapDoc(NOW - (TAP_FRESH_MINUTES - 1) * 60_000),
     '.claude/.credentials.json': credentials(),
     '.claude.json': { cachedUsageUtilization: { fetchedAtMs: NOW - 60_000, utilization: { five_hour: { utilization: 77 } } } }
   })
@@ -187,6 +190,47 @@ test('a fresh tap reading wins, and the token is never sent', async () => {
     assert.equal(limits.windows[0].usedPercent, 18)
     // The plan still comes from the sign-in.
     assert.deepEqual(account, { subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test(`a tap reading over ${TAP_FRESH_MINUTES} minutes old lets the live call go first`, async () => {
+  const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(NOW - (TAP_FRESH_MINUTES + 1) * 60_000), '.claude/.credentials.json': credentials() })
+  try {
+    const deps = depsFor(fake)
+    const { limits, tried } = await collectClaudeLimits(deps)
+    assert.equal(deps.fetch.calls.length, 1)
+    assert.equal(limits.source, 'unofficial-live')
+    assert.deepEqual(tried[0], { source: 'status line', status: 'found', why: 'over 30 minutes old, so the live call went first' })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('when the live call fails, a tap reading up to 6 hours old is used before ~/.claude.json', async () => {
+  const fake = await makeFakeHome({
+    [TAP_PATH]: tapDoc(NOW - 2 * HOUR),
+    '.claude/.credentials.json': credentials(),
+    '.claude.json': { cachedUsageUtilization: { fetchedAtMs: NOW - 60_000, utilization: { five_hour: { utilization: 77 } } } }
+  })
+  try {
+    const { limits, tried } = await collectClaudeLimits(depsFor(fake, { fetch: fetchStub(() => ({ status: 401, body: {} })) }))
+    assert.equal(limits.source, 'claude-code-statusline')
+    assert.equal(limits.readAt, '2026-10-08T10:00:00Z')
+    assert.deepEqual(tried.map((entry) => entry.source), ['status line', 'live'])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('with no sign-in to try, a tap reading up to 6 hours old is used', async () => {
+  const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(NOW - 2 * HOUR) })
+  try {
+    const deps = depsFor(fake)
+    const { limits } = await collectClaudeLimits(deps)
+    assert.equal(limits.source, 'claude-code-statusline')
+    assert.equal(deps.fetch.calls.length, 0)
   } finally {
     await fake.cleanup()
   }
@@ -260,7 +304,7 @@ test('every source tried is listed, by status and reason only', async () => {
 // --- end to end ----------------------------------------------------------------------------------------
 
 test('the snapshot names the tap as claude-code-statusline, and its log line says it came from the status line', async () => {
-  const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(Date.parse('2026-10-07T19:30:00Z'), [
+  const fake = await makeFakeHome({ [TAP_PATH]: tapDoc(Date.parse('2026-10-07T19:45:00Z'), [
     { kind: 'five_hour', usedPercent: 18, resetsAt: '2026-10-07T21:40:00Z' },
     { kind: 'weekly_all', usedPercent: 49, resetsAt: '2026-10-09T22:00:00Z' }
   ]) })
@@ -279,7 +323,7 @@ test('LEAK TEST: a hostile tap file next to the hostile home leaks nothing into 
   const fake = await hostileHome()
   try {
     await fake.write(TAP_PATH, {
-      ...tapDoc(Date.parse('2026-10-07T19:30:00Z')),
+      ...tapDoc(Date.parse('2026-10-07T19:45:00Z')),
       owner: FAKE_EMAIL,
       session_id: FAKE_UUID,
       cwd: `/Users/${FAKE_USERNAME}/secret-client`,

@@ -113,9 +113,10 @@ The exact shape, and the contract the dashboard reads it by, are in
 
 | Number | Source | Labelled |
 |---|---|---|
-| Claude limits, first choice | **Official.** The reading Claude Code hands its status line, kept by the status line tap (below) in `~/.local/state/agent-status/claude-statusline.json` (Windows: `%LOCALAPPDATA%\agent-status\claude-statusline.json`), if under 6 hours old and not every window in it has reset since | `claude-code-statusline` |
+| Claude limits, first choice | **Official.** The reading Claude Code hands its status line, kept by the status line tap (below) in `~/.local/state/agent-status/claude-statusline.json` (Windows: `%LOCALAPPDATA%\agent-status\claude-statusline.json`), if under 30 minutes old and not every window in it has reset since | `claude-code-statusline` |
 | Claude limits, second choice | The address Claude Code's `/usage` screen calls. The sign-in comes from the Mac Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `unofficial-live` |
-| Claude limits, third choice | The last reading Claude Code saved in `~/.claude.json`, if under 6 hours old | `claude-code-saved` |
+| Claude limits, third choice | **Official.** The status line tap's reading again, if the live call failed, up to 6 hours old | `claude-code-statusline` |
+| Claude limits, fourth choice | The last reading Claude Code saved in `~/.claude.json`, if under 6 hours old | `claude-code-saved` |
 | Claude plan | The plan fields of the same sign-in | - |
 | Claude activity | Claude Code's session and subagent logs in `~/.claude/projects`, last 15 days | `estimate` |
 | Codex limits | The newest reading in Codex's own session logs, `~/.codex/sessions`, up to 7 days old | `codex-session-log` |
@@ -148,7 +149,11 @@ installer again is the deliberate update, and `--remove` deletes the copy it mad
 The installer changes only the `statusLine` key and backs the file up first. The tap's reading is
 written as `claude-code-statusline`, its own name in the shared contract, and the dashboard shows it
 as official: "from Claude Code’s status line", with no "unofficial" label. When the tap's reading is
-fresh, the live call is skipped and the token never leaves the computer.
+under 30 minutes old it wins and the live call is skipped, so the token never leaves the computer.
+Older than that, the live call goes first (the status line only updates while Claude Code is in
+use, so an older tap reading may be behind), and the tap's reading is used if the live call fails,
+up to 6 hours old. The tap carries only the 5-hour and weekly windows - all Claude Code hands its
+status line - so the per-model weekly meter comes only from the live call or `~/.claude.json`.
 
 The tap only has a reading where Claude Code was used **interactively** in the last 6 hours: the
 status line does not run in headless `claude -p` jobs. On the always-on Mac, install the tap from

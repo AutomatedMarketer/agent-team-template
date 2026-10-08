@@ -281,16 +281,38 @@ test('the beginner guide is written in short sentences', async () => {
 test('the explainer names every source in the order the collector tries them', async () => {
   const doc = await explainer()
   const table = doc.slice(doc.indexOf('### Claude limits'), doc.indexOf('### Why the tap has its own name'))
-  const order = ['The status line tap', 'The live call', "Claude Code's saved reading", '**unavailable**']
-  const positions = order.map((name) => table.indexOf(name))
-  assert.ok(positions.every((position) => position >= 0), 'a source is missing from the order table')
-  assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'the order table is out of order')
+  // The decided order: tap under 30 minutes, live, tap up to 6 hours, ~/.claude.json, unavailable.
+  const rows = table.split('\n').filter((line) => /^\| \d \|/.test(line))
+  assert.equal(rows.length, 5, 'the order table should have five rows')
+  assert.match(rows[0], /\*\*The status line tap\.\*\*.*under 30 minutes old/)
+  assert.match(rows[1], /\*\*The live call\.\*\*/)
+  assert.match(rows[2], /\*\*The status line tap, again\*\*.*up to 6 hours old/)
+  assert.match(rows[3], /\*\*Claude Code's saved reading\*\*/)
+  assert.match(rows[4], /\*\*unavailable\*\*/)
   for (const source of ['claude-code-statusline', 'claude-code-saved', 'unofficial-live', 'codex-session-log', 'estimate']) {
     assert.ok(doc.includes(`\`${source}\``), `the explainer never names ${source}`)
   }
   assert.match(doc, /step 2 never runs, so \*\*your sign-in never leaves the computer\*\*/)
-  assert.match(doc, /under 6 hours old/)
   assert.match(doc, /interactive sessions/)
+})
+
+// The tap carries only what Claude Code gives the status line: the 5-hour and weekly windows. The
+// live call can also show a per-model weekly meter. All three docs must say so, and when each wins.
+test('all three docs say the tap has only the 5-hour and weekly meters, and when each source wins', async () => {
+  for (const [name, text] of [['the guide', await guide()], ['the explainer', await explainer()], ['the status README', await statusReadme()]]) {
+    const doc = text.replace(/\s+/g, ' ')
+    assert.match(doc, /only the 5-hour and weekly/i, `${name} does not say what the tap carries`)
+    assert.match(doc, /per-model weekly/i, `${name} does not say the per-model weekly meter needs another source`)
+    assert.match(doc, /30 minutes/, `${name} does not say when the tap wins outright`)
+    assert.match(doc, /6 hours/, `${name} does not say how long the tap is used at all`)
+  }
+  const status = await statusReadme()
+  const sources = status.slice(status.indexOf('## Where each number comes from'), status.indexOf('### The status line tap'))
+  const choices = ['first choice', 'second choice', 'third choice', 'fourth choice'].map((label) => sources.split('\n').find((line) => line.includes(label)) ?? '')
+  assert.match(choices[0], /under 30 minutes old.*`claude-code-statusline` \|$/)
+  assert.match(choices[1], /`unofficial-live` \|$/)
+  assert.match(choices[2], /up to 6 hours old.*`claude-code-statusline` \|$/)
+  assert.match(choices[3], /`~\/\.claude\.json`.*`claude-code-saved` \|$/)
 })
 
 test('the guides give the tap file paths the code actually uses', async () => {

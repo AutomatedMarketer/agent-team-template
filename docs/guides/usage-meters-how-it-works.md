@@ -66,18 +66,28 @@ The collector tries these **in this order** and uses the first that works:
 
 | # | Source | Official? | Written as |
 |---|---|---|---|
-| 1 | **The status line tap.** Claude Code's own reading, which it hands to the status line ([documented here](https://code.claude.com/docs/en/statusline)). Used if it is **under 6 hours old** and at least one of its windows has not reset since | **Yes** | `claude-code-statusline` |
+| 1 | **The status line tap.** Claude Code's own reading, which it hands to the status line ([documented here](https://code.claude.com/docs/en/statusline)). Wins outright if it is **under 30 minutes old** and at least one of its windows has not reset since | **Yes** | `claude-code-statusline` |
 | 2 | **The live call.** Your Claude sign-in (Mac Keychain first, then `~/.claude/.credentials.json`) is sent to the address Claude Code's `/usage` screen uses | No - undocumented | `unofficial-live` |
-| 3 | **Claude Code's saved reading** in `~/.claude.json`, if under 6 hours old | No - undocumented | `claude-code-saved` |
-| 4 | Nothing worked: **unavailable**, with the most useful reason | - | - |
+| 3 | **The status line tap, again**, if the live call failed and the tap's reading is up to 6 hours old | **Yes** | `claude-code-statusline` |
+| 4 | **Claude Code's saved reading** in `~/.claude.json`, if under 6 hours old | No - undocumented | `claude-code-saved` |
+| 5 | Nothing worked: **unavailable**, with the most useful reason | - | - |
 
 When the tap's reading is fresh, step 2 never runs, so **your sign-in never leaves the computer**.
+
+**Why 30 minutes.** The status line only updates while Claude Code is in use. A tap reading from an
+hour ago may be behind what the live call would say right now, so after 30 minutes the live call
+goes first, and the tap's reading - still official, still a true reading of that moment - is the
+fallback up to 6 hours old.
+
+**What the tap carries.** Only the 5-hour and weekly windows, because that is all Claude Code
+hands its status line. The per-model weekly meter ("Weekly, Fable only") comes only from the live
+call or `~/.claude.json`, so a snapshot taken from the tap has no per-model weekly meter.
 
 The tap only has numbers on a computer where someone **used Claude Code interactively** in the last
 6 hours, on a Pro or Max plan, after Claude's first reply in that session. The status line only
 runs in interactive sessions, so headless runs (`claude -p`) never reach the tap, and a Mac that only
-runs jobs on a schedule will usually fall through to step 2 or 3. That is why the backup steps are
-kept. The limits are per account, not per computer, so a reading from any of your computers is a
+runs jobs on a schedule will usually fall through to the live call or `~/.claude.json`. That is why
+the backup steps are kept. The limits are per account, not per computer, so a reading from any of your computers is a
 true reading of your plan.
 
 ### Why the tap has its own name
