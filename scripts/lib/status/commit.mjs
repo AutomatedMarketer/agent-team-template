@@ -54,6 +54,24 @@ export function slotStamp(now) {
   return `${parts.year}-${parts.month}-${parts.day}T${String(start).padStart(2, '0')}-00-new-york`
 }
 
+// The commit the collector's own code checkout is on, or null when it is not a git checkout of its
+// own (a downloaded copy, or a folder inside some other repo). A slot claimed by older code is not
+// a slot this code has run: the README tells a person who moves the pin to kickstart and watch.
+export async function codeCommit(git, codeDir) {
+  try {
+    const top = (await git(['rev-parse', '--show-toplevel'], codeDir)).stdout.trim()
+    if (!(await sameFolder(top, codeDir))) return null
+    const head = (await git(['rev-parse', 'HEAD'], codeDir)).stdout.trim()
+    return /^[0-9a-f]{40,64}$/.test(head) ? head : null
+  } catch {
+    return null
+  }
+}
+
+export function scheduledClaimName(now, commit) {
+  return commit ? `${slotStamp(now)}-code-${commit.slice(0, 12)}` : slotStamp(now)
+}
+
 // One run at a time. The lock is a folder because making a folder either succeeds or fails in one
 // step on every system. A lock older than an hour is from a run that crashed, and is taken over.
 export async function takeLock(stateDir, now) {

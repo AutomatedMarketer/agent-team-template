@@ -710,6 +710,45 @@ test('the same scheduled slot is never run twice, even at a different time insid
   }
 })
 
+// The README tells a person who has just moved the code pin to kickstart the job and watch it
+// work. Moving the pin is new code, so that kickstart must run even inside a slot the old code
+// already used - and a second kickstart on the same code still must not.
+test('a slot already run by older code runs once more after the code pin moves', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const code = await repo.clone('code')
+    const stateDir = join(repo.root, 'state')
+    const at = (iso) => ({ repo: code, stateDir, extra: { now: Date.parse(iso) } })
+    const snapshots = async () => (await log(repo.remote, 'main')).filter((line) => line.startsWith('Status snapshot')).length
+    const scheduled = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T19:07:00Z'))
+    assert.equal(scheduled.code, 0, scheduled.stderr)
+    assert.equal(await snapshots(), 1)
+
+    await writeFile(join(code, 'newer.md'), 'newer code\n')
+    await git(['add', '.'], code)
+    await git(['commit', '-q', '-m', 'newer code'], code)
+    const kickstart = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T20:30:00Z'))
+    assert.equal(kickstart.code, 0, kickstart.stderr)
+    assert.doesNotMatch(kickstart.stdout, /already/i)
+    assert.equal(await snapshots(), 2)
+
+    const again = await collect(fake, ['--commit', '--clone', dedicated], at('2026-10-07T21:00:00Z'))
+    assert.equal(again.code, 0)
+    assert.match(again.stdout, /already/i)
+    assert.equal(await snapshots(), 2)
+
+    const head = (await git(['rev-parse', 'HEAD'], code)).stdout.trim()
+    const claims = await readdir(join(stateDir, 'claims'))
+    assert.equal(claims.length, 2)
+    assert.ok(claims.includes(`2026-10-07T15-00-new-york-code-${head.slice(0, 12)}.claim`), claims.join(', '))
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
 test('a slot is the New York date and three-hour block, through both clock changes', () => {
   assert.equal(slotStamp(Date.parse('2026-10-07T20:00:00Z')), '2026-10-07T15-00-new-york')
   assert.equal(slotStamp(Date.parse('2026-10-08T03:59:59Z')), '2026-10-07T21-00-new-york')

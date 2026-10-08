@@ -435,7 +435,10 @@ A `--commit` run takes a lock (so two runs never overlap; a lock over an hour ol
 and is taken over), then claims its occurrence under `<state-dir>/claims/`. With `--clone` (the
 schedule) the occurrence is the three-hour slot, named by its New York date and starting hour -
 `2026-10-07T15-00-new-york.claim/` covers 15:00 to 18:00 - so a run on waking and a manual
-kickstart in the same slot do not both run; the second says so and skips. A run by hand in your
+kickstart in the same slot do not both run; the second says so and skips. When the code checkout
+is a git checkout, the claim also carries the first 12 characters of its commit
+(`2026-10-07T15-00-new-york-code-35cd2871a0b4.claim/`), so after you move the pin a kickstart
+runs the new code once, even in a slot the old code already used. A run by hand in your
 own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), so asking again
 later always takes a fresh reading. It writes `receipt.json` there once the snapshots are
 written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`, which includes

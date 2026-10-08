@@ -40,7 +40,8 @@ import {
   releaseLock,
   openClaim,
   claimStamp,
-  slotStamp,
+  codeCommit,
+  scheduledClaimName,
   writeRecord,
   prepareClone,
   commitAndPush,
@@ -464,9 +465,11 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
     return 0
   }
   try {
-    // The dedicated clone is the scheduled job, which runs once per three-hour slot however many
-    // times launchd wakes it. A run by hand in a working copy is its own occurrence.
-    const claim = await openClaim(stateDir, mode === 'clone' ? slotStamp(deps.now) : claimStamp(deps.now))
+    // The dedicated clone is the scheduled job, which runs once per three-hour slot and code commit
+    // however many times launchd wakes it. A run by hand in a working copy is its own occurrence.
+    const claim = await openClaim(stateDir, mode === 'clone'
+      ? scheduledClaimName(deps.now, await codeCommit(git, repoRoot))
+      : claimStamp(deps.now))
     if (!claim) {
       say(mode === 'clone'
         ? 'This three-hour slot was already claimed by an earlier run. Skipped, not repeated.'
