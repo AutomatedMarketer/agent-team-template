@@ -9,6 +9,7 @@
 
 import { join, dirname, basename } from 'node:path'
 import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
 import { isPlainObject } from './util.mjs'
 import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
 import { findGitBash } from './tap.mjs'
@@ -112,6 +113,22 @@ function serialise(value, originalText) {
 
 const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-')
 
+// A backup never overwrites another: two runs in one second (install, then --remove) would
+// otherwise replace the only copy of the original. The name gets -2, -3, ... instead.
+async function backUp(path, now) {
+  const stem = `${path}.before-usage-tap-${stampOf(now)}`
+  for (let attempt = 1; attempt <= 100; attempt += 1) {
+    const backup = attempt === 1 ? `${stem}.bak` : `${stem}-${attempt}.bak`
+    try {
+      await copyFile(path, backup, fsConstants.COPYFILE_EXCL)
+      return backup
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+  }
+  throw new Error('too many backups made in one second')
+}
+
 // deps: { home, env, platform, nodePath, sourceTap, now, exists, remove?, dryRun? }
 // `sourceTap` is scripts/usage-tap.mjs in the repo the installer runs from. It is never what the
 // status line runs: it is copied first (tap-copy.mjs) and the status line runs the copy.
@@ -166,10 +183,7 @@ export async function installTap(deps) {
 async function writeSettings(path, plan, originalText, deps) {
   // The backup first. If that fails, nothing is changed.
   let backup = null
-  if (originalText !== null) {
-    backup = `${path}.before-usage-tap-${stampOf(deps.now)}.bak`
-    await copyFile(path, backup)
-  }
+  if (originalText !== null) backup = await backUp(path, deps.now)
   // Written beside the file and renamed over it, so Claude Code never reads half a settings file.
   // Beside the REAL file: when settings.json is a link (a dotfiles repo), renaming over the link
   // would replace it with a plain file. And with the file's own permissions: a settings file the

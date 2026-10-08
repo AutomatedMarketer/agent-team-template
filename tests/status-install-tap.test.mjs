@@ -219,6 +219,28 @@ test('running it twice writes nothing the second time and makes no second backup
   }
 })
 
+// Found in review: install then --remove within one second made the same backup name twice, and
+// the second copy overwrote the first - the only copy of the original file.
+test('two runs in the same second keep both backups, and the first still holds the original', async () => {
+  const temp = await tempHome()
+  try {
+    const original = JSON.stringify(someSettings, null, 2)
+    await writeFile(temp.settings, original)
+    await installTap(deps(temp))
+    await installTap(deps(temp, { remove: true }))
+    await installTap(deps(temp))
+    const backups = (await filesIn(join(temp.home, '.claude'))).filter((name) => name.endsWith('.bak'))
+    assert.deepEqual(backups, [
+      'settings.json.before-usage-tap-2026-10-08T12-00-00Z-2.bak',
+      'settings.json.before-usage-tap-2026-10-08T12-00-00Z-3.bak',
+      'settings.json.before-usage-tap-2026-10-08T12-00-00Z.bak'
+    ])
+    assert.equal(await readFile(join(temp.home, '.claude', 'settings.json.before-usage-tap-2026-10-08T12-00-00Z.bak'), 'utf8'), original)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
 test('--remove restores the earlier status line exactly, after its own backup', async () => {
   const temp = await tempHome()
   try {
