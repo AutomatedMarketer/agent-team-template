@@ -189,6 +189,8 @@ earlier command fails, the bar is left empty rather than showing an error.
   the status line at the copy. Nothing in the copy imports anything from the repo. A pull does not
   change it. **Running the installer again** is the deliberate update: new code gets a new folder,
   and the old one is deleted. If the copy was changed after it was made, the next run puts it back.
+  The folder name also carries a short hash of the settings file it belongs to, so two Claude Code
+  profiles (`CLAUDE_CONFIG_DIR`) each own their copy and removing one never breaks the other.
 - **Absolute paths.** The command names the full path of `node` and of the copied tap, with forward
   slashes, quoted for the shell that will run it (`'...'` for sh and Git Bash; `& '...'` for
   PowerShell, which only runs a quoted path with `&`).
