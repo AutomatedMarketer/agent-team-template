@@ -412,6 +412,15 @@ test('the explainer says what is never written and names the checks that enforce
   }
 })
 
+// "--remove undoes it exactly" is a promise about bytes, not only settings. The explainer says what
+// makes it true, the one case where it is not, and where the original bytes always are.
+test('the explainer says the round trip is byte for byte, names the exception, and points at the backup', async () => {
+  const doc = (await explainer()).replace(/\s+/g, ' ')
+  assert.match(doc, /byte for byte/)
+  assert.match(doc, /nothing at all before: it comes back as `\{\}`/)
+  assert.match(doc, /backup always has the original bytes/)
+})
+
 test('the explainer covers the two Mac folders, the leased push, and the local app, ideas only', async () => {
   const doc = await explainer()
   assert.match(doc, /\*\*Two folders\.\*\*/)

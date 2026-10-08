@@ -120,6 +120,122 @@ function serialise(value, originalText) {
   return `${mark}${body?.includes('\r\n') ? text.replaceAll('\n', '\r\n') : text}`
 }
 
+// --- touching only the statusLine text -----------------------------------------------------------
+//
+// Rewriting the whole file would hand --remove back the same settings in the installer's layout,
+// not the person's. So the text is edited in place: install replaces just the `command` string
+// inside an existing statusLine, or appends one statusLine member after the last member; --remove
+// puts the old command string back, or cuts out exactly the member that was appended. The file has
+// already passed JSON.parse, so this small scanner only has to find where things are, not judge
+// them; whatever it produces is parsed again and compared with the intended settings, and the
+// whole-file layout is the fallback if anything differs.
+
+const isSpace = (char) => char === ' ' || char === '\t' || char === '\n' || char === '\r'
+const skipSpace = (text, index) => {
+  while (index < text.length && isSpace(text[index])) index += 1
+  return index
+}
+
+function stringEnd(text, index) {
+  for (let at = index + 1; at < text.length; at += 1) {
+    if (text[at] === '\\') at += 1
+    else if (text[at] === '"') return at + 1
+  }
+  throw new Error('unterminated string')
+}
+
+function valueEnd(text, index) {
+  if (text[index] === '"') return stringEnd(text, index)
+  if (text[index] === '{' || text[index] === '[') {
+    let depth = 0
+    for (let at = index; at < text.length; at += 1) {
+      const char = text[at]
+      if (char === '"') at = stringEnd(text, at) - 1
+      else if (char === '{' || char === '[') depth += 1
+      else if (char === '}' || char === ']') {
+        depth -= 1
+        if (depth === 0) return at + 1
+      }
+    }
+    throw new Error('unterminated value')
+  }
+  let at = index
+  while (at < text.length && !isSpace(text[at]) && !',}]'.includes(text[at])) at += 1
+  return at
+}
+
+// The members of the object whose `{` is at `start`: key, where the key starts, where the value
+// starts and ends.
+function membersOf(text, start) {
+  const members = []
+  let at = skipSpace(text, start + 1)
+  if (text[at] === '}') return members
+  for (;;) {
+    const keyStart = at
+    const keyEnd = stringEnd(text, at)
+    const valueStart = skipSpace(text, skipSpace(text, keyEnd) + 1)
+    const end = valueEnd(text, valueStart)
+    members.push({ key: JSON.parse(text.slice(keyStart, keyEnd)), keyStart, valueStart, valueEnd: end })
+    at = skipSpace(text, end)
+    if (text[at] !== ',') return members
+    at = skipSpace(text, at + 1)
+  }
+}
+
+const lastIndexOfKey = (members, key) => members.map((member) => member.key).lastIndexOf(key)
+
+// The new text, or null when only a whole rewrite will do (an empty object, a status line that
+// changes more than its command, or a layout the scanner cannot place a member in).
+function spliceStatusLine(text, desired) {
+  const top = skipSpace(text, text.startsWith(BOM) ? 1 : 0)
+  if (text[top] !== '{') return null
+  const members = membersOf(text, top)
+  const index = lastIndexOfKey(members, 'statusLine')
+  if (desired === undefined) {
+    if (index < 0) return text
+    const member = members[index]
+    if (members.length === 1) return null
+    // The last member: cut from the end of the one before it, which takes the comma and spacing
+    // that install put in front. Otherwise cut up to the next key.
+    if (index === members.length - 1) return text.slice(0, members[index - 1].valueEnd) + text.slice(member.valueEnd)
+    return text.slice(0, member.keyStart) + text.slice(members[index + 1].keyStart)
+  }
+  if (index >= 0) {
+    const member = members[index]
+    const current = JSON.parse(text.slice(member.valueStart, member.valueEnd))
+    if (!isPlainObject(current) || JSON.stringify({ ...current, command: desired.command }) !== JSON.stringify(desired)) return null
+    const command = membersOf(text, member.valueStart)
+    const at = lastIndexOfKey(command, 'command')
+    if (at < 0) return null
+    return text.slice(0, command[at].valueStart) + JSON.stringify(desired.command) + text.slice(command[at].valueEnd)
+  }
+  if (members.length === 0) return null
+  const last = members[members.length - 1]
+  if (!text.slice(top, last.valueEnd).includes('\n')) {
+    return `${text.slice(0, last.valueEnd)},"statusLine":${JSON.stringify(desired)}${text.slice(last.valueEnd)}`
+  }
+  const lineStart = text.lastIndexOf('\n', last.keyStart) + 1
+  const indent = text.slice(lineStart, last.keyStart)
+  if (!/^[ \t]*$/.test(indent) || indent === '') return null
+  const newline = text.includes('\r\n') ? '\r\n' : '\n'
+  const value = JSON.stringify(desired, null, indent).split('\n').join(`${newline}${indent}`)
+  return `${text.slice(0, last.valueEnd)},${newline}${indent}"statusLine": ${value}${text.slice(last.valueEnd)}`
+}
+
+// The text to write: the in-place edit when it gives exactly the intended settings, else the
+// whole file in the person's indentation.
+function newSettingsText(next, originalText) {
+  if (originalText !== null) {
+    try {
+      const spliced = spliceStatusLine(originalText, next.statusLine)
+      if (spliced !== null && JSON.stringify(JSON.parse(withoutBom(spliced))) === JSON.stringify(next)) return spliced
+    } catch {
+      // Fall through to the whole-file layout.
+    }
+  }
+  return serialise(next, originalText)
+}
+
 const CHANGED_UNDERNEATH = 'settings.json changed while the installer was running (Claude Code may have saved it just then), so nothing was written over it. Run the installer again'
 
 const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-')
@@ -217,7 +333,7 @@ async function writeSettings(path, plan, originalText, deps) {
   const mode = originalText === null ? null : (await stat(target)).mode & 0o777
   const temporary = join(dirname(target), `.${basename(target)}.usage-tap-${process.pid}.tmp`)
   try {
-    await writeFile(temporary, serialise(plan.next, originalText), mode === null ? undefined : { mode })
+    await writeFile(temporary, newSettingsText(plan.next, originalText), mode === null ? undefined : { mode })
     // writeFile's mode passes through the umask; chmod sets exactly the original.
     if (mode !== null) await chmod(temporary, mode)
     // A test seam: lets a test play Claude Code saving the file at the worst moment.

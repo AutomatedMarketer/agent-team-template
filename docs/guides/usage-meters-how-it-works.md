@@ -198,7 +198,10 @@ earlier command fails, the bar is left empty rather than showing an error.
   after the tap's code changes and it moves to the new copy, still chaining your original status line.
 - **`--remove` undoes it exactly.** The earlier command travels inside the new one, so removing
   puts back the very same `statusLine` - or none, if there was none. `--remove` also deletes the copy
-  of the tap it made.
+  of the tap it made. Only the status line's own text is ever edited - install swaps the command
+  string, or adds one `statusLine` entry after the last setting - so install then `--remove` gives
+  back the file byte for byte, whatever its layout. The one exception is a settings file that held
+  nothing at all before: it comes back as `{}`. The backup always has the original bytes.
 - **It refuses rather than guesses.** A settings file that is not plain JSON, a status line that is
   not a command, or a tap you wired in by hand: nothing changes, and it says why.
 - **`--dry-run`** shows the change and writes nothing.

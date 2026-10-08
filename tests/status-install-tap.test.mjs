@@ -219,6 +219,54 @@ test('running it twice writes nothing the second time and makes no second backup
   }
 })
 
+// Found in re-review: --remove gave back the same settings but rewrote the whole file in the
+// installer's own layout. Now only the statusLine text is touched: install splices in the new
+// command (or appends a statusLine member), and --remove takes out exactly that, so the round trip
+// gives back the file byte for byte.
+const { statusLine: _drop, ...withoutStatusLine } = someSettings
+const ROUND_TRIPS = {
+  'two spaces': `${JSON.stringify(someSettings, null, 2)}\n`,
+  'four spaces': `${JSON.stringify(someSettings, null, 4)}\n`,
+  tabs: `${JSON.stringify(someSettings, null, '\t')}\n`,
+  'Windows line endings': `${JSON.stringify(someSettings, null, 2).replaceAll('\n', '\r\n')}\r\n`,
+  'a byte-order mark': `﻿${JSON.stringify(someSettings, null, 2)}\n`,
+  'no newline at the end': JSON.stringify(someSettings, null, 2),
+  'one line': JSON.stringify(someSettings),
+  'hand spacing inside statusLine': '{\n  "model" : "opus",\n  "statusLine":  { "type": "command",   "command": "my-line",  "padding": 2 } ,\n  "env": {"A": "1"}\n}\n',
+  'no status line, two spaces': `${JSON.stringify(withoutStatusLine, null, 2)}\n`,
+  'no status line, Windows line endings': `${JSON.stringify(withoutStatusLine, null, 2).replaceAll('\n', '\r\n')}\r\n`,
+  'no status line, one line': JSON.stringify(withoutStatusLine),
+  'no status line, hand spacing': '{\n  "model" : "opus",\n\n  "permissions": {"allow": [ ]}   \n}\n'
+}
+
+for (const [name, original] of Object.entries(ROUND_TRIPS)) {
+  test(`install then --remove gives back the file byte for byte: ${name}`, async () => {
+    const temp = await tempHome()
+    try {
+      await writeFile(temp.settings, original)
+      assert.equal((await installTap(deps(temp))).action, 'install')
+      assert.equal((await installTap(deps(temp, { remove: true, now: STAMP + 60_000 }))).action, 'remove')
+      assert.equal(await readFile(temp.settings, 'utf8'), original)
+    } finally {
+      await temp.cleanup()
+    }
+  })
+}
+
+test('install changes nothing but the command text when there is a status line already', async () => {
+  const temp = await tempHome()
+  try {
+    const original = ROUND_TRIPS['hand spacing inside statusLine']
+    await writeFile(temp.settings, original)
+    await installTap(deps(temp))
+    const after = await readFile(temp.settings, 'utf8')
+    const command = JSON.parse(after).statusLine.command
+    assert.equal(after.replace(JSON.stringify(command), '"my-line"'), original)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
 test('a settings.json with Windows line endings keeps them', async () => {
   const temp = await tempHome()
   try {
