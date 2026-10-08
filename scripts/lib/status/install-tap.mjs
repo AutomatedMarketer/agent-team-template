@@ -11,7 +11,7 @@ import { join, dirname, basename } from 'node:path'
 import { readFile, writeFile, rename, rm, copyFile, realpath, stat, chmod, mkdir } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { isPlainObject } from './util.mjs'
-import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
+import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy, profileKey } from './tap-copy.mjs'
 import { findGitBash } from './tap.mjs'
 
 export const TAP_SCRIPT_NAME = 'usage-tap.mjs'
@@ -163,7 +163,9 @@ export async function installTap(deps) {
   }
 
   const copyRoot = tapCopyRoot(deps)
-  const currentCopy = copyDirOf(copyRoot, tapPathFrom(settings?.statusLine?.command))
+  // This settings file's own copies only: another profile's copy is never updated or deleted here.
+  const profile = await profileKey(path, deps.platform)
+  const currentCopy = copyDirOf(copyRoot, tapPathFrom(settings?.statusLine?.command), profile)
 
   if (deps.remove) {
     const plan = planRemove({ settings })
@@ -180,12 +182,12 @@ export async function installTap(deps) {
   } catch (error) {
     return { ...refuse(`the tap could not be copied: ${error.message}`), path }
   }
-  const copy = copyDirFor(copyRoot, files)
+  const copy = copyDirFor(copyRoot, files, profile)
   const plan = planInstall({ settings, nodePath: deps.nodePath, tapPath: join(copy, TAP_SCRIPT_NAME), dialect: dialectFor(deps.platform, deps.env, deps.exists) })
   if (deps.dryRun || plan.action === 'refuse') return { ...plan, path, backup: null, copy }
 
   // The copy first, checked, so the status line never points at a folder that is not there yet.
-  const { repaired } = await ensureCopy(copyRoot, files)
+  const { repaired } = await ensureCopy(copyRoot, files, profile)
   if (plan.action === 'unchanged') return { ...plan, path, backup: null, copy, repairedCopy: repaired }
   const written = await writeSettings(path, plan, originalText, deps)
   if (written.changedUnderneath) {

@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 855
+ℹ tests 857
 ℹ fail 0
 ```
 

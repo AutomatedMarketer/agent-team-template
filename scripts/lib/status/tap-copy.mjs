@@ -8,11 +8,11 @@
 // contents, checks the copy byte for byte, and points the status line at the copy. Nothing in the
 // copy imports anything outside it. Running the installer again is the deliberate update.
 
-import { readFile, mkdir, writeFile, rm, rename, readdir, rmdir } from 'node:fs/promises'
+import { readFile, mkdir, writeFile, rm, rename, readdir, rmdir, realpath, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join, dirname, resolve, relative, isAbsolute, sep } from 'node:path'
+import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'node:path'
 
-export const COPY_NAME = /^[0-9a-f]{16}$/
+export const COPY_NAME = /^[0-9a-f]{16}-[0-9a-f]{8}$/
 
 export function tapCopyRoot({ home, env = {}, platform }) {
   if (platform === 'win32') return join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'agent-status', 'tap')
@@ -69,7 +69,40 @@ export function filesHash(files) {
   return hash.digest('hex')
 }
 
-export const copyDirFor = (root, files) => join(root, filesHash(files).slice(0, 16))
+// Each settings file owns its copy. Two Claude Code profiles (CLAUDE_CONFIG_DIR) installing the same
+// tap would otherwise share one content-named folder, and --remove or an update in one would delete
+// the copy the other still runs. So the folder is <content hash>-<settings-file hash>.
+export async function profileKey(settingsPath, platform = process.platform) {
+  let real
+  try {
+    real = await realpath(settingsPath)
+  } catch {
+    real = await realpath(dirname(settingsPath)).then((dir) => join(dir, basename(settingsPath)), () => resolve(settingsPath))
+  }
+  // Windows paths are the same file whatever their case.
+  if (platform === 'win32') real = real.toLowerCase()
+  return createHash('sha256').update(real).digest('hex').slice(0, 8)
+}
+
+export const copyDirFor = (root, files, profile) => join(root, `${filesHash(files).slice(0, 16)}-${profile}`)
+
+// A half-built copy older than this is a crashed install, not one still in progress.
+const STALE_BUILD_MS = 3600_000
+
+async function clearStaleBuilds(root, now) {
+  let names = []
+  try {
+    names = await readdir(root)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!/^[0-9a-f]{16}-[0-9a-f]{8}\.building-\d+$/.test(name)) continue
+    const path = join(root, name)
+    const age = now - (await stat(path).then((info) => info.mtimeMs, () => now))
+    if (age > STALE_BUILD_MS) await rm(path, { recursive: true, force: true }).catch(() => {})
+  }
+}
 
 // True when `dir` holds exactly these files, byte for byte, and its entry's imports all resolve
 // inside it.
@@ -88,9 +121,10 @@ async function copyMatches(dir, files) {
 
 // Makes (or checks and keeps) the copy. Returns { dir, repaired }: `repaired` when a copy was
 // there but no longer matched and was replaced.
-export async function ensureCopy(root, files) {
-  const dir = copyDirFor(root, files)
+export async function ensureCopy(root, files, profile) {
+  const dir = copyDirFor(root, files, profile)
   let repaired = false
+  await clearStaleBuilds(root, Date.now())
   if (await copyMatches(dir, files)) return { dir, repaired }
   if (await readdir(dir).then(() => true, () => false)) {
     repaired = true
@@ -113,18 +147,21 @@ export async function ensureCopy(root, files) {
   return { dir, repaired }
 }
 
-// The copy folder a status line command runs, if it is one of ours: <root>/<16 hex>/usage-tap.mjs.
-export function copyDirOf(root, tapPath) {
+// The copy folder a status line command runs, if it is THIS profile's: <root>/<16 hex>-<profile>/
+// usage-tap.mjs. A command pointing at another profile's copy (a settings file copied across) is
+// not ours to update or delete.
+export function copyDirOf(root, tapPath, profile) {
   if (typeof tapPath !== 'string') return null
   const dir = dirname(resolve(tapPath))
-  if (dirname(dir) !== resolve(root) || !COPY_NAME.test(dir.slice(dirname(dir).length + 1))) return null
+  if (dirname(dir) !== resolve(root) || !COPY_NAME.test(basename(dir))) return null
+  if (profile && !basename(dir).endsWith(`-${profile}`)) return null
   return dir
 }
 
 // Deletes one of our copies, and the copies folder once it is empty. Anything that is not
-// <root>/<16 hex> is left alone.
+// <root>/<16 hex>-<8 hex> is left alone.
 export async function removeCopy(root, dir) {
-  if (!dir || dirname(dir) !== resolve(root) || !COPY_NAME.test(dir.slice(dirname(dir).length + 1))) return
+  if (!dir || dirname(dir) !== resolve(root) || !COPY_NAME.test(basename(dir))) return
   await rm(dir, { recursive: true, force: true })
   await rmdir(root).catch(() => {})
 }

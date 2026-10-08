@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, writeFile, mkdtemp, rm, readdir, mkdir, cp } from 'node:fs/promises'
+import { readFile, writeFile, mkdtemp, rm, readdir, mkdir, cp, utimes } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -89,7 +89,8 @@ test('the status line points at a hash-named copy, never at the team repo', asyn
     const root = tapCopyRoot({ home: fake.home, env: {}, platform: 'darwin' }).replaceAll('\\', '/')
     assert.ok(tapPath.startsWith(`${root}/`), `the status line runs ${tapPath}`)
     assert.ok(!tapPath.includes('team-repo'), 'the status line still runs the working copy')
-    assert.match(tapPath, /\/tap\/[0-9a-f]{16}\/usage-tap\.mjs$/)
+    // <content hash>-<settings-file hash>: the second part is what makes the copy this profile's own.
+    assert.match(tapPath, /\/tap\/[0-9a-f]{16}-[0-9a-f]{8}\/usage-tap\.mjs$/)
     const copyDir = tapPath.slice(0, -'/usage-tap.mjs'.length)
     assert.deepEqual((await readdir(join(copyDir, 'lib', 'status'))).sort(), ['safe.mjs', 'schema.mjs', 'tap.mjs', 'util.mjs'])
   } finally {
@@ -164,6 +165,48 @@ test('--remove deletes the copy it made, and the empty copies folder', async () 
     await installTap(deps(fake, { remove: true, now: STAMP + 60_000 }))
     assert.equal(existsSync(tapPath), false)
     assert.equal(existsSync(tapCopyRoot({ home: fake.home, env: {}, platform: 'darwin' })), false)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// Found in re-review: two Claude Code profiles (CLAUDE_CONFIG_DIR) installing the same tap shared
+// one content-named copy, so --remove or an update in one deleted the copy the other still ran.
+// Each settings file now owns its copy.
+test('two CLAUDE_CONFIG_DIR profiles each get their own copy, and removing one leaves the other running', async () => {
+  const fake = await fakeRepoAndHome()
+  try {
+    const profileA = { CLAUDE_CONFIG_DIR: join(fake.home, 'profile-a') }
+    const profileB = { CLAUDE_CONFIG_DIR: join(fake.home, 'profile-b') }
+    await installTap(deps(fake, { env: profileA }))
+    await installTap(deps(fake, { env: profileB }))
+    const tapIn = async (profile) => /'([^']*usage-tap\.mjs)'/.exec(JSON.parse(await readFile(join(profile.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8')).statusLine.command)[1]
+    const a = await tapIn(profileA)
+    const b = await tapIn(profileB)
+    assert.notEqual(a, b, 'the two profiles share one copy')
+    await installTap(deps(fake, { env: profileA, remove: true, now: STAMP + 60_000 }))
+    assert.equal(existsSync(a), false)
+    assert.equal(existsSync(b), true, "removing profile A deleted the copy profile B runs")
+    const env = { HOME: fake.home, USERPROFILE: fake.home, LOCALAPPDATA: join(fake.home, 'AppData', 'Local'), PATH: process.env.PATH ?? '' }
+    assert.equal((await runNode(b, reading, env)).stdout, '5h 18%\n')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a half-built copy left by a crash over an hour ago is cleared; a recent one is left alone', async () => {
+  const fake = await fakeRepoAndHome()
+  try {
+    const root = tapCopyRoot({ home: fake.home, env: {}, platform: 'darwin' })
+    const stale = join(root, '0123456789abcdef-01234567.building-4242')
+    const recent = join(root, '0123456789abcdef-01234567.building-4343')
+    await mkdir(stale, { recursive: true })
+    await mkdir(recent, { recursive: true })
+    const twoHoursAgo = (Date.now() - 2 * 3600_000) / 1000
+    await utimes(stale, twoHoursAgo, twoHoursAgo)
+    await installTap(deps(fake))
+    assert.equal(existsSync(stale), false, 'a stale half-built copy was left behind')
+    assert.equal(existsSync(recent), true, 'a copy another install may still be building was deleted')
   } finally {
     await fake.cleanup()
   }
