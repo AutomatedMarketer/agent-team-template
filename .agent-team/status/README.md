@@ -487,7 +487,7 @@ and a rollback.
 | Owner | `~/Library/LaunchAgents/local.donna.agent-status-collector.plist` |
 | Cadence | 00:07, 03:07, ... 21:07 Mac local time (the Mac must be set to New York time) |
 | Command | `node <code>/scripts/collect-status.mjs --computer "Mac Mini" --commit --clone <data>` |
-| Receipts | `~/.local/state/agent-status-collector/claims/<slot>.claim/{receipt,final}.json` |
+| Receipts | `~/.local/state/agent-status-collector/claims/<slot>[-code-<commit>].claim/{receipt,final}.json` |
 | Missed runs | Skipped. If the Mac sleeps through a slot, launchd runs once on wake: one fresh reading under a new claim, not a replay |
 | Alert | The dashboard's stale banner after 8 hours |
 | Rollback | `launchctl bootout`, move the plist out, delete both folders |

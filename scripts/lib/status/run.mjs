@@ -472,7 +472,7 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
       : claimStamp(deps.now))
     if (!claim) {
       say(mode === 'clone'
-        ? 'This three-hour slot was already claimed by an earlier run. Skipped, not repeated.'
+        ? 'This three-hour slot was already run by this code. Skipped, not repeated.'
         : 'This occurrence was already claimed by an earlier run. Skipped, not repeated.')
       return 0
     }

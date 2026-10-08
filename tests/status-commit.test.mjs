@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { runCollector } from '../scripts/lib/status/run.mjs'
-import { slotStamp } from '../scripts/lib/status/commit.mjs'
+import { slotStamp, codeCommit, scheduledClaimName } from '../scripts/lib/status/commit.mjs'
 import { makeFakeHome, setMtime } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
 import { repoRoot } from './helpers/repo.mjs'
@@ -742,10 +742,54 @@ test('a slot already run by older code runs once more after the code pin moves',
     const head = (await git(['rev-parse', 'HEAD'], code)).stdout.trim()
     const claims = await readdir(join(stateDir, 'claims'))
     assert.equal(claims.length, 2)
+    for (const claim of claims) assert.match(claim, /^2026-10-07T15-00-new-york-code-[0-9a-f]{12}\.claim$/)
     assert.ok(claims.includes(`2026-10-07T15-00-new-york-code-${head.slice(0, 12)}.claim`), claims.join(', '))
   } finally {
     await fake.cleanup()
     await repo.cleanup()
+  }
+})
+
+// The claim name only takes the commit of a checkout that is the code folder itself. A code
+// folder that is a plain folder, or a folder inside some other repo, has no commit of its own -
+// that repo's commit says nothing about the code that runs - so the bare slot is used.
+test('a code folder that is not its own git checkout claims the bare slot', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const dedicated = await repo.clone('dedicated')
+    const outer = await repo.clone('outer')
+    const inside = join(outer, 'sub')
+    const plain = join(repo.root, 'plain')
+    await mkdir(inside, { recursive: true })
+    await mkdir(plain, { recursive: true })
+    for (const [index, code] of [inside, plain].entries()) {
+      const stateDir = join(repo.root, `state-${index}`)
+      const result = await collect(fake, ['--commit', '--clone', dedicated], { repo: code, stateDir, extra: { now: Date.parse('2026-10-07T19:07:00Z') } })
+      assert.equal(result.code, 0, result.stderr)
+      assert.deepEqual(await readdir(join(stateDir, 'claims')), ['2026-10-07T15-00-new-york.claim'])
+    }
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+// What git prints becomes part of a folder name. Only a full hex commit id may.
+test('a code commit is used only when git answers with a commit id', async () => {
+  const answering = (head) => async (args, cwd) => ({ stdout: args.includes('--show-toplevel') ? `${cwd}\n` : `${head}\n` })
+  const folder = await mkdtemp(join(tmpdir(), 'agent-status-code-'))
+  try {
+    const id = 'a'.repeat(40)
+    assert.equal(await codeCommit(answering(id), folder), id)
+    for (const head of ['../../escape', 'A'.repeat(40), 'abc123', 'HEAD', '', `${'a'.repeat(40)}/x`]) {
+      assert.equal(await codeCommit(answering(head), folder), null, `accepted ${JSON.stringify(head)}`)
+    }
+    assert.equal(await codeCommit(async () => { throw new Error('not a repo') }, folder), null)
+    assert.equal(scheduledClaimName(Date.parse('2026-10-07T19:07:00Z'), id), `2026-10-07T15-00-new-york-code-${'a'.repeat(12)}`)
+    assert.equal(scheduledClaimName(Date.parse('2026-10-07T19:07:00Z'), null), '2026-10-07T15-00-new-york')
+  } finally {
+    await rm(folder, { recursive: true, force: true })
   }
 })
 
