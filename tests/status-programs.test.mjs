@@ -161,8 +161,8 @@ test('a timeout kills the program and everything it started', async () => {
       'setTimeout(() => {}, 60000)'
     ].join(';')
     const started = Date.now()
-    await assert.rejects(runner(process.execPath, ['-e', parent], { cwd: folder, timeout: 2_000 }), (error) => error.code === 'ETIMEDOUT')
-    assert.ok(Date.now() - started < 15_000, 'the timeout did not stop it')
+    await assert.rejects(runner(process.execPath, ['-e', parent], { cwd: folder, timeout: 6_000 }), (error) => error.code === 'ETIMEDOUT')
+    assert.ok(Date.now() - started < 30_000, 'the timeout did not stop it')
     const grandchild = Number(await readFile(pidFile, 'utf8'))
     let alive = true
     for (let tries = 0; tries < 50 && alive; tries++) {

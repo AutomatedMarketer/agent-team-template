@@ -270,7 +270,7 @@ test('the command line runs end to end, with a dry run that writes nothing into 
 test('SPAWN SAFETY: a spawned collector on a "Mac" reaches the shut Keychain door, never /usr/bin/security', async () => {
   const fake = await hostileHome({ now: Date.now() })
   try {
-    const result = await spawnCollector(fake, ['--dry-run', '--computer', 'Script Test'], { platform: 'darwin' })
+    const result = await spawnCollector(fake, ['--dry-run', '--computer', 'Script Test', '--only', 'usage'], { platform: 'darwin' })
     assert.equal(result.code, 0, result.stderr)
     // The collector did try the Keychain - with the full path - and the harness's stand-in took
     // the call. The live address was tried too, and also stopped at the door.

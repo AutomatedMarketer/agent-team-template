@@ -56,9 +56,57 @@ export async function hostileHome({ now = NOW } = {}) {
     },
     '.claude.json': {
       oauthAccount: { emailAddress: FAKE_EMAIL, accountUuid: FAKE_UUID, displayName: 'Fake Person' },
-      projects: { [`/Users/${FAKE_USERNAME}/secret-client`]: { allowedTools: [] } },
-      cachedUsageUtilization: { fetchedAtMs: now - HOUR, utilization: { five_hour: { utilization: 5 }, owner: FAKE_EMAIL } }
+      projects: {
+        [`/Users/${FAKE_USERNAME}/secret-client`]: {
+          allowedTools: [],
+          // A project's own server: counted, never named - its name and path are the client's.
+          mcpServers: { 'client-db': { type: 'stdio', command: `/Users/${FAKE_USERNAME}/secret-client/bin/db`, env: { DB_PASSWORD: fakeRefreshToken() } } }
+        }
+      },
+      cachedUsageUtilization: { fetchedAtMs: now - HOUR, utilization: { five_hour: { utilization: 5 }, owner: FAKE_EMAIL } },
+      // Your own servers: every kind of secret a server entry can hold, under names that are fine
+      // and names that are not.
+      mcpServers: {
+        crm: { type: 'http', url: `https://mcp.example.com/crm?key=${fakeClaudeToken()}`, headers: { Authorization: `Bearer ${fakeClaudeToken()}` } },
+        github: { type: 'stdio', command: 'npx', args: ['-y', '@example/github-server', '--token', fakeClaudeToken()], env: { GITHUB_TOKEN: fakeRefreshToken() } },
+        [FAKE_EMAIL]: { type: 'http', url: 'https://mcp.example.com/mine' },
+        [`${FAKE_USERNAME}-tools`]: { command: `/Users/${FAKE_USERNAME}/bin/tools` },
+        [fakeClaudeToken().slice(0, 40)]: { url: 'https://mcp.example.com/t' }
+      },
+      claudeAiMcpEverConnected: ['claude.ai Gmail', `claude.ai ${FAKE_EMAIL}`]
     },
+    '.claude/mcp-needs-auth-cache.json': { 'plugin:marketing:supermetrics': { timestamp: now - HOUR } },
+    '.claude/settings.json': {
+      enabledPlugins: { 'marketing@claude-plugins': true, 'switched-off@claude-plugins': false },
+      env: { ANTHROPIC_API_KEY: fakeClaudeToken() }
+    },
+    '.claude/plugins/cache/marketing/.mcp.json': {
+      mcpServers: { supermetrics: { type: 'http', url: `https://mcp.example.com/sm?token=${fakeClaudeToken()}`, headers: { 'X-Owner': FAKE_EMAIL } } }
+    },
+    '.claude/plugins/cache/switched-off/.mcp.json': { mcpServers: { 'never-shown': { command: 'npx' } } },
+    '.codex/config.toml': [
+      'model = "gpt-5"',
+      `[projects.'/Users/${FAKE_USERNAME}/secret-client']`,
+      'trust_level = "trusted"',
+      '[mcp_servers.docs]',
+      `command = "/Users/${FAKE_USERNAME}/bin/docs"`,
+      `args = ["--token", "${fakeClaudeToken()}"]`,
+      'env_vars = ["DOCS_SECRET"]',
+      `url = "https://mcp.example.com/docs?owner=${FAKE_EMAIL}"`,
+      '[mcp_servers.docs.env]',
+      `TOKEN = "${fakeRefreshToken()}"`,
+      `[mcp_servers."${FAKE_USERNAME}-notes"]`,
+      'command = "notes"',
+      '[plugins."github@openai-curated"]',
+      'enabled = true',
+      '[plugins."canva@openai-curated"]',
+      'enabled = false',
+      `[hooks.state.'C:\\Users\\${FAKE_USERNAME}\\secret-client']`,
+      'enabled = true',
+      'notes = """',
+      `[plugins."hidden-in-a-string@${FAKE_EMAIL}"]`,
+      '"""'
+    ].join('\n'),
     '.codex/auth.json': {
       OPENAI_API_KEY: null,
       tokens: {
@@ -97,6 +145,14 @@ export async function hostileHome({ now = NOW } = {}) {
     ].join('\n')
   )
   await setMtime(codexLog, now - HOUR)
+  // Where the plugin is installed is recorded with its full path - which holds the username.
+  await fake.write('.claude/plugins/installed_plugins.json', {
+    version: 2,
+    plugins: {
+      'marketing@claude-plugins': [{ scope: 'user', installPath: join(fake.home, '.claude', 'plugins', 'cache', 'marketing'), version: '1.0.0' }],
+      'switched-off@claude-plugins': [{ scope: 'user', installPath: join(fake.home, '.claude', 'plugins', 'cache', 'switched-off'), version: '1.0.0' }]
+    }
+  })
   return fake
 }
 
@@ -111,7 +167,20 @@ export const FORBIDDEN = () => [
   'C:\\',
   'eyJ',
   'Bearer',
-  'secret-client'
+  'secret-client',
+  // What a server entry holds besides its name: address, command, arguments, settings.
+  'mcp.example.com',
+  'https://',
+  'npx',
+  '--token',
+  'GITHUB_TOKEN',
+  'DOCS_SECRET',
+  'client-db',
+  'never-shown',
+  'switched-off',
+  'hidden-in-a-string',
+  'trust_level',
+  'oat01'
 ]
 
 export function depsFor(fake, extra = {}) {
