@@ -95,9 +95,10 @@ true reading of your plan.
 The list of source names is a **shared contract** between this repo and the dashboard
 (`tests/fixtures/usage-parity.json`, the same bytes in both repos, checked by a test in each). The
 tap's reading is written as `claude-code-statusline`, a name of its own, because it is the one
-Claude reading Anthropic documents. So the dashboard shows it as official -
-"from Claude Code’s status line" - with no "unofficial" label. The two backup readings keep their own names
-(`unofficial-live` and `claude-code-saved`) and their "unofficial" label.
+Claude reading Anthropic documents. So the dashboard shows it as official: the chip says
+"From Claude Code", with no "unofficial" label, and its Why? line says the figures came from Claude
+Code's own status line on the computer that took the reading. The two backup readings keep their
+own names (`unofficial-live` and `claude-code-saved`) and their "unofficial" label.
 
 ### The other numbers
 

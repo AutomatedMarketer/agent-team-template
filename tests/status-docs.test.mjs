@@ -168,6 +168,32 @@ test('the status README states exactly the label rule the collector enforces', a
 const guide = () => read('docs/guides/usage-meters.md')
 const explainer = () => read('docs/guides/usage-meters-how-it-works.md')
 
+// The words the board's chip shows on the status line reading (agent-cockpit public/index.html,
+// sourceChipHtml). The guides quote it, so a student can match what they read to what they see.
+const BOARD_CHIP = 'From Claude Code'
+
+// Found in review: the guides quoted the chip as "from Claude Code’s status line"; the board says
+// "From Claude Code". When agent-cockpit is checked out beside this repo, the board's own source is
+// the check. Otherwise this says loudly that it did not check.
+test('the board chip the guides quote is the one agent-cockpit actually shows', async (t) => {
+  const { readFile: readOutside } = await import('node:fs/promises')
+  const { repoRoot } = await import('./helpers/repo.mjs')
+  let board
+  try {
+    board = await readOutside(posix.join(repoRoot.replaceAll('\\', '/'), '..', 'agent-cockpit', 'public', 'index.html'), 'utf8')
+  } catch {
+    t.skip('NOT CHECKED: agent-cockpit is not checked out beside this repo, so the chip text the guides quote could not be compared with the board')
+    return
+  }
+  const chip = /source === 'claude-code-statusline'\) return '<span class="chip[^"]*">([^<]+)<\/span>'/.exec(board)?.[1]
+  assert.ok(chip, 'agent-cockpit no longer has a chip for claude-code-statusline where this test looks')
+  assert.equal(chip, BOARD_CHIP, `the board says "${chip}"; the guides quote "${BOARD_CHIP}"`)
+  for (const [name, doc] of [['the guide', await guide()], ['the explainer', await explainer()], ['the status README', await statusReadme()]]) {
+    assert.ok(doc.includes(BOARD_CHIP), `${name} does not quote "${BOARD_CHIP}"`)
+    assert.ok(!doc.includes('from Claude Code’s status line'), `${name} still quotes the old chip wording`)
+  }
+})
+
 // GitHub's heading anchors: lower case, punctuation dropped, spaces to hyphens.
 const anchorsIn = (markdown) =>
   new Set([...markdown.matchAll(/^#{1,6}\s+(.+)$/gm)].map((match) =>
@@ -226,15 +252,17 @@ test('the beginner guide explains its words before it uses them, and every label
   }
   assert.ok(doc.indexOf('## Words used in this guide') < doc.indexOf('## Path A'), 'the words are explained after they are used')
   const labels = doc.slice(doc.indexOf('## What you will see'), doc.indexOf('## The Mac "Always Allow" box'))
-  for (const label of ['from Claude Code’s status line', 'saved copy', 'unofficial', 'estimate', 'not found', 'unavailable', 'reset since this reading', 'older than 8 hours']) {
+  for (const label of [BOARD_CHIP, 'saved copy', 'unofficial', 'estimate', 'not found', 'unavailable', 'reset since this reading', 'older than 8 hours']) {
     assert.ok(labels.includes(`**${label}**`), `the guide does not explain "${label}"`)
   }
   assert.match(labels, /tap's numbers come straight from Claude Code/)
   // The tap's reading has its own name now, and the board shows it as official.
   const rows = labels.split('\n')
-  const officialRow = rows.find((line) => line.startsWith('| **from Claude Code’s status line**')) ?? ''
+  const officialRow = rows.find((line) => line.startsWith(`| **${BOARD_CHIP}**`)) ?? ''
   assert.match(officialRow, /official/i)
   assert.match(officialRow, /tap/)
+  assert.match(officialRow, /Why\?/, 'the guide does not say the Why? line names the status line')
+  assert.match(officialRow, /status line/)
   const savedRow = rows.find((line) => line.startsWith('| **saved copy**')) ?? ''
   assert.doesNotMatch(savedRow, /tap/, 'the guide still says the tap reading is a saved copy')
   assert.match(doc, /Claude Pro or Max/)
@@ -334,7 +362,8 @@ test('the explainer says the tap has its own source name, and the board shows it
   const why = doc.slice(start, doc.indexOf('### The other numbers'))
   assert.match(why, /tests\/fixtures\/usage-parity\.json/)
   assert.match(why, /`claude-code-statusline`/)
-  assert.match(why, /from Claude Code’s status line/)
+  assert.ok(why.includes(`"${BOARD_CHIP}"`), `the explainer does not quote the board's chip, "${BOARD_CHIP}"`)
+  assert.match(why, /Why\?/)
   assert.match(why, /official/)
   const table = doc.slice(doc.indexOf('### Claude limits'), start)
   const tapRow = table.split('\n').find((line) => line.startsWith('| 1 |')) ?? ''

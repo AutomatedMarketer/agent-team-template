@@ -148,7 +148,8 @@ installer again is the deliberate update, and `--remove` deletes the copy it mad
 
 The installer changes only the `statusLine` key and backs the file up first. The tap's reading is
 written as `claude-code-statusline`, its own name in the shared contract, and the dashboard shows it
-as official: "from Claude Code’s status line", with no "unofficial" label. When the tap's reading is
+as official - a "From Claude Code" chip, no "unofficial" label, and a Why? line naming the status
+line. When the tap's reading is
 under 30 minutes old it wins and the live call is skipped, so the token never leaves the computer.
 Older than that, the live call goes first (the status line only updates while Claude Code is in
 use, so an older tap reading may be behind), and the tap's reading is used if the live call fails,

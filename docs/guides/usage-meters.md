@@ -95,7 +95,7 @@ Each number on the dashboard has a small label. Here is what each label means.
 
 | You see | What it means | Do you need to do anything? |
 |---|---|---|
-| **from Claude Code’s status line** | The official numbers. Claude Code gave them to the tap, and Anthropic documents them | No |
+| **From Claude Code** | The official numbers. Claude Code gave them to the tap, and Anthropic documents them. Tap **Why?** under the meters and it says they came from Claude Code's status line | No |
 | **saved copy** | A backup. Claude Code saved this reading in its own file on your computer | No |
 | **unofficial** | Anthropic has not published the place this reading came from. It is right today, but it could stop working without warning. Only the backup methods get this label | No |
 | **from Codex's own log** | The Codex numbers came from Codex's own records on your computer | No |
@@ -106,7 +106,7 @@ Each number on the dashboard has a small label. Here is what each label means.
 | **older than 8 hours** | The reading may be out of date | Run `/snapshot` again |
 
 **The best label to see.** The tap's numbers come straight from Claude Code. They are the official
-ones, so the dashboard shows them as **from Claude Code’s status line**, with no "unofficial" label.
+ones, so the dashboard shows them as **From Claude Code**, with no "unofficial" label.
 
 **Which reading wins.** The tap only gets numbers while you are using Claude Code.
 
