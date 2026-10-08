@@ -9,10 +9,13 @@
 // status-parts, status-commit). Reproduced outside the suite with 12 parallel push loops: 2 of 120
 // failed; with this retry, 0 of 360, after 2 retries.
 //
-// Only that exact message is retried, at most four times, a little longer each time. Any other git
-// failure - every one a test is about - is returned at once, unchanged. A failed object write
-// changes nothing git counts as done (no ref moves, no commit is made), so running the same command
-// again is safe; a clone that failed part way has its half-made folder removed first.
+// The same hold hits git's other write-then-rename files: .git/config through config.lock ("could
+// not write config file ...: Permission denied", seen once in five full runs, on `git config
+// user.name`) and the index. Only these messages, and only with "Permission denied", are retried,
+// at most four times, a little longer each time. Any other git failure - every one a test is
+// about - is returned at once, unchanged. A failed write of this kind changes nothing git counts as
+// done (no ref moves, no commit is made, the old config and index stay), so running the same
+// command again is safe; a clone that failed part way has its half-made folder removed first.
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -21,7 +24,7 @@ import { resolve } from 'node:path'
 
 const execFileP = promisify(execFile)
 
-export const HELD_BY_SCANNER = /unable to (write|create temporary) file.*Permission denied/
+export const HELD_BY_SCANNER = /(unable to (write|create temporary) file|could not (write|commit) config file|unable to write new index file).*Permission denied/
 export const RETRIES = 4
 
 const runGit = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })

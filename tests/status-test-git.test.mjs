@@ -13,13 +13,17 @@ test('the retry matches the scanner\'s hold and nothing else', () => {
   for (const held of [
     'remote: error: unable to write file C:/T/remote.git/./objects/tmp_objdir-incoming-x/a4/2489: Permission denied',
     'error: unable to write file .git/objects/fb/0cf6ab0e0b: Permission denied',
-    'error: unable to create temporary file: Permission denied'
+    'error: unable to create temporary file: Permission denied',
+    'error: could not write config file .git/config: Permission denied',
+    'error: could not commit config file .git/config: Permission denied',
+    'fatal: unable to write new index file: Permission denied'
   ]) assert.match(held, HELD_BY_SCANNER, held)
   for (const other of [
     ' ! [rejected]        main -> main (fetch first)',
     'error: failed to push some refs to origin',
     'fatal: not a git repository (or any of the parent directories): .git',
     'error: unable to write file x: No space left on device',
+    'error: could not lock config file .git/config: File exists',
     'fatal: could not read Username: Permission denied (publickey)'
   ]) assert.doesNotMatch(other, HELD_BY_SCANNER, other)
 })
