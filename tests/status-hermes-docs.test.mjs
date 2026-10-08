@@ -131,3 +131,23 @@ test('the README mentions the Hermes card beside the Connections wall', async ()
   const readme = await read('README.md')
   assert.match(section(readme, '## The Connections wall'), /Hermes/)
 })
+
+test('the Mac section says what moving the pin to this version starts doing, and how to keep a part out', async () => {
+  const doc = await read('.agent-team/status/README.md')
+  const start = doc.indexOf('### What changes when you move the pin to this version')
+  assert.ok(start > 0, 'no note on what a pin move to this version changes')
+  const note = flat(doc.slice(start, doc.indexOf('\n### ', start + 1)))
+  assert.match(note, /no `--only`/)
+  assert.match(note, /runs `claude mcp list`/)
+  assert.match(note, /starts every local server/)
+  assert.match(note, /every 3 hours/)
+  assert.match(note, /state\.db/)
+  assert.match(note, /<string>--only<\/string> <string>usage,hermes<\/string>/)
+  assert.match(note, /launchctl bootstrap/)
+  assert.match(note, /not verified yet/i)
+  // The schedule's own plist keeps running every part: the opt-out is the person's choice.
+  const plist = /```xml\n([\s\S]*?)```/.exec(doc)?.[1] ?? ''
+  assert.doesNotMatch(plist, /--only/)
+  const unverified = flat(doc.slice(doc.lastIndexOf('### Not verified yet')))
+  assert.match(unverified, /records the empty folder .* as a project/)
+})

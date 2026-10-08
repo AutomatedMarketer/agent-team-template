@@ -607,6 +607,38 @@ checkout would otherwise move you to code you have not read. If anything in the 
 you expected, do not move the pin. The next scheduled run uses the new code; nothing needs
 reloading.
 
+### What changes when you move the pin to this version
+
+The plist runs the collector with **no `--only`**, so it collects **every part** the code it runs
+knows. A pin still on the Phase 4 code collects usage only. Moving the pin to this version adds two
+parts to every scheduled run, with nothing changed in the plist:
+
+| Part | What starts happening every 3 hours |
+|---|---|
+| **connections** | It reads Claude Code's and Codex's settings files for names, and **runs `claude mcp list`** from the empty folder, which **starts every local server** on that list and asks every web server to connect - up to 2 minutes. It also runs `--version` for Claude Code, Codex, Git, GitHub CLI and Tailscale, and reads the apps' `Info.plist`. |
+| **hermes** | It reads Hermes's files under `~/.hermes` (version, gateway and scheduler times, each profile's model lines and skill count) and copies each profile's `state.db` into `<state-dir>/hermes-db-...` to count sessions, then deletes the copy. It runs nothing. When Hermes is alive it also commits `runs/heartbeat/hermes.json`. |
+
+Nuno approved the live check every 3 hours (decision D1). Whether `claude mcp list`, run from the
+empty folder, records that folder as a project in `~/.claude.json` is **not verified yet** (below).
+Look after the first run: if `~/.claude.json` gains a project for
+`~/.local/state/agent-status-collector/empty-cwd`, that is the live check.
+
+**To keep a part out**, name the parts you want with `--only` in the plist's `ProgramArguments`,
+after `Mac Mini`:
+
+```xml
+    <string>--computer</string>
+    <string>Mac Mini</string>
+    <string>--only</string>
+    <string>usage,hermes</string>
+```
+
+`usage,hermes` leaves out the connections part and with it `claude mcp list`; `usage,connections`
+leaves out Hermes; `usage` is the Phase 4 behaviour. After editing the plist, reload it:
+`launchctl bootout gui/$(id -u)/local.donna.agent-status-collector`, then
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.donna.agent-status-collector.plist`.
+A part left out keeps its last file on the dashboard until that file goes stale (8 hours).
+
 ### Rollback
 
 ```bash
@@ -632,8 +664,9 @@ These are checked on the first live run on the Mac, not assumed:
 - whether Codex keeps `auth.json` as a file on the Mac, or in a keyring (then the plan says `not found`)
 - the team repo name, and push access from the Mac
 - how long `claude mcp list` takes with every server on the Mac, whether it writes to
-  `~/.claude.json`, the exact state words it prints there, and whether claude.ai connectors appear
-  in it from a LaunchAgent
+  `~/.claude.json` - in particular whether it records the empty folder
+  (`~/.local/state/agent-status-collector/empty-cwd`) as a project there every 3 hours - the exact
+  state words it prints there, and whether claude.ai connectors appear in it from a LaunchAgent
 - where Claude Code and Codex are installed on the Mac, and that `~/.local/bin` on the plist's
   `PATH` (or the collector's own lookup) finds them
 - where every plugin keeps its servers: some plugins' servers are not listed through
