@@ -28,13 +28,13 @@ import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
 import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
 import { checkUsage, checkConnections, checkHermes, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
-import { writeSnapshots, assertNoLinks, LinkedPath } from './write.mjs'
+import { writeSnapshots, assertNoLinks, LinkedPath, PartlyWritten } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
 import { collectConnections } from './connections.mjs'
-import { collectHermes } from './hermes.mjs'
+import { collectHermes, removeLeftoverCopies } from './hermes.mjs'
 import {
   takeLock,
   releaseLock,
@@ -236,6 +236,8 @@ export function partsFrom(only) {
 // Returns { snapshots, files } when all passed - snapshots per part, files every file to write, in
 // order - or { problems } naming each refused field with its part. Nothing is written either way.
 async function collectParts(parts, deps, computer, identity) {
+  // A run that crashed while counting Hermes's sessions may have left its private copy behind.
+  await removeLeftoverCopies(deps.stateDir)
   const snapshots = []
   for (const part of parts) {
     const entry = PART_TABLE[part]
@@ -372,6 +374,16 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   // Sources that run programs need the state folder (their empty working folder goes there) and
   // the --clone folder (no program inside it may run).
   const stateDir = values['state-dir'] ?? defaultStateDir(deps)
+
+  // The state folder holds the lock, the claims and receipts, the empty folder programs run from,
+  // and the private copies of Hermes's sessions. Inside the data clone, all of that would sit in a
+  // folder reset to whatever the team repo holds. Refused before anything, like code there.
+  if (values.clone !== undefined && (await isInsideFolder(stateDir, values.clone))) {
+    complain('Refused: the --state-dir folder is inside the --clone folder.')
+    complain('That folder is reset to whatever the team repo holds, so anyone who can push could change the lock, the receipts and the folder programs run from.')
+    complain('Give a --state-dir outside it. The default, ~/.local/state/agent-status-collector, is fine.')
+    return 2
+  }
   deps = { ...deps, stateDir, clone: values.clone }
 
   if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
@@ -409,6 +421,11 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
       return 1
     }
     // The error itself is not shown: it carries a full path, and a full path carries the username.
+    if (error instanceof PartlyWritten) {
+      complain('Writing the snapshot files failed part way. Some snapshot files may have been written; check .agent-team/status and runs/heartbeat.')
+      complain('No temporary file was left. Run it again once nothing is in the way; a full run puts every file back in step.')
+      return 1
+    }
     complain('Writing the snapshot files failed. Nothing was written: no snapshot file and no temporary file was left.')
     complain('Check that this folder can be written to, and that nothing is in the way of .agent-team/status or runs/heartbeat.')
     return 1

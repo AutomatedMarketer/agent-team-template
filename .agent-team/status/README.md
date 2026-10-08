@@ -46,7 +46,7 @@ npm run collect:status -- --only hermes --dry-run         # the Hermes card only
 | `--dry-run` | Prints the files it would write. Writes nothing, commits nothing |
 | `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
-| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, is made here too |
+| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, and the private copies of Hermes's sessions are made here too. Refused (exit 2) when it is inside the `--clone` folder |
 | `--only usage,connections,hermes` | Only these parts, in any order: one, two or all three |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
@@ -369,6 +369,9 @@ holds the newest sessions), into a new folder under its state folder (`<state-di
 never `state.db-shm` - asks the copy, and deletes that folder whatever happens. Hermes's folder is
 left exactly as it was. Above 200 MB nothing is copied, and sessions say `unavailable` ("database
 too big").
+If a run crashes before it deletes its copy, the next run removes it: at the start of every run,
+any `hermes-db-...` folder in the state folder older than an hour is deleted - only real folders
+with that name, never a link, and never one younger, which may be another run's.
 
 Sessions are one fixed question. The collector first asks which columns the `sessions` table has
 (`PRAGMA table_info`), then asks one `SELECT` built only from fixed words - never from anything read
@@ -400,6 +403,11 @@ The contract the dashboard reads this by is `scripts/lib/status/hermes-schema.mj
 `tests/fixtures/hermes-parity.json`: the states and their words, the cap, the alive rule, the
 heartbeat settings, accept and refuse examples for profile, model and provider names, a full
 sample, and the shape the board builds from it.
+
+If writing fails before any file is in place, it says **Nothing was written** and leaves no file.
+If it fails after some files were already renamed into place, it says **Some snapshot files may
+have been written; check .agent-team/status and runs/heartbeat** - run it again to put every file
+back in step.
 
 ## What is never written
 

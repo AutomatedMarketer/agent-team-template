@@ -48,6 +48,36 @@ const EARLIEST_BELIEVABLE_MS = Date.parse('2000-01-01T00:00:00Z')
 export const MAX_SKILL_ENTRIES = 50_000
 // The biggest state.db (with its -wal) the collector will copy to count sessions in.
 export const MAX_SESSION_DB_BYTES = 200 * 1024 * 1024
+// Each private copy is a folder named like this in the state folder, deleted when the count is done.
+export const COPY_PREFIX = 'hermes-db-'
+// A copy lives for seconds. One older than this was left by a run that crashed; a younger one may
+// belong to another run reading it right now (a run by hand beside the scheduled one).
+export const LEFTOVER_AFTER_MS = 3600_000
+
+// Run at the start of every run: removes the private copies a crashed run left behind. Only
+// folders named COPY_PREFIX..., only directly in the state folder, only real folders - a link with
+// that name is left alone, so nothing is ever followed out of the state folder - and only when
+// older than LEFTOVER_AFTER_MS. Nothing it finds is opened; failures are ignored.
+export async function removeLeftoverCopies(stateDir, now = Date.now()) {
+  if (typeof stateDir !== 'string' || !stateDir) return
+  let entries
+  try {
+    entries = await readdir(stateDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.name.startsWith(COPY_PREFIX) || entry.isSymbolicLink() || !entry.isDirectory()) continue
+    const path = join(stateDir, entry.name)
+    try {
+      const info = await lstat(path)
+      if (!info.isDirectory() || info.isSymbolicLink() || now - info.mtimeMs < LEFTOVER_AFTER_MS) continue
+      await rm(path, { recursive: true, force: true })
+    } catch {
+      // Left for the next run.
+    }
+  }
+}
 
 // --- where Hermes lives ---------------------------------------------------------------------------------
 
@@ -442,7 +472,7 @@ async function readSessions(dir, deps) {
   let folder = null
   try {
     await mkdir(deps.stateDir, { recursive: true })
-    folder = await mkdtemp(join(deps.stateDir, 'hermes-db-'))
+    folder = await mkdtemp(join(deps.stateDir, COPY_PREFIX))
     const copy = join(folder, 'state.db')
     await copyFile(path, copy, constants.COPYFILE_EXCL)
     if (walSize !== 'missing') {

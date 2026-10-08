@@ -151,3 +151,12 @@ test('the Mac section says what moving the pin to this version starts doing, and
   const unverified = flat(doc.slice(doc.lastIndexOf('### Not verified yet')))
   assert.match(unverified, /records the empty folder .* as a project/)
 })
+
+test('the status README says how leftover copies, a state folder in the clone and a part-way write are handled', async () => {
+  const doc = flat(await read('.agent-team/status/README.md'))
+  assert.match(doc, /Refused \(exit 2\) when it is inside the `--clone` folder/)
+  assert.match(doc, /any `hermes-db-\.\.\.` folder in the state folder older than an hour is deleted/)
+  assert.match(doc, /never a link/)
+  assert.match(doc, /Some snapshot files may have been written; check \.agent-team\/status and runs\/heartbeat/)
+  assert.match(doc, /Nothing was written/)
+})
