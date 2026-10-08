@@ -25,6 +25,7 @@ import { isoSeconds, isPlainObject, readJson } from './util.mjs'
 import { claudeConfigDir, claudeStatePath } from './claude-limits.mjs'
 import { codexHomeDir } from './codex-limits.mjs'
 import { isInsideFolder } from './commit.mjs'
+import { liveCheck } from './claude-live.mjs'
 
 const UNREADABLE = { status: 'unavailable', why: 'could not be read' }
 const SCOPE_ORDER = Object.keys(SERVER_SCOPES)
@@ -122,8 +123,9 @@ async function needsSignIn(deps) {
   return new Set(cache.state === 'ok' && isPlainObject(cache.value) ? Object.keys(cache.value) : [])
 }
 
-// Returns a found block without `live` (the live check adds it), or a not found / unavailable one.
-export async function claudeServersFromFiles(deps) {
+// Every server the files name, before the name rule: { status: 'found', entries, projectServers },
+// or a not found / unavailable block.
+async function claudeEntriesFromFiles(deps) {
   const state = await readJson(claudeStatePath(deps))
   if (state.state === 'broken') return { ...UNREADABLE }
   const settings = await readJson(join(claudeConfigDir(deps), 'settings.json'))
@@ -145,8 +147,62 @@ export async function claudeServersFromFiles(deps) {
     if (isPlainObject(project?.mcpServers)) projectServers += Object.keys(project.mcpServers).length
   }
 
-  const { kept, hidden, more } = keepNames(entries, deps.identity, CAPS.claudeServers, (entry) => entry.name, (entry) => SCOPE_ORDER.indexOf(entry.scope))
-  return { status: 'found', servers: kept.map(({ name, scope, transport, state: s }) => ({ name, scope, transport, state: s })), projectServers, hidden, more }
+  return { status: 'found', entries, projectServers }
+}
+
+// The live list's state wins for every server the files named. A server only the live list has
+// is added when its name says where it comes from - "plugin:" or "claude.ai " - and otherwise
+// counted, not named: from the empty folder it could still be a project's own server, and those
+// are counted, never named (decision D2).
+export function mergeLive(entries, rows) {
+  const merged = entries.map((entry) => ({ ...entry }))
+  const byName = new Map()
+  for (const entry of merged) if (!byName.has(entry.name)) byName.set(entry.name, entry)
+  let unnamed = 0
+  for (const row of rows) {
+    const known = byName.get(row.name)
+    if (known) {
+      known.state = row.state
+      continue
+    }
+    let added = null
+    if (row.name.startsWith('plugin:')) added = { name: row.name, scope: 'plugin', transport: 'unknown', state: row.state }
+    else if (row.name.startsWith('claude.ai ')) added = { name: row.name, scope: 'claude.ai', transport: 'web', state: row.state }
+    if (!added) {
+      unnamed += 1
+      continue
+    }
+    merged.push(added)
+    byName.set(added.name, added)
+  }
+  return { entries: merged, unnamed }
+}
+
+function claudeBlock(entries, projectServers, identity, extraHidden = 0) {
+  const { kept, hidden, more } = keepNames(entries, identity, CAPS.claudeServers, (entry) => entry.name, (entry) => SCOPE_ORDER.indexOf(entry.scope))
+  return {
+    servers: kept.map(({ name, scope, transport, state }) => ({ name, scope, transport, state })),
+    projectServers,
+    hidden: hidden + extraHidden,
+    more
+  }
+}
+
+// The file list alone, as a found block without `live`, or a not found / unavailable block.
+export async function claudeServersFromFiles(deps) {
+  const files = await claudeEntriesFromFiles(deps)
+  if (files.status !== 'found') return files
+  return { status: 'found', ...claudeBlock(files.entries, files.projectServers, deps.identity) }
+}
+
+// The file list, then the live check merged in. Nothing is started when the files are not there.
+async function claudeServers(deps) {
+  const files = await claudeEntriesFromFiles(deps)
+  if (files.status !== 'found') return files
+  const live = await (deps.sources?.claudeLive ?? liveCheck)(deps)
+  if (live.live !== 'checked') return { status: 'found', live: live.live, ...claudeBlock(files.entries, files.projectServers, deps.identity) }
+  const { entries, unnamed } = mergeLive(files.entries, live.rows)
+  return { status: 'found', live: 'checked', ...claudeBlock(entries, files.projectServers, deps.identity, unnamed) }
 }
 
 // --- Codex ----------------------------------------------------------------------------------------------
@@ -263,14 +319,13 @@ async function safely(read, deps) {
 }
 
 export async function collectConnections(deps, computer) {
-  const [claude, codex] = await Promise.all([safely(claudeServersFromFiles, deps), safely(codexFromConfig, deps)])
+  const [claude, codex] = await Promise.all([safely(claudeServers, deps), safely(codexFromConfig, deps)])
   return {
     schema: CONNECTIONS_SCHEMA,
     takenAt: isoSeconds(deps.now),
     computer,
     tools: [],
-    // Until the live check lands, the file list is all there is.
-    claude: claude.status === 'found' ? { status: 'found', live: 'could not run', ...claude } : claude,
+    claude,
     codex
   }
 }
