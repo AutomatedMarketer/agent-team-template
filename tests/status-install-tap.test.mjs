@@ -219,6 +219,39 @@ test('running it twice writes nothing the second time and makes no second backup
   }
 })
 
+test('a settings.json with Windows line endings keeps them', async () => {
+  const temp = await tempHome()
+  try {
+    await writeFile(temp.settings, `${JSON.stringify(someSettings, null, 2).replaceAll('\n', '\r\n')}\r\n`)
+    await installTap(deps(temp))
+    const text = await readFile(temp.settings, 'utf8')
+    assert.ok(text.includes('\r\n'))
+    assert.doesNotMatch(text, /[^\r]\n/, 'a line ends with a bare newline')
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+// Claude Code itself writes settings.json (/config, /statusline, permission answers). If it does
+// so while the installer runs, renaming the installer's version over it would throw that change
+// away. So the file is read again just before the rename, and a difference stops everything.
+test('if settings.json changes while the installer runs, it stops and keeps the other change', async () => {
+  const temp = await tempHome()
+  try {
+    await writeFile(temp.settings, JSON.stringify(someSettings, null, 2))
+    const theirs = JSON.stringify({ ...someSettings, model: 'sonnet' }, null, 2)
+    const result = await installTap(deps(temp, { beforeWrite: () => writeFile(temp.settings, theirs) }))
+    assert.equal(result.action, 'refuse')
+    assert.match(result.why, /changed while/)
+    assert.equal(await readFile(temp.settings, 'utf8'), theirs, 'the other change was lost')
+    assert.deepEqual((await filesIn(join(temp.home, '.claude'))).filter((name) => name.endsWith('.tmp')), [])
+    // The copy made for this run is not left behind with nothing pointing at it.
+    assert.equal(existsSync(join(temp.home, '.local', 'share', 'agent-status', 'tap')), false)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
 // Windows editors sometimes save a byte-order mark at the start. JSON.parse refuses it, so the
 // file looked "not plain JSON" when it was. The mark is set aside to read the file, and kept, so
 // nothing but statusLine changes.

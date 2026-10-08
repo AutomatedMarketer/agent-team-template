@@ -115,8 +115,12 @@ function serialise(value, originalText) {
   const indent = /^\{\s*\n([ \t]+)"/.exec(body ?? '')?.[1] ?? '  '
   const ending = body === null || body === undefined || body.endsWith('\n') ? '\n' : ''
   const mark = originalText?.startsWith(BOM) ? BOM : ''
-  return `${mark}${JSON.stringify(value, null, indent)}${ending}`
+  const text = `${JSON.stringify(value, null, indent)}${ending}`
+  // Windows line endings stay Windows line endings.
+  return `${mark}${body?.includes('\r\n') ? text.replaceAll('\n', '\r\n') : text}`
 }
+
+const CHANGED_UNDERNEATH = 'settings.json changed while the installer was running (Claude Code may have saved it just then), so nothing was written over it. Run the installer again'
 
 const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-')
 
@@ -165,6 +169,7 @@ export async function installTap(deps) {
     const plan = planRemove({ settings })
     if (deps.dryRun || plan.action !== 'remove') return { ...plan, path, backup: null }
     const written = await writeSettings(path, plan, originalText, deps)
+    if (written.changedUnderneath) return { ...refuse(CHANGED_UNDERNEATH), path, backup: written.backup }
     await removeCopy(copyRoot, currentCopy)
     return { ...plan, ...written, removedCopy: currentCopy }
   }
@@ -183,9 +188,18 @@ export async function installTap(deps) {
   const { repaired } = await ensureCopy(copyRoot, files)
   if (plan.action === 'unchanged') return { ...plan, path, backup: null, copy, repairedCopy: repaired }
   const written = await writeSettings(path, plan, originalText, deps)
+  if (written.changedUnderneath) {
+    // The new copy is not pointed at by anything; the one in use stays.
+    if (copy !== currentCopy) await removeCopy(copyRoot, copy)
+    return { ...refuse(CHANGED_UNDERNEATH), path, backup: written.backup }
+  }
   if (currentCopy && currentCopy !== copy) await removeCopy(copyRoot, currentCopy)
   return { ...plan, ...written, copy, repairedCopy: repaired }
 }
+
+// What is on disk now, for the last check before the rename: the text, null when there is no
+// file, or undefined when it cannot be read (which counts as changed).
+const currentText = (path) => readFile(path, 'utf8').catch((error) => (error?.code === 'ENOENT' ? null : undefined))
 
 async function writeSettings(path, plan, originalText, deps) {
   // The backup first. If that fails, nothing is changed.
@@ -204,6 +218,16 @@ async function writeSettings(path, plan, originalText, deps) {
     await writeFile(temporary, serialise(plan.next, originalText), mode === null ? undefined : { mode })
     // writeFile's mode passes through the umask; chmod sets exactly the original.
     if (mode !== null) await chmod(temporary, mode)
+    // A test seam: lets a test play Claude Code saving the file at the worst moment.
+    if (typeof deps.beforeWrite === 'function') await deps.beforeWrite()
+    // The last check. If the file is not what was read, someone else wrote it in between, and
+    // renaming over it would throw their change away. What remains is the moment between this
+    // read and the rename - milliseconds - which nothing short of a lock Claude Code does not
+    // offer can close; the backup covers it.
+    if ((await currentText(path)) !== originalText) {
+      await rm(temporary, { force: true }).catch(() => {})
+      return { path, backup, changedUnderneath: true }
+    }
     await rename(temporary, target)
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {})

@@ -171,7 +171,13 @@ earlier command fails, the bar is left empty rather than showing an error.
   link (a dotfiles repo), the file it points to is changed and the link stays a link; the file's
   permissions are kept, so a private (0600) file stays private.
 - **Backup first.** Before any change it copies the file to
-  `settings.json.before-usage-tap-<UTC time>.bak` beside it.
+  `settings.json.before-usage-tap-<UTC time>.bak` beside it (`-2`, `-3`, ... if that name is taken -
+  a backup never overwrites another). Windows line endings and a leading byte-order mark are kept.
+- **It stops if the file changes underneath it.** Claude Code writes `settings.json` too. Just
+  before swapping in the new file, the installer reads the file again; if it is not what it read
+  at the start, it stops, writes nothing over it, and says to run it again. What remains is the
+  few milliseconds between that last read and the swap, which nothing short of a lock Claude Code
+  does not offer can close - the backup covers it.
 - **It runs a copy, never your repo.** The status line runs after every Claude reply, with no
   permission prompt. If it ran the tap out of your team repo's working copy, anyone who can push to
   the team repo would choose code that runs on your computer after your next pull - the same reason
