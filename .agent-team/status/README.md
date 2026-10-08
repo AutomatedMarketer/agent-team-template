@@ -137,6 +137,14 @@ node scripts/install-usage-tap.mjs             # install, keeping your status li
 node scripts/install-usage-tap.mjs --remove    # put back exactly what you had
 ```
 
+The status line never runs the tap from this repo. It runs after every Claude reply with no
+permission prompt, so if it ran the working copy, anyone who can push to the team repo would choose
+code that runs on your computer after your next pull - the same reason the Mac runs the collector
+from a checkout pinned by hand. The installer copies `usage-tap.mjs` and every file it imports to
+`~/.local/share/agent-status/tap/<hash>/` (Windows: `%LOCALAPPDATA%\agent-status\tap\<hash>\`),
+checks the copy, and points the status line there. A pull does not change the copy; running the
+installer again is the deliberate update, and `--remove` deletes the copy it made.
+
 The installer changes only the `statusLine` key and backs the file up first. The tap's reading is
 written as `claude-code-statusline`, its own name in the shared contract, and the dashboard shows it
 as official: "from Claude Code’s status line", with no "unofficial" label. When the tap's reading is

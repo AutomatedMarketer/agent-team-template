@@ -38,12 +38,14 @@ async function tempHome() {
   return { root, home, settings: join(home, '.claude', 'settings.json'), cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
+// The installer copies the tap out of `sourceTap` into the temporary home before pointing the
+// status line at the copy, so `sourceTap` is the real script in this repo.
 const deps = (temp, extra = {}) => ({
   home: temp.home,
   env: {},
   platform: 'darwin',
   nodePath: NODE,
-  tapPath: TAP,
+  sourceTap: join(repoRoot, 'scripts', 'usage-tap.mjs'),
   now: STAMP,
   exists: () => false,
   ...extra
@@ -256,7 +258,8 @@ test('a settings.json that is not valid JSON is refused, untouched', async () =>
 // --- the real script and the real shells ----------------------------------------------------------------
 
 const tempEnv = (temp) => {
-  const env = { HOME: temp.home, USERPROFILE: temp.home, CLAUDE_CONFIG_DIR: join(temp.home, '.claude'), PATH: process.env.PATH ?? '' }
+  // LOCALAPPDATA too: on Windows the tap's copy goes there, and it must be the temporary one.
+  const env = { HOME: temp.home, USERPROFILE: temp.home, LOCALAPPDATA: join(temp.home, 'AppData', 'Local'), CLAUDE_CONFIG_DIR: join(temp.home, '.claude'), PATH: process.env.PATH ?? '' }
   // Windows PowerShell 5.1 starts and silently does nothing without these. A real Claude Code
   // session always has them; this hand-built environment has to add them.
   for (const name of ['SystemRoot', 'windir', 'PATHEXT', 'ComSpec']) {
@@ -279,7 +282,10 @@ test('the real script installs into a temporary home, and --remove undoes it', a
     const installed = await run(process.execPath, [join('scripts', 'install-usage-tap.mjs')], { cwd: repoRoot, env })
     assert.match(installed.stdout, /Installed/)
     assert.match(installed.stdout, /--remove/)
-    assert.ok(JSON.parse(await readFile(temp.settings, 'utf8')).statusLine.command.includes('usage-tap.mjs'))
+    const command = JSON.parse(await readFile(temp.settings, 'utf8')).statusLine.command
+    assert.ok(command.includes('usage-tap.mjs'))
+    assert.ok(command.includes(temp.home.replaceAll('\\', '/')), 'the tap was copied somewhere other than the temporary home')
+    assert.ok(!command.includes(repoRoot.replaceAll('\\', '/').replace(/\/$/, '')), 'the status line runs the repo copy')
     const removed = await run(process.execPath, [join('scripts', 'install-usage-tap.mjs'), '--remove'], { cwd: repoRoot, env })
     assert.match(removed.stdout, /Removed/)
     assert.deepEqual(JSON.parse(await readFile(temp.settings, 'utf8')), someSettings)

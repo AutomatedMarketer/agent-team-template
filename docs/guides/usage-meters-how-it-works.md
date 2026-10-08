@@ -155,20 +155,32 @@ rather than showing an error.
   `CLAUDE_CONFIG_DIR` names), and nothing else. Your indentation is kept.
 - **Backup first.** Before any change it copies the file to
   `settings.json.before-usage-tap-<UTC time>.bak` beside it.
-- **Absolute paths.** The command names the full path of `node` and of the tap, with forward
+- **It runs a copy, never your repo.** The status line runs after every Claude reply, with no
+  permission prompt. If it ran the tap out of your team repo's working copy, anyone who can push to
+  the team repo would choose code that runs on your computer after your next pull - the same reason
+  the always-on Mac runs the collector from a checkout pinned by hand (below). So the installer
+  copies `usage-tap.mjs` and every file it imports into a folder named after a hash of their
+  contents - `~/.local/share/agent-status/tap/<hash>/` on a Mac or Linux,
+  `%LOCALAPPDATA%\agent-status\tap\<hash>\` on Windows - checks the copy byte for byte, and points
+  the status line at the copy. Nothing in the copy imports anything from the repo. A pull does not
+  change it. **Running the installer again** is the deliberate update: new code gets a new folder,
+  and the old one is deleted. If the copy was changed after it was made, the next run puts it back.
+- **Absolute paths.** The command names the full path of `node` and of the copied tap, with forward
   slashes, quoted for the shell that will run it (`'...'` for sh and Git Bash; `& '...'` for
   PowerShell, which only runs a quoted path with `&`).
 - **Twice is the same as once.** It recognises its own command and never wraps itself. Run it again
-  after moving the repo and it updates the paths, still chaining your original status line.
+  after the tap's code changes and it moves to the new copy, still chaining your original status line.
 - **`--remove` undoes it exactly.** The earlier command travels inside the new one, so removing
-  puts back the very same `statusLine` - or none, if there was none.
+  puts back the very same `statusLine` - or none, if there was none. `--remove` also deletes the copy
+  of the tap it made.
 - **It refuses rather than guesses.** A settings file that is not plain JSON, a status line that is
   not a command, or a tap you wired in by hand: nothing changes, and it says why.
 - **`--dry-run`** shows the change and writes nothing.
 
-**Where it runs from matters.** The status line runs the tap from wherever the installer was. On
-the always-on Mac, install it from the **pinned code checkout** (see below), never from the data
-clone - the data clone is reset to whatever the team repo holds on every run.
+**Where you run the installer from still matters**, because that is the code it copies. On the
+always-on Mac, install it from the **pinned code checkout** (see below), never from the data clone -
+the data clone is reset to whatever the team repo holds on every run. On a laptop, read what
+changed in the tap before running the installer again.
 
 ---
 

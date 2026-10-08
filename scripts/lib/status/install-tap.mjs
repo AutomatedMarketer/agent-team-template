@@ -10,6 +10,7 @@
 import { join, dirname } from 'node:path'
 import { readFile, writeFile, rename, rm, copyFile } from 'node:fs/promises'
 import { isPlainObject } from './util.mjs'
+import { tapCopyRoot, collectTapFiles, copyDirFor, ensureCopy, copyDirOf, removeCopy } from './tap-copy.mjs'
 
 export const TAP_SCRIPT_NAME = 'usage-tap.mjs'
 
@@ -49,14 +50,21 @@ export function tapCommand({ nodePath, tapPath, dialect, earlier = null }) {
 // ending in usage-tap.mjs), an optional --then64. Anything else that mentions the tap was written
 // by hand, and is left alone.
 const QUOTED = String.raw`'(?:[^']|'\\''|'')*'`
-const OUR_FORM = new RegExp(String.raw`^(?:& )?${QUOTED} '(?:[^']|'\\''|'')*/${TAP_SCRIPT_NAME.replace('.', '\\.')}'(?: --then64 ([A-Za-z0-9_-]+))?$`)
+const OUR_FORM = new RegExp(String.raw`^(&? ?)${QUOTED} '((?:[^']|'\\''|'')*/${TAP_SCRIPT_NAME.replace('.', '\\.')})'(?: --then64 ([A-Za-z0-9_-]+))?$`)
 
 const mentionsTap = (statusLine) => isPlainObject(statusLine) && typeof statusLine.command === 'string' && statusLine.command.includes(TAP_SCRIPT_NAME)
 const isOurs = (statusLine) => mentionsTap(statusLine) && OUR_FORM.test(statusLine.command)
 
 export function earlierFrom(command) {
-  const encoded = OUR_FORM.exec(command ?? '')?.[1]
+  const encoded = OUR_FORM.exec(command ?? '')?.[3]
   return encoded ? Buffer.from(encoded, 'base64url').toString('utf8') : null
+}
+
+// The tap path inside one of our commands, unquoted, so --remove and an update can find the copy.
+export function tapPathFrom(command) {
+  const match = OUR_FORM.exec(command ?? '')
+  if (!match) return null
+  return match[1] === '& ' ? match[2].replaceAll("''", "'") : match[2].replaceAll("'\\''", "'")
 }
 
 const refuse = (why) => ({ action: 'refuse', why })
@@ -106,8 +114,10 @@ function serialise(value, originalText) {
 
 const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-')
 
-// deps: { home, env, platform, nodePath, tapPath, now, exists, remove?, dryRun? }
-// Returns the plan plus { path, backup }. Never throws for a file problem it can name.
+// deps: { home, env, platform, nodePath, sourceTap, now, exists, remove?, dryRun? }
+// `sourceTap` is scripts/usage-tap.mjs in the repo the installer runs from. It is never what the
+// status line runs: it is copied first (tap-copy.mjs) and the status line runs the copy.
+// Returns the plan plus { path, backup, copy, repairedCopy }. Never throws for a file problem it can name.
 export async function installTap(deps) {
   const path = settingsPathFor(deps)
   let originalText = null
@@ -126,10 +136,36 @@ export async function installTap(deps) {
     if (!isPlainObject(settings)) return { ...refuse('settings.json does not hold a settings object, so it was not touched'), path }
   }
 
-  const plan = deps.remove
-    ? planRemove({ settings })
-    : planInstall({ settings, nodePath: deps.nodePath, tapPath: deps.tapPath, dialect: dialectFor(deps.platform, deps.env, deps.exists) })
-  if (deps.dryRun || plan.action === 'refuse' || plan.action === 'unchanged') return { ...plan, path, backup: null }
+  const copyRoot = tapCopyRoot(deps)
+  const currentCopy = copyDirOf(copyRoot, tapPathFrom(settings?.statusLine?.command))
+
+  if (deps.remove) {
+    const plan = planRemove({ settings })
+    if (deps.dryRun || plan.action !== 'remove') return { ...plan, path, backup: null }
+    const written = await writeSettings(path, plan, originalText, deps)
+    await removeCopy(copyRoot, currentCopy)
+    return { ...plan, ...written, removedCopy: currentCopy }
+  }
+
+  let files
+  try {
+    files = await collectTapFiles(deps.sourceTap)
+  } catch (error) {
+    return { ...refuse(`the tap could not be copied: ${error.message}`), path }
+  }
+  const copy = copyDirFor(copyRoot, files)
+  const plan = planInstall({ settings, nodePath: deps.nodePath, tapPath: join(copy, TAP_SCRIPT_NAME), dialect: dialectFor(deps.platform, deps.env, deps.exists) })
+  if (deps.dryRun || plan.action === 'refuse') return { ...plan, path, backup: null, copy }
+
+  // The copy first, checked, so the status line never points at a folder that is not there yet.
+  const { repaired } = await ensureCopy(copyRoot, files)
+  if (plan.action === 'unchanged') return { ...plan, path, backup: null, copy, repairedCopy: repaired }
+  const written = await writeSettings(path, plan, originalText, deps)
+  if (currentCopy && currentCopy !== copy) await removeCopy(copyRoot, currentCopy)
+  return { ...plan, ...written, copy, repairedCopy: repaired }
+}
+
+async function writeSettings(path, plan, originalText, deps) {
 
   // The backup first. If that fails, nothing is changed.
   let backup = null
@@ -146,5 +182,5 @@ export async function installTap(deps) {
     await rm(temporary, { force: true }).catch(() => {})
     throw error
   }
-  return { ...plan, path, backup, folder: dirname(path) }
+  return { path, backup, folder: dirname(path) }
 }

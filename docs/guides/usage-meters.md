@@ -65,6 +65,11 @@ Type these into a terminal, in your team repo folder.
 
    It saves a backup of your Claude Code settings first. It tells you where the backup went.
 
+   It also puts a **copy of the tap** in a folder of its own, and runs that copy. Why: the tap runs
+   after every reply. If it ran from your team repo, anyone who can change your repo could change
+   what runs on your computer. A `git pull` does not change the copy by itself. To take a newer tap,
+   run the installer again.
+
 3. **Use Claude Code as normal.** Send it one message. After Claude's first reply, the bottom bar
    shows something like `5h 18% · wk 49%`.
    - Already had your own status line? You will still see yours. The tap works quietly behind it.
@@ -133,7 +138,8 @@ You only need **Always Allow** for an always-on Mac that runs by itself. On a la
 
 Do any of these. Each one is safe on its own.
 
-1. **Take the tap out of Claude Code.** This puts back exactly the status line you had before:
+1. **Take the tap out of Claude Code.** This puts back exactly the status line you had before, and
+   deletes the copy of the tap:
 
    ```bash
    node scripts/install-usage-tap.mjs --remove
@@ -173,4 +179,4 @@ Do any of these. Each one is safe on its own.
 | "Nothing changed: your status line already runs usage-tap.mjs..." | You added the tap by hand before. The installer leaves that alone. Edit it yourself, or remove it first |
 | "settings.json is not plain JSON" | Your Claude Code settings file has a comment or a stray comma in it. Fix that first. Nothing was changed |
 | The dashboard says **unavailable** | Read the reason under it. Use Claude Code for one reply, then run `/snapshot` again |
-| You moved your team repo to another folder | Run `node scripts/install-usage-tap.mjs` again from the new folder. It updates itself |
+| You pulled a newer team repo and want the newer tap | Run the installer again: `node scripts/install-usage-tap.mjs`. The copy never changes by itself |

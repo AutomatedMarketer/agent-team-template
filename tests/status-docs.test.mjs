@@ -391,3 +391,26 @@ test('the status README documents the tap, the installer and the new reasons', a
   assert.ok(sources.indexOf('second choice') > sources.indexOf('first choice'))
   assert.ok(sources.indexOf('third choice') > sources.indexOf('second choice'))
 })
+
+// The status line runs a COPY of the tap, never the team repo's working copy: a push to the team
+// repo must not choose code that runs after every reply. All three docs have to say so, with the
+// folders the code really uses, and say that re-running the installer is the update.
+test('all three docs say the status line runs a pinned copy of the tap, where it lives, and why', async () => {
+  const { tapCopyRoot } = await import('../scripts/lib/status/tap-copy.mjs')
+  const mac = tapCopyRoot({ home: '~', env: {}, platform: 'darwin' }).replaceAll('\\', '/')
+  const windows = tapCopyRoot({ home: 'H', env: { LOCALAPPDATA: '%LOCALAPPDATA%' }, platform: 'win32' }).replaceAll('/', '\\')
+  for (const [name, text] of [['the explainer', await explainer()], ['the status README', await statusReadme()]]) {
+    const doc = text.replace(/\s+/g, ' ')
+    assert.ok(doc.includes(mac), `${name} does not give ${mac}`)
+    assert.ok(doc.includes(windows), `${name} does not give ${windows}`)
+    assert.match(doc, /anyone who can push to the team repo/i, `${name} does not say why`)
+    assert.match(doc, /same reason/i, `${name} does not tie it to the Mac pin`)
+    assert.match(doc, /run(ning)? the installer again/i, `${name} does not say how to update`)
+    assert.match(doc, /--remove`?[^.]*deletes? the cop(y|ies)/i, `${name} does not say --remove deletes the copy`)
+  }
+  const doc = (await guide()).replace(/\s+/g, ' ')
+  assert.match(doc, /copy of the tap/i)
+  assert.match(doc, /does not change (it|the copy) by itself|never changes by itself/i)
+  assert.match(doc, /run the installer again/i)
+  assert.doesNotMatch(doc, /You moved your team repo/, 'the guide still says moving the repo matters')
+})
