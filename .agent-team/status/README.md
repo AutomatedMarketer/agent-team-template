@@ -113,7 +113,7 @@ The exact shape, and the contract the dashboard reads it by, are in
 
 | Number | Source | Labelled |
 |---|---|---|
-| Claude limits, first choice | **Official.** The reading Claude Code hands its status line, kept by the status line tap (below) in `~/.local/state/agent-status/claude-statusline.json` (Windows: `%LOCALAPPDATA%\agent-status\claude-statusline.json`), if under 6 hours old and not every window in it has reset since | `claude-code-saved` |
+| Claude limits, first choice | **Official.** The reading Claude Code hands its status line, kept by the status line tap (below) in `~/.local/state/agent-status/claude-statusline.json` (Windows: `%LOCALAPPDATA%\agent-status\claude-statusline.json`), if under 6 hours old and not every window in it has reset since | `claude-code-statusline` |
 | Claude limits, second choice | The address Claude Code's `/usage` screen calls. The sign-in comes from the Mac Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `unofficial-live` |
 | Claude limits, third choice | The last reading Claude Code saved in `~/.claude.json`, if under 6 hours old | `claude-code-saved` |
 | Claude plan | The plan fields of the same sign-in | - |
@@ -138,10 +138,9 @@ node scripts/install-usage-tap.mjs --remove    # put back exactly what you had
 ```
 
 The installer changes only the `statusLine` key and backs the file up first. The tap's reading is
-written as `claude-code-saved`: it is a reading Claude Code produced and this computer saved, and the
-contract's source names are shared with the dashboard. So the dashboard currently labels it
-"unofficial · saved copy" too. When the tap's reading is fresh, the live call is skipped and the
-token never leaves the computer.
+written as `claude-code-statusline`, its own name in the shared contract, and the dashboard shows it
+as official: "from Claude Code’s status line", with no "unofficial" label. When the tap's reading is
+fresh, the live call is skipped and the token never leaves the computer.
 
 The tap only has a reading where Claude Code was used **interactively** in the last 6 hours: the
 status line does not run in headless `claude -p` jobs. On the always-on Mac, install the tap from

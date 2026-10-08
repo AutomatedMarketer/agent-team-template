@@ -42,6 +42,7 @@ test('the status README names the file, the format and the command', async () =>
     '--commit',
     '--clone',
     'unofficial-live',
+    'claude-code-statusline',
     'claude-code-saved',
     'codex-session-log'
   ]) {
@@ -225,10 +226,17 @@ test('the beginner guide explains its words before it uses them, and every label
   }
   assert.ok(doc.indexOf('## Words used in this guide') < doc.indexOf('## Path A'), 'the words are explained after they are used')
   const labels = doc.slice(doc.indexOf('## What you will see'), doc.indexOf('## The Mac "Always Allow" box'))
-  for (const label of ['saved copy', 'unofficial', 'estimate', 'not found', 'unavailable', 'reset since this reading', 'older than 8 hours']) {
+  for (const label of ['from Claude Code’s status line', 'saved copy', 'unofficial', 'estimate', 'not found', 'unavailable', 'reset since this reading', 'older than 8 hours']) {
     assert.ok(labels.includes(`**${label}**`), `the guide does not explain "${label}"`)
   }
   assert.match(labels, /tap's numbers come straight from Claude Code/)
+  // The tap's reading has its own name now, and the board shows it as official.
+  const rows = labels.split('\n')
+  const officialRow = rows.find((line) => line.startsWith('| **from Claude Code’s status line**')) ?? ''
+  assert.match(officialRow, /official/i)
+  assert.match(officialRow, /tap/)
+  const savedRow = rows.find((line) => line.startsWith('| **saved copy**')) ?? ''
+  assert.doesNotMatch(savedRow, /tap/, 'the guide still says the tap reading is a saved copy')
   assert.match(doc, /Claude Pro or Max/)
 })
 
@@ -272,12 +280,12 @@ test('the beginner guide is written in short sentences', async () => {
 
 test('the explainer names every source in the order the collector tries them', async () => {
   const doc = await explainer()
-  const table = doc.slice(doc.indexOf('### Claude limits'), doc.indexOf('### Why the tap is written as'))
+  const table = doc.slice(doc.indexOf('### Claude limits'), doc.indexOf('### Why the tap has its own name'))
   const order = ['The status line tap', 'The live call', "Claude Code's saved reading", '**unavailable**']
   const positions = order.map((name) => table.indexOf(name))
   assert.ok(positions.every((position) => position >= 0), 'a source is missing from the order table')
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'the order table is out of order')
-  for (const source of ['claude-code-saved', 'unofficial-live', 'codex-session-log', 'estimate']) {
+  for (const source of ['claude-code-statusline', 'claude-code-saved', 'unofficial-live', 'codex-session-log', 'estimate']) {
     assert.ok(doc.includes(`\`${source}\``), `the explainer never names ${source}`)
   }
   assert.match(doc, /step 2 never runs, so \*\*your sign-in never leaves the computer\*\*/)
@@ -297,13 +305,32 @@ test('the guides give the tap file paths the code actually uses', async () => {
   assert.ok(undo.includes(posix.dirname(mac)), 'the undo step deletes another folder than the tap uses')
 })
 
-test('the explainer says why the tap is written as claude-code-saved, and what that costs', async () => {
+test('the explainer says the tap has its own source name, and the board shows it as official', async () => {
   const doc = await explainer()
-  const why = doc.slice(doc.indexOf('### Why the tap is written as'), doc.indexOf('### The other numbers'))
+  const start = doc.indexOf('### Why the tap has its own name')
+  assert.ok(start > 0, 'no section on the tap\'s source name')
+  const why = doc.slice(start, doc.indexOf('### The other numbers'))
   assert.match(why, /tests\/fixtures\/usage-parity\.json/)
-  assert.match(why, /no contract change/)
-  assert.match(why, /unofficial · saved copy/)
-  assert.match(why, /claude-code-statusline/)
+  assert.match(why, /`claude-code-statusline`/)
+  assert.match(why, /from Claude Code’s status line/)
+  assert.match(why, /official/)
+  const table = doc.slice(doc.indexOf('### Claude limits'), start)
+  const tapRow = table.split('\n').find((line) => line.startsWith('| 1 |')) ?? ''
+  assert.match(tapRow, /`claude-code-statusline` \|$/)
+})
+
+// Every source name the contract allows is one the explainer and the status README explain, and the
+// tap's reading is never again described as an unofficial saved copy.
+test('the guides name every contract source, and none calls the tap reading unofficial', async () => {
+  const { SOURCES } = await import('../scripts/lib/status/schema.mjs')
+  const docs = [['the explainer', await explainer()], ['the status README', await statusReadme()], ['the guide', await guide()]]
+  for (const [name, doc] of docs.slice(0, 2)) {
+    for (const source of SOURCES) assert.ok(doc.includes(`\`${source}\``), `${name} never names ${source}`)
+  }
+  for (const [name, doc] of docs) {
+    assert.doesNotMatch(doc, /tap[^.|]*unofficial · saved copy|unofficial · saved copy[^.|]*tap/i, `${name} still labels the tap reading unofficial`)
+    assert.doesNotMatch(doc, /tap's reading is\s+written as `claude-code-saved`/, `${name} still files the tap as claude-code-saved`)
+  }
 })
 
 test('the explainer covers chaining, and the trade-off of running the earlier command through a shell', async () => {
@@ -359,6 +386,8 @@ test('the status README documents the tap, the installer and the new reasons', a
   }
   const sources = doc.slice(doc.indexOf('## Where each number comes from'), doc.indexOf('### The status line tap'))
   assert.ok(sources.indexOf('first choice | **Official.**') > 0, 'the tap is not listed as the first choice')
+  const firstRow = sources.split('\n').find((line) => line.includes('first choice')) ?? ''
+  assert.match(firstRow, /`claude-code-statusline` \|$/)
   assert.ok(sources.indexOf('second choice') > sources.indexOf('first choice'))
   assert.ok(sources.indexOf('third choice') > sources.indexOf('second choice'))
 })

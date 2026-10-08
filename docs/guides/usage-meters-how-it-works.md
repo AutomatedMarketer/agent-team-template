@@ -66,7 +66,7 @@ The collector tries these **in this order** and uses the first that works:
 
 | # | Source | Official? | Written as |
 |---|---|---|---|
-| 1 | **The status line tap.** Claude Code's own reading, which it hands to the status line ([documented here](https://code.claude.com/docs/en/statusline)). Used if it is **under 6 hours old** and at least one of its windows has not reset since | **Yes** | `claude-code-saved` |
+| 1 | **The status line tap.** Claude Code's own reading, which it hands to the status line ([documented here](https://code.claude.com/docs/en/statusline)). Used if it is **under 6 hours old** and at least one of its windows has not reset since | **Yes** | `claude-code-statusline` |
 | 2 | **The live call.** Your Claude sign-in (Mac Keychain first, then `~/.claude/.credentials.json`) is sent to the address Claude Code's `/usage` screen uses | No - undocumented | `unofficial-live` |
 | 3 | **Claude Code's saved reading** in `~/.claude.json`, if under 6 hours old | No - undocumented | `claude-code-saved` |
 | 4 | Nothing worked: **unavailable**, with the most useful reason | - | - |
@@ -76,19 +76,18 @@ When the tap's reading is fresh, step 2 never runs, so **your sign-in never leav
 The tap only has numbers on a computer where someone **used Claude Code interactively** in the last
 6 hours, on a Pro or Max plan, after Claude's first reply in that session. The status line only
 runs in interactive sessions, so headless runs (`claude -p`) never reach the tap, and a Mac that only
-runs jobs on a schedule will usually fall through to step 2 or 3. That is why the backup steps are kept. The limits are per account, not
-per computer, so a reading from any of your computers is a true reading of your plan.
+runs jobs on a schedule will usually fall through to step 2 or 3. That is why the backup steps are
+kept. The limits are per account, not per computer, so a reading from any of your computers is a
+true reading of your plan.
 
-### Why the tap is written as `claude-code-saved`
+### Why the tap has its own name
 
 The list of source names is a **shared contract** between this repo and the dashboard
-(`tests/fixtures/usage-parity.json`, the same bytes in both repos). Adding a new name means changing
-both repos together. The tap's reading **is** a reading Claude Code produced and this computer
-saved, so `claude-code-saved` is true, and no contract change was needed.
-
-The cost: the dashboard labels every `claude-code-saved` reading "unofficial · saved copy", so the
-official reading wears a cautious label. The numbers are right; only the label under-claims. Giving
-the tap its own name (for example `claude-code-statusline`) is a planned two-repo change.
+(`tests/fixtures/usage-parity.json`, the same bytes in both repos, checked by a test in each). The
+tap's reading is written as `claude-code-statusline`, a name of its own, because it is the one
+Claude reading Anthropic documents. So the dashboard shows it as official -
+"from Claude Code’s status line" - with no "unofficial" label. The two backup readings keep their own names
+(`unofficial-live` and `claude-code-saved`) and their "unofficial" label.
 
 ### The other numbers
 
@@ -206,8 +205,8 @@ Keychain answer)`. On a Mac a live reason also says where the sign-in came from:
 the file because the Keychain gave no answer or an unreadable one.
 
 The collector's printed summary lists **every source it tried**, in order, under the Claude limits
-line - so you can tell a tap reading from a `~/.claude.json` one, and see each reason, not just the
-last:
+line - so when a backup was used you can see why each earlier source was passed over, not just the
+last reason:
 
 ```
 - Claude limits found (claude-code-saved)

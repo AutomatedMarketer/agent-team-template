@@ -90,8 +90,9 @@ Each number on the dashboard has a small label. Here is what each label means.
 
 | You see | What it means | Do you need to do anything? |
 |---|---|---|
-| **saved copy** | The reading was made by Claude Code and kept on your computer. It came from the tap, or from Claude Code's own saved file | No |
-| **unofficial** | Anthropic has not published the place this reading came from. It is right today, but it could stop working without warning. Right now the dashboard also puts this label on the tap's reading, which IS official - see below | No |
+| **from Claude Code’s status line** | The official numbers. Claude Code gave them to the tap, and Anthropic documents them | No |
+| **saved copy** | A backup. Claude Code saved this reading in its own file on your computer | No |
+| **unofficial** | Anthropic has not published the place this reading came from. It is right today, but it could stop working without warning. Only the backup methods get this label | No |
 | **from Codex's own log** | The Codex numbers came from Codex's own records on your computer | No |
 | **estimate** | A rough count of your Claude Code use, from its logs on this one computer. It is never shown as a percentage | No |
 | **not found** | That thing is not on this computer. For example, no Codex numbers if you do not use Codex. This is normal | No |
@@ -99,9 +100,8 @@ Each number on the dashboard has a small label. Here is what each label means.
 | **reset since this reading** | The limit has reset since the reading was taken, so the old number no longer counts | No. Fresh numbers come with the next snapshot |
 | **older than 8 hours** | The reading may be out of date | Run `/snapshot` again |
 
-**About "unofficial" on the tap's reading.** The tap's numbers come straight from Claude Code. They
-are the official ones. But the dashboard has one label for every "saved copy", and today that label
-also says "unofficial". The numbers are still right. Only the label is cautious.
+**The best label to see.** The tap's numbers come straight from Claude Code. They are the official
+ones, so the dashboard shows them as **from Claude Code’s status line**, with no "unofficial" label.
 
 **Why "older than 6 hours" matters.** The tap only gets numbers while you are using Claude Code.
 If you have not used it on this computer for over 6 hours, the snapshot uses a backup method
