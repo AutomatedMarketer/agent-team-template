@@ -377,7 +377,7 @@ test('a Mac and a Hermes full of secrets, through a whole committed run: the fil
     // What it did keep: the jobs the wall shows, the Hermes jobs with good names - and a count of what was withheld.
     assert.deepEqual(doc.launchd.items.map((item) => item.label), ['local.donna.blog-watch', 'local.donna.security-changelog', 'local.donna.story-belt-daily'])
     assert.equal(doc.launchd.hidden, 2, 'the label with the username and the one with the email')
-    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Morning brief/ok', 'default/Weekly review/error', 'donna/Donna brief/error'])
+    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Morning brief/ok', 'default/Unnamed job/ok', 'default/Weekly review/error', 'donna/Donna brief/error'])
     assert.equal(doc.hermes.hidden, 2, 'the job named after an email, and the profile named after the person')
 
     const [claim] = await readdir(join(stateDir, 'claims'))

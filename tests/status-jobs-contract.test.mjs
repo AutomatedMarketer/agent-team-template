@@ -14,6 +14,7 @@ import {
   LOOKBACK_DAYS,
   LAUNCHD_STATES,
   HERMES_RESULTS,
+  UNNAMED_JOB,
   EXIT_CODE,
   CADENCE,
   LABEL,
@@ -21,7 +22,7 @@ import {
 } from '../scripts/lib/status/jobs-schema.mjs'
 import { MAX_COMPUTERS_SHOWN } from '../scripts/lib/status/connections-schema.mjs'
 import { COMPUTER_SLUG, STATUSES } from '../scripts/lib/status/schema.mjs'
-import { checkJobs, checkLabel } from '../scripts/lib/status/safe.mjs'
+import { checkJobs, checkLabel, checkConnectionName } from '../scripts/lib/status/safe.mjs'
 import { fakeClaudeToken, FAKE_EMAIL } from './helpers/fake-home.mjs'
 
 /* tests/fixtures/jobs-parity.json is the shared contract for the Readiness wall - the same bytes in
@@ -61,6 +62,13 @@ test('jobs parity: caps, grace, look-back, states, results and the exit-code ran
   assert.deepEqual(LAUNCHD_STATES, fixture.launchdStates)
   assert.deepEqual(HERMES_RESULTS, fixture.hermesResults)
   assert.deepEqual(EXIT_CODE, fixture.exitCode)
+})
+
+test('jobs parity: the name a nameless job is shown under matches', () => {
+  assert.equal(UNNAMED_JOB, fixture.unnamedJob)
+  assert.equal(UNNAMED_JOB, 'Unnamed job')
+  // It passes the name rule it stands in for.
+  assert.deepEqual(checkConnectionName(UNNAMED_JOB, 'name', identity), [])
 })
 
 test('jobs parity: the four cadence kinds and every bound on them match', () => {

@@ -5,7 +5,10 @@
 // byte for byte, in agent-cockpit too, and tests/status-jobs-contract.test.mjs fails if this file
 // drifts from it. The shape at the bottom is what safe.mjs enforces before anything is written.
 // Names, times, numbers and states only: a job's arguments, environment settings, folders, prompts,
-// error text and logs have no key here, so they cannot reach a file.
+// error text and logs have no key here, so they cannot reach a file. One thing is looked at and not
+// kept: Hermes names a job nobody named after the first 50 characters of its prompt, so the collector
+// reads a Hermes job's prompt, skills and script in memory, only to notice a name copied from them,
+// and writes UNNAMED_JOB in its place. Nothing of the prompt, not even a hash, is written.
 //
 // The file never says whether a job is on time. It carries when each job should have run
 // (dueAt, dueBeforeAt - worked out on the Mac in the job's own timezone, where the schedule is
@@ -30,6 +33,8 @@ export const GRACE_MINUTES = 30
 export const LOOKBACK_DAYS = 32
 
 export const LAUNCHD_STATES = ['running', 'loaded', 'not loaded']
+// What a Hermes job is called when it has no name of its own, or Hermes copied its name from what it runs.
+export const UNNAMED_JOB = 'Unnamed job'
 export const HERMES_RESULTS = ['ok', 'error', 'unknown']
 // launchctl's last exit status: a code, or minus the signal that stopped the job.
 export const EXIT_CODE = { min: -255, max: 255 }

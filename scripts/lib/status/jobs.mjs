@@ -28,17 +28,23 @@
 //                                     enabled, schedule.kind, schedule.expr, schedule.minutes,
 //                                     schedule.timezone, last_run_at, last_status. last_status
 //                                     becomes ok, error or unknown and nothing more.
+//                                     Also looked at, and not kept: the prompt, the skills and the
+//                                     script - only to tell whether the name is a copy of the first
+//                                     50 characters of one of them, as Hermes makes when nobody names
+//                                     a job. A copied name is written as "Unnamed job". Nothing of
+//                                     what they say, not a hash of it, is written.
 //   <profile>/config.yaml             the one top-level `timezone:` line, and no other line: it is
 //                                     the zone Hermes reads that profile's cron expressions in
 //                                     (hermes_time.py), so the times are only judged when it is the
 //                                     computer's own.
 // Never kept: the prompt, the script, where the job delivers or came from, its model, skills and
 // settings, and last_error and every other word of error text. Those are in the same file and are
-// dropped the moment the few values above are taken.
+// dropped the moment the few values above are taken (the prompt, skills and script after the name
+// check above).
 
 import { readdir, stat } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
-import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES } from './jobs-schema.mjs'
+import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, UNNAMED_JOB } from './jobs-schema.mjs'
 import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
 import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
@@ -271,15 +277,46 @@ function scheduleOf(schedule, zone, profileZone) {
   return { cadence: cadenceFromCron(schedule.expr) }
 }
 
+// Hermes names a job that has no name after the first 50 characters of what it runs: its prompt,
+// else its first skill, else its script (cron/jobs.py, create_job and _normalize_job_record; Python
+// counts characters, not UTF-16 units, and strips the text before and after). Such a name IS the
+// prompt, and a prompt can say anything. So a name equal to any of those, from the text as it is or
+// stripped, is a copy, and is not published.
+const firstFifty = (text) => Array.from(text).slice(0, 50).join('').trim()
+
+function copiedFromWhatItRuns(name, row) {
+  const wanted = name.trim()
+  if (!wanted) return false
+  const skills = [row.skill, ...(Array.isArray(row.skills) ? row.skills : typeof row.skills === 'string' ? [row.skills] : [])]
+  for (const source of [row.prompt, row.script, ...skills]) {
+    if (source === undefined || source === null) continue
+    const text = String(source)
+    if (firstFifty(text) === wanted || firstFifty(text.trim()) === wanted) return true
+  }
+  return false
+}
+
+// What the job is called on the wall, or null when its name is one the board would refuse. A record
+// with no name, or a name Hermes copied from what the job runs, is shown as unnamed; the id, which the
+// board already has, says which job it is.
+function shownName(row, identity) {
+  const given = row.name
+  if (given === undefined || given === null || given === '') return UNNAMED_JOB
+  if (typeof given !== 'string') return null
+  if (copiedFromWhatItRuns(given, row)) return UNNAMED_JOB
+  return checkConnectionName(given, 'name', identity).length ? null : given
+}
+
 // One job of the file as an item, or null when its id or name is one the board would refuse.
 function hermesItem(profile, row, deps, zone, profileZone) {
-  if (!isPlainObject(row) || typeof row.id !== 'string' || typeof row.name !== 'string') return null
-  if (checkLabel(row.id, 'id', deps.identity).length || checkConnectionName(row.name, 'name', deps.identity).length) return null
+  if (!isPlainObject(row) || typeof row.id !== 'string' || checkLabel(row.id, 'id', deps.identity).length) return null
+  const name = shownName(row, deps.identity)
+  if (name === null) return null
   const { cadence, oneShot } = scheduleOf(row.schedule, zone, profileZone)
   // Hermes reads a record with no `enabled` key as on, and anything else by whether it is truthy
   // (cron/jobs.py, is_job_runnable); a job that runs once is written as off.
   const enabled = (row.enabled === undefined ? true : Boolean(row.enabled)) && !oneShot
-  const item = { profile, id: row.id, name: row.name, enabled, cadence }
+  const item = { profile, id: row.id, name, enabled, cadence }
   const lastRunAt = hermesTime(row.last_run_at, deps.now)
   if (lastRunAt) item.lastRunAt = lastRunAt
   item.lastResult = resultOf(row.last_status)

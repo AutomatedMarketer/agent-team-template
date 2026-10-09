@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import { collectLaunchd, collectHermesJobs, collectJobs, machineZone, fitToFile, parseLaunchctlList, MAX_PLISTS_READ, HERMES_RESULT_WORDS } from '../scripts/lib/status/jobs.mjs'
 import { checkJobs } from '../scripts/lib/status/safe.mjs'
-import { JOBS_SCHEMA } from '../scripts/lib/status/jobs-schema.mjs'
+import { JOBS_SCHEMA, UNNAMED_JOB } from '../scripts/lib/status/jobs-schema.mjs'
 import {
   makeFakeHome,
   setMtime,
@@ -819,7 +819,6 @@ test('a job whose name, id or shape the board would refuse is dropped and counte
       hermesJob({ id: 'key', name: `Brief ${fakeClaudeToken()}` }),
       hermesJob({ id: 'dash', name: 'Brief — morning' }),
       hermesJob({ id: 'long', name: 'A very long job name that goes on and on past sixty characters in all' }),
-      hermesJob({ id: 'noname', name: undefined }),
       hermesJob({ id: 'numname', name: 7 }),
       hermesJob({ id: undefined, name: 'No id' }),
       hermesJob({ id: 'bad/id', name: 'Slash id' }),
@@ -832,9 +831,79 @@ test('a job whose name, id or shape the board would refuse is dropped and counte
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
     assert.deepEqual(block.items.map((item) => item.id), ['fine'])
     assert.equal(block.items[0].name, 'Fine job', 'the first of two with one id is the one kept')
-    assert.equal(block.hidden, 15)
+    assert.equal(block.hidden, 14)
     const text = JSON.stringify(block)
     for (const word of [FAKE_EMAIL, FAKE_USERNAME, fakeClaudeToken(), FAKE_UUID, '/Users/', '—']) assert.ok(!text.includes(word), `the answer holds ${word}`)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// Hermes names a job you did not name after the first 50 characters of what it runs: its prompt, else its
+// first skill, else its script (cron/jobs.py, create_job and _normalize_job_record). That name is the
+// prompt, and a prompt can say anything. It is never written; the job is shown as unnamed.
+const head50 = (text) => Array.from(text).slice(0, 50).join('').trim()
+
+test('a job Hermes named after its prompt, skill or script is written as "Unnamed job", whatever the prompt says', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const harmless = "Summarise yesterday's YouTube analytics and write a short report for the channel"
+    const sensitive = 'Email Dr Smith about my HIV test results and the follow up appointment next week'
+    const skill = 'research-daily-digest-of-competitor-pricing-changes-weekly-for-all-clients'
+    const script = '/Users/someone/bin/run-nightly-backup-of-client-database-to-the-vault.sh'
+    const astral = '\u{1D400}\u{1D401} '.repeat(40)
+    const padded = '   Weekly review of the sales pipeline for the whole team and the managers   '
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'harmless', name: head50(harmless), prompt: harmless }),
+      hermesJob({ id: 'sensitive', name: head50(sensitive), prompt: sensitive }),
+      hermesJob({ id: 'short', name: 'Morning brief', prompt: 'Morning brief' }),
+      hermesJob({ id: 'padcreate', name: head50(padded.trim()), prompt: padded }),
+      hermesJob({ id: 'padnormal', name: head50(padded), prompt: padded }),
+      hermesJob({ id: 'skills', name: head50(skill), prompt: '', skills: [skill, 'second'] }),
+      hermesJob({ id: 'skillone', name: head50(skill), prompt: '', skill }),
+      hermesJob({ id: 'script', name: head50(script), prompt: '', script, no_agent: true }),
+      hermesJob({ id: 'astral', name: head50(astral), prompt: astral }),
+      hermesJob({ id: 'nameless', name: undefined, prompt: sensitive }),
+      hermesJob({ id: 'nullname', name: null, prompt: sensitive }),
+      hermesJob({ id: 'emptyname', name: '', prompt: sensitive }),
+      // Named by a person: kept, even when it starts like the prompt, because it is not the copy Hermes makes.
+      hermesJob({ id: 'chosen', name: 'Weekly review', prompt: 'Weekly review of the sales pipeline for the whole team' }),
+      hermesJob({ id: 'chosen2', name: 'Client digest', prompt: sensitive })
+    ] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
+    for (const id of ['harmless', 'sensitive', 'short', 'padcreate', 'padnormal', 'skills', 'skillone', 'script', 'astral', 'nameless', 'nullname', 'emptyname']) {
+      assert.equal(byId[id]?.name, UNNAMED_JOB, `${id} was published under ${byId[id]?.name}`)
+    }
+    assert.equal(UNNAMED_JOB, 'Unnamed job')
+    assert.equal(byId.chosen.name, 'Weekly review')
+    assert.equal(byId.chosen2.name, 'Client digest')
+    // None of them is hidden: the id says which job it is, and the light still works.
+    assert.equal(block.items.length, 14)
+    assert.equal(block.hidden, 0)
+    // Not one word of what the jobs run is written - not as a name, not shortened, not hashed.
+    const written = JSON.stringify(block)
+    for (const word of ['HIV', 'Smith', 'Summarise', 'YouTube analytics', 'competitor', 'run-nightly', 'someone', 'sales pipeline', '\u{1D400}', 'follow up']) {
+      assert.ok(!written.includes(word), `the answer holds ${word}`)
+    }
+    for (const item of block.items) assert.deepEqual(Object.keys(item).filter((key) => !['profile', 'id', 'name', 'enabled', 'cadence', 'lastRunAt', 'lastResult', 'dueAt', 'dueBeforeAt'].includes(key)), [], item.id)
+    assert.deepEqual(checkJobs(wholeDoc(block), fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('an unnamed job whose copied name would not have passed the name rule is still shown', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const prompt = 'Check https://example.com/report?key=1 and mail the owner about the numbers'
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'urlname', name: head50(prompt), prompt })] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.deepEqual(block.items.map((item) => item.name), [UNNAMED_JOB])
+    assert.equal(block.hidden, 0)
+    assert.ok(!JSON.stringify(block).includes('example.com'))
   } finally {
     await fake.cleanup()
   }

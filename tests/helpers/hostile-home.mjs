@@ -211,10 +211,13 @@ async function hostileHermes(fake, now) {
     last_delivery_error: `delivery-secret-words ${fakeRefreshToken()}`,
     next_run_at: new Date(now + HOUR).toISOString().replace('Z', '+00:00')
   })
+  const unnamedPrompt = 'private-prompt-words about client Jones and the sale of the house on the hill'
   await at('cron/jobs.json', {
     jobs: [
       { id: 'brief1', name: 'Morning brief', enabled: true, schedule: { kind: 'cron', expr: '30 6 * * *', timezone: 'America/New_York' }, last_run_at: new Date(now - 13 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'ok', ...jobBaggage('one') },
       { id: 'review1', name: 'Weekly review', enabled: true, schedule: { kind: 'cron', expr: '0 9 * * 1', timezone: 'America/New_York' }, last_run_at: new Date(now - 2 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'error', ...jobBaggage('two') },
+      // Hermes named this one after its prompt, as it does a job nobody named: the prompt must not come out as a name.
+      { id: 'unnamed1', name: Array.from(unnamedPrompt).slice(0, 50).join('').trim(), enabled: true, schedule: { kind: 'cron', expr: '0 8 * * *', timezone: 'America/New_York' }, last_status: 'ok', ...jobBaggage('five'), prompt: unnamedPrompt },
       { id: 'mail1', name: FAKE_EMAIL, enabled: true, schedule: { kind: 'cron', expr: '0 7 * * *' }, last_status: 'ok', ...jobBaggage('three') }
     ]
   })
@@ -299,6 +302,8 @@ export const FORBIDDEN = () => [
   'nightly',
   // What a scheduled job and a LaunchAgent keep beside the name, schedule and result the wall shows.
   'prompt-secret-words',
+  'private-prompt-words',
+  'client Jones',
   'error-secret-words',
   'delivery-secret-words',
   'plist-secret-words',

@@ -463,6 +463,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
 | When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
 | The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
 | Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on, its schedule (a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
+| A name Hermes copied | the same job's `prompt`, `skills` and `script`, in memory, only to compare with the name | nothing. Hermes names a job nobody named after the first 50 characters of its prompt (else its first skill, else its script); a name equal to one of those, or no name at all, is written as `Unnamed job`. No part of the prompt is written, not shortened and not hashed - the job's `id` says which job it is |
 | Hermes's timezone | each profile's `config.yaml`: the top-level `timezone:` line, and no other line | nothing is written: the zone is only compared with the computer's, to decide whether a cron time can be judged |
 
 A Hermes job's `last_status` is written as `ok`, `error` or `unknown` and nothing more. The words are
@@ -512,9 +513,9 @@ as the Connections wall (no at sign, slash, key, token start, id, long unbroken 
 computer's username or name), a label and an id also letters, numbers and `.` `-` `_` only, and a
 name also its characters (letters, numbers, spaces and `. , ' ’ ( ) + & : _ -`) and 60 characters at
 most. One that fails is **not written**: it is counted in `hidden`, so the wall can say "n jobs not
-shown". Hermes names a job you did not name after the first 50 characters of its prompt, so an unnamed
-job writes those words as its name when they pass the rule - give it a name of your own, or hide it
-in `jobs.yml`. A jobs file or plist that cannot be read counts as one. At most 60 LaunchAgents and 40
+shown". A job Hermes named after its own prompt is shown as `Unnamed job` (see the table above), not
+hidden; give it a name of your own in Hermes if you want it called something. A jobs file or plist
+that cannot be read counts as one. At most 60 LaunchAgents and 40
 Hermes jobs are written (the first by label, or by profile and name) and at most 200 plists are
 read; the rest are counted in `more`. The file stays under 64 KB: if it ever would not, the biggest
 schedules are given up first (the job stays, its schedule `unknown`).
@@ -554,7 +555,8 @@ never the value. These are never written:
   name rule
 - from jobs: a LaunchAgent's program and its arguments (`ProgramArguments`), its environment
   (`EnvironmentVariables`), its folders (`WorkingDirectory`) and every other key of its plist; the
-  contents of its logs, which are never opened; a Hermes job's prompt and script, where a job
+  contents of its logs, which are never opened; a Hermes job's prompt and script (the collector looks at
+  them in memory only to notice a name copied from them, and writes `Unnamed job` instead), where a job
   delivers or came from, its model and skills, `last_error` and every other word of error text; a
   label, id or job name that fails the name rule
 

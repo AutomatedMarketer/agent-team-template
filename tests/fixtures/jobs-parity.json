@@ -29,6 +29,7 @@
     "error",
     "unknown"
   ],
+  "unnamedJob": "Unnamed job",
   "exitCode": {
     "min": -255,
     "max": 255
@@ -210,7 +211,8 @@
     "dueAt and dueBeforeAt are the two most recent times the job was expected to run, at or before takenAt minus graceMinutes, worked out on the Mac in the job's own timezone looking back lookbackDays days; a daylight-saving gap skips the slot and an overlap takes the earlier instant",
     "for cadence every the phase is not known, so dueAt is takenAt minus graceMinutes minus N minutes and dueBeforeAt minus 2N minutes",
     "dueAt and dueBeforeAt are left out when the cadence is always or unknown and when the job is switched off (a disabled launchd job, a Hermes job with enabled false); dueBeforeAt is also left out when fewer than two expected runs fall in the look-back, and is always earlier than dueAt",
-    "a Hermes job is read from cron/jobs.json in the Hermes home and in each profile; only its id, name, enabled, schedule (kind, expr, timezone), last_run_at and last_status are kept - its prompt, script, destination, origin, model, skills and every word of error text have no key",
+    "a Hermes job is read from cron/jobs.json in the Hermes home and in each profile; only its id, name, enabled, schedule (kind, expr, timezone), last_run_at and last_status are kept - its destination, origin, model and every word of error text have no key",
+    "Hermes names a job nobody named after the first 50 characters of what it runs: its prompt, else its first skill, else its script. The collector looks at the prompt, skills and script in memory, only to notice such a copy; a name equal to one, and a job with no name at all, is written as unnamedJob. Nothing of the prompt, skills or script is written - not shortened, not hashed. The job's id (12 hex characters) says which job it is",
     "a Hermes schedule is a cron expression, or an interval of N minutes; Hermes reads a cron expression in the timezone set by the profile's config.yaml (the top-level timezone line) or else the computer's, so a profile or job that names a timezone other than the computer's, or a kind other than cron and interval, has cadence unknown",
     "a Hermes job that runs once (schedule kind at or once) is written with enabled false and cadence unknown; a job is on unless its enabled says otherwise (Hermes reads a record with no enabled key as on)",
     "a Hermes last_status is written as ok, error or unknown and nothing else: ok for ok; error for error, delivery_failed, blocked_config or interrupted, in any case; every other word, and no word, is unknown",
