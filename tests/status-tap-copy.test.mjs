@@ -62,7 +62,7 @@ test('the copy goes to a per-user folder, outside every repo', () => {
 
 test('the tap and exactly the files it imports are collected, with their paths inside scripts/', async () => {
   const files = await collectTapFiles(join(repoRoot, 'scripts', 'usage-tap.mjs'))
-  assert.deepEqual(files.map((file) => file.rel), ['lib/status/connections-schema.mjs', 'lib/status/hermes-schema.mjs', 'lib/status/safe.mjs', 'lib/status/schema.mjs', 'lib/status/tap.mjs', 'lib/status/util.mjs', 'usage-tap.mjs'])
+  assert.deepEqual(files.map((file) => file.rel), ['lib/status/connections-schema.mjs', 'lib/status/hermes-schema.mjs', 'lib/status/jobs-schema.mjs', 'lib/status/safe.mjs', 'lib/status/schema.mjs', 'lib/status/tap.mjs', 'lib/status/util.mjs', 'usage-tap.mjs'])
 })
 
 test('an import that reaches outside scripts/, or a package, is refused', async () => {
@@ -116,7 +116,7 @@ for (const [name, line] of Object.entries(HIDDEN_LOADS)) {
 
 test('the tap as shipped passes the stricter scan', async () => {
   const files = await collectTapFiles(join(repoRoot, 'scripts', 'usage-tap.mjs'))
-  assert.equal(files.length, 7)
+  assert.equal(files.length, 8)
 })
 
 test('the status line points at a hash-named copy, never at the team repo', async () => {
@@ -131,7 +131,7 @@ test('the status line points at a hash-named copy, never at the team repo', asyn
     // <content hash>-<settings-file hash>: the second part is what makes the copy this profile's own.
     assert.match(tapPath, /\/tap\/[0-9a-f]{16}-[0-9a-f]{8}\/usage-tap\.mjs$/)
     const copyDir = tapPath.slice(0, -'/usage-tap.mjs'.length)
-    assert.deepEqual((await readdir(join(copyDir, 'lib', 'status'))).sort(), ['connections-schema.mjs', 'hermes-schema.mjs', 'safe.mjs', 'schema.mjs', 'tap.mjs', 'util.mjs'])
+    assert.deepEqual((await readdir(join(copyDir, 'lib', 'status'))).sort(), ['connections-schema.mjs', 'hermes-schema.mjs', 'jobs-schema.mjs', 'safe.mjs', 'schema.mjs', 'tap.mjs', 'util.mjs'])
   } finally {
     await fake.cleanup()
   }

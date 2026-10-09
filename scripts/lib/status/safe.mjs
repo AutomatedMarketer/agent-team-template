@@ -10,6 +10,7 @@
 import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, MAX_PERCENT, computerSlug } from './schema.mjs'
 import { CONNECTIONS_SHAPE, CONNECTION_NAME, VERSION_PATTERN, MAX_VERSION_LENGTH } from './connections-schema.mjs'
 import { HERMES_SHAPE, PROFILE_NAME } from './hermes-schema.mjs'
+import { JOBS_SHAPE, LABEL } from './jobs-schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -166,6 +167,27 @@ function walk(value, shape, path, identity, problems) {
     case 'profileName':
       problems.push(...checkProfileName(value, path, identity))
       return
+    case 'label':
+      problems.push(...checkLabel(value, path, identity))
+      return
+    case 'int':
+      // A bound is part of the type: an exit status or a minute that is a whole number but out of
+      // range is as wrong as text.
+      if (!Number.isSafeInteger(value) || value < shape.min || value > shape.max) {
+        problems.push(`${path}: is not a whole number from ${shape.min} to ${shape.max}`)
+      }
+      return
+    case 'variant': {
+      // One shape per value of a named key (a cadence's kind). The key itself is checked by the
+      // chosen shape, so a kind that is not listed has nowhere to go.
+      const chosen = isPlainObject(value) && typeof value[shape.on] === 'string' && Object.hasOwn(shape.variants, value[shape.on])
+        ? shape.variants[value[shape.on]]
+        : null
+      if (!isPlainObject(value)) problems.push(`${path}: is not an object`)
+      else if (!chosen) problems.push(`${join(path, shape.on)}: is not one of the allowed values`)
+      else walk(value, chosen, path, identity, problems)
+      return
+    }
     case 'array':
       if (!Array.isArray(value)) {
         problems.push(`${path}: is not a list`)
@@ -261,6 +283,12 @@ export function checkConnections(doc, identity) {
 export function checkHermes(doc, identity) {
   const problems = []
   walk(doc, HERMES_SHAPE, '', identity, problems)
+  return problems
+}
+
+export function checkJobs(doc, identity) {
+  const problems = []
+  walk(doc, JOBS_SHAPE, '', identity, problems)
   return problems
 }
 
@@ -369,6 +397,16 @@ export const isConnectionName = (value, identity) => checkConnectionName(value, 
 export function checkProfileName(value, path, identity) {
   const problems = checkConnectionName(value, path, identity)
   if (typeof value === 'string' && value && !PROFILE_NAME.test(value)) problems.push(`${path}: is not a Hermes profile name`)
+  return problems
+}
+
+// A launchd label or a Hermes job id (jobs-schema.mjs, LABEL): the connection-name rule, so no
+// at sign, slash, key or token start, id, long unbroken run, username or computer name, and the
+// label form on top - letters, numbers and . - _ only, starting with a letter or number. Like every
+// gate problem, it names the field and never the value.
+export function checkLabel(value, path, identity) {
+  const problems = checkConnectionName(value, path, identity)
+  if (typeof value === 'string' && value && !LABEL.pattern.test(value)) problems.push(`${path}: is not a label (letters, numbers and . - _ only)`)
   return problems
 }
 

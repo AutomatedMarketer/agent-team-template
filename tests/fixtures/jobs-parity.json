@@ -1,0 +1,225 @@
+{
+  "about": "Shared contract for the jobs snapshot (the Readiness wall: every scheduled job on a Mac and in Hermes, one light each). The same bytes live in agent-team-template and agent-cockpit; a test in each repo checks they match. The collector writes `sample`-shaped files; the board reads them. The Mac works out, in the job's own timezone, the two most recent times each job was expected to run (dueAt, dueBeforeAt) and writes them down - the board never works them out from a schedule it cannot see and says a job is late only when dueAt is there. Names, times, numbers and states only: a job's arguments, environment settings, folders, prompts, error text and logs have no key here, so they cannot reach a file.",
+  "schema": "agent-status/jobs/v1",
+  "folder": ".agent-team/status/jobs",
+  "computerSlug": "^[a-z0-9-]{1,32}$",
+  "staleAfterHours": 8,
+  "maxFilesRead": 5,
+  "maxFileBytes": 65536,
+  "maxComputersShown": 3,
+  "statuses": [
+    "found",
+    "not found",
+    "unavailable"
+  ],
+  "caps": {
+    "launchd": 60,
+    "hermes": 40,
+    "slots": 48
+  },
+  "graceMinutes": 30,
+  "lookbackDays": 32,
+  "launchdStates": [
+    "running",
+    "loaded",
+    "not loaded"
+  ],
+  "hermesResults": [
+    "ok",
+    "error",
+    "unknown"
+  ],
+  "exitCode": {
+    "min": -255,
+    "max": 255
+  },
+  "cadence": {
+    "kinds": [
+      "always",
+      "every",
+      "slots",
+      "unknown"
+    ],
+    "everyMinutes": { "min": 1, "max": 44640 },
+    "slot": {
+      "minute": { "min": 0, "max": 59 },
+      "hour": { "min": 0, "max": 23 },
+      "weekday": { "min": 0, "max": 6 },
+      "day": { "min": 1, "max": 31 }
+    },
+    "slotRule": "A slot is one minute of the hour. With an hour it is one time of day; without, it is every hour. With a weekday (0 is Sunday) it is that day of the week; with a day (1 to 31) that day of the month; with neither, every day. A slot never has both a weekday and a day. Slots are written in order of day, weekday, hour, then minute, a missing value first."
+  },
+  "names": {
+    "label": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$",
+    "labelRule": "A launchd label, and a Hermes job id, are held to this form and to the connection-name rule from tests/fixtures/connections-parity.json on top (no at sign, slash, backslash, key or token start, uuid, stretch of 24 or more characters without a separator, and not this computer's username, name or home folder). One that fails is not written; it is counted in hidden. A Hermes job name and profile are held to the connection-name rule and Hermes's profile rule as they are.",
+    "labelAccept": [
+      "local.donna.story-belt-daily",
+      "local.donna.agent-status-collector",
+      "com.donna.blog-watch",
+      "ai.hermes.gateway-donna",
+      "com.example.Weekly_Report",
+      "a1b2c3d4e5f6",
+      "nightly-brief",
+      "job_7"
+    ],
+    "labelRefuse": [
+      { "name": "", "why": "empty" },
+      { "name": "local.donna@host.job", "why": "an at sign" },
+      { "name": "local/donna.job", "why": "a slash" },
+      { "name": "local\\donna.job", "why": "a backslash" },
+      { "name": ".hidden.job", "why": "does not start with a letter or number" },
+      { "name": "local donna job", "why": "a space" },
+      { "name": "local.über.job", "why": "a letter a launchd label does not use" },
+      { "name": "0f0e0d0c-1111-2222-3333-444455556666", "why": "a uuid" },
+      { "name": "local.desk-helper", "why": "contains sk- by accident, refused all the same" },
+      { "name": "local.bearer-bot", "why": "an authorization header word" },
+      { "name": "local.eyJhbGciOiJIUzI1NiJ9", "why": "the start of a signed token" },
+      { "name": "local.abcdefghijklmnopqrstuvwxyz0123", "why": "a stretch of 24 or more characters without a separator" },
+      { "name": "local.donna.a-very-long-label-that-keeps-going-past-sixty-characters", "why": "longer than 60 characters" }
+    ]
+  },
+  "rules": [
+    "a block (launchd, hermes) with any status other than found carries only status and an optional why",
+    "launchd is not found when the computer is not a Mac or has no ~/Library/LaunchAgents folder; only that user folder is read, never /Library; hermes is not found when Hermes is not on the computer",
+    "launchd state is running when launchctl lists the label with a process, loaded when it lists it without one, and not loaded when it does not list it; lastExit is launchctl's last exit status and is written only for a job that is listed",
+    "lastReportAt on a launchd job is the newest modified time of its two log files (standard out and standard error); the files are never opened and their paths are never kept",
+    "self is written only as true, on the row for the collector's own LaunchAgent; disabled is written only as true, from the plist's Disabled key",
+    "cadence is always for a job with KeepAlive, or with RunAtLoad and no schedule; every for a StartInterval, or a cron minute step that divides an hour; slots for calendar entries or cron lists, at most caps.slots slots; unknown for anything else, including a month, a day together with a weekday, a calendar entry with no minute, a cron form that is not minute, hour, weekday and a day of the month, or a Hermes timezone other than the computer's",
+    "dueAt and dueBeforeAt are the two most recent times the job was expected to run, at or before takenAt minus graceMinutes, worked out on the Mac in the job's own timezone looking back lookbackDays days; a daylight-saving gap skips the slot and an overlap takes the earlier instant",
+    "for cadence every the phase is not known, so dueAt is takenAt minus graceMinutes minus N minutes and dueBeforeAt minus 2N minutes",
+    "dueAt and dueBeforeAt are left out when the cadence is always or unknown and when the job is switched off (a disabled launchd job, a Hermes job with enabled false); dueBeforeAt is also left out when fewer than two expected runs fall in the look-back, and is always earlier than dueAt",
+    "a Hermes job that runs once (schedule kind at) is written with enabled false and cadence unknown",
+    "a Hermes job in a profile is listed by the profile's name, with the default profile (the Hermes home itself) first, then the other profiles A to Z",
+    "a launchd label or Hermes job name that fails the name rules is not written and is counted in hidden; jobs past the cap are counted in more; the board re-checks every name and adds what it drops to hidden",
+    "the file never says whether a job is on time or late; the board works that out from dueAt, dueBeforeAt and the last report or run",
+    "a file older than staleAfterHours is shown as not checked since its time, never as a light",
+    "the board shows at most maxComputersShown computers, newest takenAt first"
+  ],
+  "sample": {
+    "schema": "agent-status/jobs/v1",
+    "takenAt": "2026-10-09T15:00:00Z",
+    "computer": "Mac Mini",
+    "timezone": "America/New_York",
+    "launchd": {
+      "status": "found",
+      "items": [
+        {
+          "label": "local.donna.agent-status-collector",
+          "cadence": {
+            "kind": "slots",
+            "slots": [
+              { "minute": 0, "hour": 0 },
+              { "minute": 0, "hour": 3 },
+              { "minute": 0, "hour": 6 },
+              { "minute": 0, "hour": 9 },
+              { "minute": 0, "hour": 12 },
+              { "minute": 0, "hour": 15 },
+              { "minute": 0, "hour": 18 },
+              { "minute": 0, "hour": 21 }
+            ]
+          },
+          "state": "loaded",
+          "lastExit": 0,
+          "lastReportAt": "2026-10-09T13:00:41Z",
+          "dueAt": "2026-10-09T13:00:00Z",
+          "dueBeforeAt": "2026-10-09T10:00:00Z",
+          "self": true
+        },
+        {
+          "label": "local.donna.story-belt-daily",
+          "cadence": { "kind": "slots", "slots": [{ "minute": 15, "hour": 6 }] },
+          "state": "loaded",
+          "lastExit": 0,
+          "lastReportAt": "2026-10-09T10:15:22Z",
+          "dueAt": "2026-10-09T10:15:00Z",
+          "dueBeforeAt": "2026-10-08T10:15:00Z"
+        },
+        {
+          "label": "com.donna.blog-watch",
+          "cadence": { "kind": "every", "minutes": 15 },
+          "state": "loaded",
+          "lastExit": 0,
+          "lastReportAt": "2026-10-09T14:52:10Z",
+          "dueAt": "2026-10-09T14:15:00Z",
+          "dueBeforeAt": "2026-10-09T14:00:00Z"
+        },
+        {
+          "label": "local.donna.weekday-brief",
+          "cadence": {
+            "kind": "slots",
+            "slots": [
+              { "minute": 45, "hour": 7, "weekday": 1 },
+              { "minute": 45, "hour": 7, "weekday": 2 },
+              { "minute": 45, "hour": 7, "weekday": 3 },
+              { "minute": 45, "hour": 7, "weekday": 4 },
+              { "minute": 45, "hour": 7, "weekday": 5 }
+            ]
+          },
+          "state": "not loaded",
+          "lastReportAt": "2026-10-08T11:45:20Z",
+          "dueAt": "2026-10-09T11:45:00Z",
+          "dueBeforeAt": "2026-10-08T11:45:00Z"
+        },
+        {
+          "label": "local.donna.security-changelog",
+          "cadence": { "kind": "always" },
+          "state": "running",
+          "lastReportAt": "2026-10-09T14:50:02Z"
+        },
+        {
+          "label": "local.donna.paused-draft",
+          "cadence": { "kind": "slots", "slots": [{ "minute": 0, "hour": 9, "weekday": 1 }] },
+          "state": "not loaded",
+          "disabled": true
+        }
+      ],
+      "hidden": 1,
+      "more": 0
+    },
+    "hermes": {
+      "status": "found",
+      "items": [
+        {
+          "profile": "default",
+          "id": "a1b2c3d4e5f6",
+          "name": "YouTube morning brief",
+          "enabled": true,
+          "cadence": { "kind": "slots", "slots": [{ "minute": 30, "hour": 6 }] },
+          "lastRunAt": "2026-10-09T10:30:04Z",
+          "lastResult": "ok",
+          "dueAt": "2026-10-09T10:30:00Z",
+          "dueBeforeAt": "2026-10-08T10:30:00Z"
+        },
+        {
+          "profile": "donna",
+          "id": "b2c3d4e5f6a1",
+          "name": "Memory tidy",
+          "enabled": true,
+          "cadence": {
+            "kind": "slots",
+            "slots": [
+              { "minute": 0, "hour": 0 },
+              { "minute": 0, "hour": 6 },
+              { "minute": 0, "hour": 12 },
+              { "minute": 0, "hour": 18 }
+            ]
+          },
+          "lastRunAt": "2026-10-09T10:00:09Z",
+          "lastResult": "error",
+          "dueAt": "2026-10-09T10:00:00Z",
+          "dueBeforeAt": "2026-10-09T04:00:00Z"
+        },
+        {
+          "profile": "donna",
+          "id": "c3d4e5f6a1b2",
+          "name": "Substack draft",
+          "enabled": false,
+          "cadence": { "kind": "unknown" },
+          "lastResult": "unknown"
+        }
+      ],
+      "hidden": 0,
+      "more": 0
+    }
+  }
+}
