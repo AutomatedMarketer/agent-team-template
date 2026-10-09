@@ -191,3 +191,17 @@ test('the docs say exactly what is looked at: a Hermes prompt is read in memory 
   const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
   assert.ok(contract.rules.some((rule) => /unnamedJob/.test(rule) && /not hashed/.test(rule)))
 })
+
+test('the docs say always on needs a process, so a run-once agent that finished is not called down', async () => {
+  const jobs = flat(section(await read('.agent-team/status/README.md'), '## The jobs file'))
+  assert.match(jobs, /`always` \| a LaunchAgent with `KeepAlive` set to true, or with `RunAtLoad` true while it has a process/)
+  assert.match(jobs, /runs once at login and exits is finished, not down/)
+  assert.doesNotMatch(jobs, /`RunAtLoad` true and no schedule/)
+  const unverified = flat((await read('.agent-team/status/README.md')).slice((await read('.agent-team/status/README.md')).lastIndexOf('### Not verified yet')))
+  assert.match(unverified, /`RunAtLoad` or `WatchPaths`/)
+  assert.match(unverified, /loaded but not running/)
+  const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
+  const rule = contract.rules.find((text) => text.startsWith('cadence is always'))
+  assert.match(rule, /RunAtLoad true while it has a process/)
+  assert.doesNotMatch(rule, /RunAtLoad true and no schedule/)
+})

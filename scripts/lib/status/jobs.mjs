@@ -99,18 +99,20 @@ function keysOf(plist) {
   }
 }
 
-// How the job is scheduled. A calendar or an interval says it; with neither, a job that is kept
-// alive, or runs at load, is an always-on service. KeepAlive as anything but plain true ("restart
-// it if it fails", "while the network is up") is a condition this does not judge. Both a calendar and
-// an interval at once is two schedules, which is not one this can write down.
-function cadenceOf(keys) {
+// How the job is scheduled. A calendar or an interval says it. With neither, "always on" is a claim
+// that a process should be there: KeepAlive set to plain true says so, and so does RunAtLoad while the
+// job has a process. RunAtLoad alone does not - an agent that runs once at login and exits is finished,
+// not down - and neither does a KeepAlive that is a condition ("restart it if it fails", "while the
+// network is up"). Those are unknown, and the job's light comes from how its last run ended. Both a
+// calendar and an interval at once is two schedules, which is not one this can write down.
+function cadenceOf(keys, running) {
   const hasCalendar = keys.calendar !== undefined
   const hasInterval = keys.interval !== undefined
   if (hasCalendar && hasInterval) return { kind: 'unknown' }
   if (hasCalendar) return cadenceFromCalendar(keys.calendar)
   if (hasInterval) return cadenceFromInterval(keys.interval)
   if (keys.keepAlive === true) return { kind: 'always' }
-  if (keys.keepAlive === undefined || keys.keepAlive === false) return keys.runAtLoad === true ? { kind: 'always' } : { kind: 'unknown' }
+  if (keys.runAtLoad === true && running) return { kind: 'always' }
   return { kind: 'unknown' }
 }
 
@@ -196,7 +198,7 @@ export async function collectLaunchd(deps, zone) {
 
     const listed = table.get(keys.label)
     const state = !listed ? 'not loaded' : listed.running ? 'running' : 'loaded'
-    const cadence = cadenceOf(keys)
+    const cadence = cadenceOf(keys, state === 'running')
     // Disabled in the plist counts only when the job is not loaded: a loaded job is on.
     const disabled = keys.disabled === true && state === 'not loaded'
     const item = { label: keys.label, cadence, state }

@@ -477,7 +477,7 @@ nobody has checked. Hermes keeps the reason; it is never kept here.
 
 | Kind | When | Written as |
 |---|---|---|
-| `always` | a LaunchAgent with `KeepAlive` set to true, or with `RunAtLoad` true and no schedule | nothing more |
+| `always` | a LaunchAgent with `KeepAlive` set to true, or with `RunAtLoad` true while it has a process. An agent that runs once at login and exits is finished, not down, so it is `unknown` and its light comes from how it last ended | nothing more |
 | `every` | a `StartInterval` (seconds, rounded to whole minutes, at least one), a cron minute step that divides the hour (`*/15 * * * *`), or a Hermes `interval` job (its `minutes`) | the number of minutes |
 | `slots` | `StartCalendarInterval` entries, or a cron expression with lists, ranges and steps for minute, hour and weekday and a single day of the month - at most 48 slots | each slot: a minute, and optionally an hour, a weekday (0 is Sunday) or a day of the month |
 | `unknown` | anything else | nothing more |
@@ -837,7 +837,9 @@ These are checked on the first live run on the Mac, not assumed:
   completes, is the finish and not the start; and whether any job name has a dash, a slash or more
   than 60 characters - those jobs are counted in `hidden`, not shown
 - which of the Mac's LaunchAgents use a `KeepAlive` that is a condition rather than plain `true`:
-  those are read as an unknown schedule
+  those are read as an unknown schedule; and how many agents with `RunAtLoad` or `WatchPaths` are
+  loaded but not running - they are read as an unknown schedule, so a crash shows through the
+  non-zero exit status, not through a missing process
 - the Mac's Node version: session counts need `node:sqlite` (Node 22.13 or newer); older says
   "needs a newer Node"
 - that a copy of `state.db` and `state.db-wal` taken while Hermes is writing reads cleanly: a

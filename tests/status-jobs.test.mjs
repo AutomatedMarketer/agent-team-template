@@ -227,6 +227,55 @@ test('an ordinary Mac: each job with its cadence, state, last exit and due times
   }
 })
 
+// "Always on" is a claim that a process should be there. KeepAlive true says so. RunAtLoad alone does not:
+// an agent that runs once at login and exits 0 is finished, not down, and calling it always-on would
+// light it red for good. RunAtLoad counts only while the job has a process; otherwise the schedule is
+// unknown and its light comes from how its last run ended.
+test('always on is KeepAlive true, or RunAtLoad while it is running - not RunAtLoad that has finished', async () => {
+  const cases = {
+    'keep-running': [{ KeepAlive: true }, ['4001', 0], 'always'],
+    'keep-exited': [{ KeepAlive: true }, ['-', 1], 'always'],
+    'keep-unloaded': [{ KeepAlive: true }, null, 'always'],
+    'keep-and-load': [{ KeepAlive: true, RunAtLoad: true }, ['-', 0], 'always'],
+    'load-running': [{ RunAtLoad: true }, ['4002', 0], 'always'],
+    'load-false-running': [{ RunAtLoad: true, KeepAlive: false }, ['4003', 0], 'always'],
+    'load-condition-running': [{ RunAtLoad: true, KeepAlive: { NetworkState: true } }, ['4004', 0], 'always'],
+    'load-finished': [{ RunAtLoad: true }, ['-', 0], 'unknown'],
+    'load-crashed': [{ RunAtLoad: true }, ['-', 1], 'unknown'],
+    'load-unloaded': [{ RunAtLoad: true }, null, 'unknown'],
+    'load-false-finished': [{ RunAtLoad: true, KeepAlive: false }, ['-', 0], 'unknown'],
+    'load-condition-stopped': [{ RunAtLoad: true, KeepAlive: { SuccessfulExit: false } }, ['-', 0], 'unknown'],
+    'condition-running': [{ KeepAlive: { SuccessfulExit: false } }, ['4005', 0], 'unknown'],
+    'watch-loaded': [{ WatchPaths: ['/tmp/inbox'] }, ['-', 0], 'unknown'],
+    'queue-loaded': [{ QueueDirectories: ['/tmp/queue'], RunAtLoad: false }, ['-', 0], 'unknown'],
+    'started-by-hand': [{ RunAtLoad: false }, ['4006', 0], 'unknown'],
+    'nothing': [{}, ['-', 0], 'unknown']
+  }
+  const names = Object.keys(cases)
+  const fake = await macHome(names.map((name) => `local.test.${name}.plist`))
+  try {
+    const plists = Object.fromEntries(names.map((name) => [`local.test.${name}.plist`, { Label: `local.test.${name}`, ...cases[name][0] }]))
+    const rows = names.filter((name) => cases[name][1]).map((name) => [cases[name][1][0], cases[name][1][1], `local.test.${name}`])
+    const block = await collectLaunchd(depsFor(fake, fakePrograms({ plists, launchctl: launchctlTable(rows) })), ZONE)
+    const byName = Object.fromEntries(block.items.map((item) => [item.label.replace('local.test.', ''), item]))
+    for (const name of names) assert.equal(byName[name].cadence.kind, cases[name][2], `${name}: ${JSON.stringify(cases[name][0])}`)
+    // A finished or crashed agent keeps its real exit status, which is what its light is made from.
+    assert.equal(byName['load-finished'].lastExit, 0)
+    assert.equal(byName['load-crashed'].lastExit, 1)
+    assert.equal(byName['load-crashed'].dueAt, undefined)
+    assert.equal(byName['load-unloaded'].state, 'not loaded')
+    // A schedule still wins over RunAtLoad, as before.
+    await fake.write('Library/LaunchAgents/local.test.both.plist', '<plist/>')
+    const both = await collectLaunchd(depsFor(fake, fakePrograms({
+      plists: { 'local.test.both.plist': { Label: 'local.test.both', RunAtLoad: true, StartInterval: 900 } },
+      launchctl: launchctlTable([['-', 0, 'local.test.both']])
+    })), ZONE)
+    assert.deepEqual(both.items.find((item) => item.label === 'local.test.both').cadence, { kind: 'every', minutes: 15 })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
 test('the same Mac in a different order gives the same bytes', async () => {
   const names = Object.keys(ORDINARY)
   const answers = []
