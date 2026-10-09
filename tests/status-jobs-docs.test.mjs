@@ -218,3 +218,27 @@ test('the docs say a paused Hermes job is off even when enabled, and that a day 
   assert.ok(contract.rules.some((rule) => /pause marker/.test(rule) && /paused_at/.test(rule)))
   assert.ok(contract.rules.some((rule) => /neither is a bare/.test(rule)))
 })
+
+test('the docs say plainly which names the safety rule hides, that they are counted, and that jobs.yml cannot rescue them', async () => {
+  const doc = await read('.agent-team/status/README.md')
+  const jobs = flat(section(doc, '## The jobs file'))
+  assert.match(jobs, /anything with `sk-` in it/)
+  for (const example of ['task-runner', 'desk-helper', 'risk-monitor']) assert.ok(jobs.includes(example), `the jobs section does not name ${example}`)
+  assert.match(jobs, /counted in `hidden`/)
+  assert.match(jobs, /jobs hidden by the safety rule/)
+  assert.match(jobs, /[Rr]enaming it in `jobs\.yml` cannot help/)
+  assert.match(jobs, /rule is shared with the whole dashboard and is not loosened/)
+  const yml = flat(await read('jobs.yml'))
+  assert.match(yml, /hidden by the safety rule/)
+  assert.match(yml, /cannot (bring|rescue|help)/)
+})
+
+test('the docs say a job that runs only on the 31st can have no due time inside the 32-day look-back, and name every key read', async () => {
+  const jobs = flat(section(await read('.agent-team/status/README.md'), '## The jobs file'))
+  assert.match(jobs, /a job that runs only on the 31st can have none/)
+  assert.doesNotMatch(jobs, /a monthly job often has only one\)/, 'the old wording leaves out the case of no due time')
+  const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
+  for (const key of contract.keysRead.hermesSchedule) assert.ok(jobs.includes(key), `the jobs section does not name the schedule key ${key}`)
+  assert.match(jobs, /`schedule` \(`kind`, `expr`, `minutes`, `timezone`/)
+  for (const key of contract.keysRead.plist.slice(0, 6)) assert.ok(jobs.includes(key), `the jobs section does not name the plist key ${key}`)
+})

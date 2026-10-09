@@ -462,7 +462,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
 | Loaded or not | `/bin/launchctl list` | `running` (it has a process), `loaded` (listed, no process), `not loaded` (not listed); and the last exit status (-255 to 255) of a job it lists |
 | When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
 | The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
-| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on, its schedule (a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
+| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on (`enabled`, and whether `state` or `paused_at` marks it paused), its `schedule` (`kind`, `expr`, `minutes`, `timezone`: a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
 | A name Hermes copied | the same job's `prompt`, `skills` and `script`, in memory, only to compare with the name | nothing. Hermes names a job nobody named after the first 50 characters of its prompt (else its first skill, else its script); a name equal to one of those, or no name at all, is written as `Unnamed job`. No part of the prompt is written, not shortened and not hashed - the job's `id` says which job it is |
 | Hermes's timezone | each profile's `config.yaml`: the top-level `timezone:` line, and no other line | nothing is written: the zone is only compared with the computer's, to decide whether a cron time can be judged |
 
@@ -503,7 +503,8 @@ When the clocks jump forward, a time that does not exist that day is skipped; wh
 time that happens twice takes the earlier one. An `every` job's start is not known, so its times are
 placed N and 2N minutes before the limit. A job with an `always` or `unknown` schedule, and a job
 that is switched off, has no due times, and `dueBeforeAt` is also left out when fewer than two
-expected runs fall in the 32 days (a monthly job often has only one).
+expected runs fall in the 32 days (a monthly job often has only one, and a job that runs only on the
+31st can have none: its `dueAt` is left out too).
 
 **Switched off.** A LaunchAgent is `disabled: true` when its plist says `Disabled` and `launchctl`
 does not list it (a loaded job is on). A Hermes job is `enabled: false` when its `enabled` is false -
@@ -516,7 +517,12 @@ as the Connections wall (no at sign, slash, key, token start, id, long unbroken 
 computer's username or name), a label and an id also letters, numbers and `.` `-` `_` only, and a
 name also its characters (letters, numbers, spaces and `. , ' ’ ( ) + & : _ -`) and 60 characters at
 most. One that fails is **not written**: it is counted in `hidden`, so the wall can say "n jobs not
-shown". A job Hermes named after its own prompt is shown as `Unnamed job` (see the table above), not
+shown". The name rule refuses anything with `sk-` in it, because that is how a key starts, so a job
+called `task-runner`, `desk-helper` or `risk-monitor` is withheld too. It is counted in `hidden`, in the
+file and in the log line, so the dashboard can say how many jobs hidden by the safety rule there are;
+the rule is shared with the whole dashboard and is not loosened. Renaming it in `jobs.yml` cannot help,
+because the collector refuses the name before anything is written and the dashboard never sees it:
+rename the job where it is made (the LaunchAgent's label, the Hermes job's name). A job Hermes named after its own prompt is shown as `Unnamed job` (see the table above), not
 hidden; give it a name of your own in Hermes if you want it called something. A jobs file or plist
 that cannot be read counts as one. At most 60 LaunchAgents and 40
 Hermes jobs are written (the first by label, or by profile and name) and at most 200 plists are

@@ -5,6 +5,7 @@ import * as realFs from 'node:fs/promises'
 import { join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import { collectLaunchd, collectHermesJobs, collectJobs, machineZone, fitToFile, parseLaunchctlList, MAX_PLISTS_READ, HERMES_RESULT_WORDS } from '../scripts/lib/status/jobs.mjs'
+import { summarizeJobs } from '../scripts/lib/status/run.mjs'
 import { checkJobs } from '../scripts/lib/status/safe.mjs'
 import { JOBS_SCHEMA, UNNAMED_JOB } from '../scripts/lib/status/jobs-schema.mjs'
 import {
@@ -274,6 +275,75 @@ test('always on is KeepAlive true, or RunAtLoad while it is running - not RunAtL
   } finally {
     await fake.cleanup()
   }
+})
+
+// launchctl prints the last exit status, or minus the signal that stopped the job. A number outside
+// the contract's range is not one of those, and is not written as an exit code.
+test('a launchctl status outside -255 to 255 is left out, not clipped or guessed', async () => {
+  const rows = { zero: 0, edge: 255, low: -255, over: 256, under: -256, wait: 19968, big: 65280, huge: 2147483647 }
+  const names = Object.keys(rows)
+  const fake = await macHome(names.map((name) => `local.test.${name}.plist`))
+  try {
+    const plists = Object.fromEntries(names.map((name) => [`local.test.${name}.plist`, { Label: `local.test.${name}`, StartInterval: 3600 }]))
+    const table = launchctlTable(names.map((name) => ['-', rows[name], `local.test.${name}`]))
+    const block = await collectLaunchd(depsFor(fake, fakePrograms({ plists, launchctl: table })), ZONE)
+    const byName = Object.fromEntries(block.items.map((item) => [item.label.replace('local.test.', ''), item]))
+    assert.equal(byName.zero.lastExit, 0)
+    assert.equal(byName.edge.lastExit, 255)
+    assert.equal(byName.low.lastExit, -255)
+    for (const name of ['over', 'under', 'wait', 'big', 'huge']) {
+      assert.equal(byName[name].lastExit, undefined, `${name} (${rows[name]}) was written as an exit status`)
+      assert.equal(byName[name].state, 'loaded', `${name} is still a listed job`)
+    }
+    assert.deepEqual(checkJobs({ schema: JOBS_SCHEMA, takenAt: iso(NOW), computer: 'Mac Mini', timezone: ZONE, launchd: block, hermes: { status: 'not found' } }, fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// The name rule refuses any text with "sk-" in it, because that is how a key starts - and so it also
+// refuses task-runner, desk-helper and risk-monitor. The rule is shared with the whole board and is not
+// loosened. What this part owes is that nothing is lost quietly: every job it withholds is counted in
+// `hidden`, in the file and in the log, so the board can say how many were hidden by the safety rule.
+test('names that only look like a key (task-runner, desk-helper, risk-monitor) are withheld and counted, in both halves', async () => {
+  const labels = ['local.task-runner', 'local.desk-helper', 'com.example.risk-monitor', 'com.example.disk-usage']
+  const fake = await macHome([...labels, 'local.fine'].map((label) => `${label}.plist`))
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'a1', name: 'Task-runner brief' }),
+      hermesJob({ id: 'a2', name: 'Desk-check report' }),
+      hermesJob({ id: 'a3', name: 'Risk-review' }),
+      hermesJob({ id: 'a4', name: 'Fine brief' })
+    ] })
+    const plists = Object.fromEntries([...labels, 'local.fine'].map((label) => [`${label}.plist`, { Label: label, StartInterval: 3600 }]))
+    const doc = await collectJobs(depsFor(fake, fakePrograms({ plists, launchctl: launchctlTable([]) })), 'Mac Mini')
+    assert.deepEqual(doc.launchd.items.map((item) => item.label), ['local.fine'])
+    assert.equal(doc.launchd.hidden, 4, 'every label the rule withheld is counted')
+    assert.deepEqual(doc.hermes.items.map((item) => item.name), ['Fine brief'])
+    assert.equal(doc.hermes.hidden, 3)
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+    const lines = summarizeJobs(doc)
+    assert.match(lines[0], /, 4 hidden, 0 more$/)
+    assert.match(lines[1], /, 3 hidden, 0 more$/)
+    const text = JSON.stringify(doc)
+    for (const word of ['task-runner', 'desk-helper', 'risk-monitor', 'disk-usage', 'Task-runner', 'Desk-check', 'Risk-review']) assert.ok(!text.includes(word), `the file holds ${word}`)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// What the code touches is what the contract says it touches. Every key read from a plist or a Hermes job
+// is in the fixture's lists, so a key added to the code without being added to the contract fails here.
+test('the keys read from a plist and from a Hermes job are exactly the ones the contract lists', () => {
+  const source = readFileSync(join(repoRoot, 'scripts', 'lib', 'status', 'jobs.mjs'), 'utf8')
+  const between = (from, to) => source.slice(source.indexOf(from), source.indexOf(to))
+  const keysIn = (text, name) => [...new Set([...text.matchAll(new RegExp(`\\b${name}\\.([A-Za-z_]+)`, 'g'))].map((match) => match[1]))].sort()
+  const plist = keysIn(between('function keysOf(plist)', '// How the job is scheduled.'), 'plist')
+  assert.deepEqual(plist, [...fixture.keysRead.plist].sort())
+  const hermesSection = between('// The zone Hermes reads this profile', 'const byNameThenId')
+  assert.deepEqual(keysIn(hermesSection, 'row').filter((key) => key !== 'cadence'), [...fixture.keysRead.hermesJob].sort())
+  assert.deepEqual(keysIn(hermesSection, 'schedule'), [...fixture.keysRead.hermesSchedule].sort())
 })
 
 test('the same Mac in a different order gives the same bytes', async () => {

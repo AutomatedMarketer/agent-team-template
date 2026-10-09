@@ -9,6 +9,10 @@
 # The dashboard only reads this file. It never writes it, so you change it by asking Claude:
 # "call local.donna.blog-watch 'Blog watch'" or "hide the Hermes job b2c3d4e5f6a1".
 #
+# This cannot bring back a job the collector withheld. A label or job name with sk- in it
+# (task-runner, desk-helper) is refused by the safety rule before it reaches the repo, and is only
+# counted as "hidden by the safety rule"; rename the job itself to get it onto the wall.
+#
 # Each entry has an id, then a name (what the wall shows) or `hide: true` (the job is listed under
 # "Switched off" instead of getting a light). The id says where the job comes from:
 #

@@ -23,6 +23,7 @@ import {
 import { MAX_COMPUTERS_SHOWN } from '../scripts/lib/status/connections-schema.mjs'
 import { COMPUTER_SLUG, STATUSES } from '../scripts/lib/status/schema.mjs'
 import { checkJobs, checkLabel, checkConnectionName } from '../scripts/lib/status/safe.mjs'
+import { JOBS_SHAPE } from '../scripts/lib/status/jobs-schema.mjs'
 import { fakeClaudeToken, FAKE_EMAIL } from './helpers/fake-home.mjs'
 
 /* tests/fixtures/jobs-parity.json is the shared contract for the Readiness wall - the same bytes in
@@ -77,6 +78,26 @@ test('jobs parity: the four cadence kinds and every bound on them match', () => 
   assert.deepEqual(CADENCE.everyMinutes, fixture.cadence.everyMinutes)
   assert.deepEqual(CADENCE.slot, fixture.cadence.slot)
   assert.equal(CADENCE.slotRule, fixture.cadence.slotRule)
+})
+
+test('jobs parity: the contract lists every key a file, a block, an item, a cadence and a slot may have - and no other', () => {
+  const keysOf = (shape) => Object.keys(shape.keys).sort()
+  const allowed = fixture.allowedKeys
+  assert.deepEqual([...allowed.file].sort(), keysOf(JOBS_SHAPE))
+  assert.deepEqual([...allowed.blockFound].sort(), ['hidden', 'items', 'more', 'status'])
+  assert.deepEqual([...allowed.blockNotFound].sort(), ['status', 'why'])
+  for (const block of ['launchd', 'hermes']) assert.deepEqual(['hidden', 'items', 'more'], Object.keys(JOBS_SHAPE.keys[block].found).sort())
+  const launchdItem = JOBS_SHAPE.keys.launchd.found.items.of
+  const hermesItem = JOBS_SHAPE.keys.hermes.found.items.of
+  assert.deepEqual([...allowed.launchdItem].sort(), keysOf(launchdItem))
+  assert.deepEqual([...allowed.hermesItem].sort(), keysOf(hermesItem))
+  assert.deepEqual([...allowed.slot].sort(), keysOf(launchdItem.keys.cadence.variants.slots.keys.slots.of))
+  assert.deepEqual(Object.keys(allowed.cadence).sort(), [...CADENCE.kinds].sort())
+  for (const kind of CADENCE.kinds) assert.deepEqual([...allowed.cadence[kind]].sort(), keysOf(launchdItem.keys.cadence.variants[kind]), kind)
+  // Each list also says which are always there.
+  assert.deepEqual([...fixture.requiredKeys.launchdItem].sort(), [...launchdItem.required].sort())
+  assert.deepEqual([...fixture.requiredKeys.hermesItem].sort(), [...hermesItem.required].sort())
+  assert.deepEqual([...fixture.requiredKeys.file].sort(), [...JOBS_SHAPE.required].sort())
 })
 
 test('jobs parity: the label rule is written the same way on this side', () => {
