@@ -80,8 +80,23 @@
     "note": "Read means used. A jobs file is one JSON file, so it is parsed whole in memory; only these keys are then used. A Hermes job's name, prompt, skills and script are not among them - not used, kept or written, in any form. Of these, a plist's log paths are only stat-ed, and state and paused_at only decide whether a job is paused; none of those is written."
   },
   "names": {
+    "hermesId": "^[0-9a-f]{12}$",
+    "hermesIdRule": "A Hermes job id is exactly what Hermes makes: 12 lowercase hexadecimal characters (cron/jobs.py, uuid4().hex[:12]). Anything else - a word-like id, a longer or shorter one, capitals, a uuid - is not published; the job is counted in hidden.",
+    "hermesIdAccept": ["a1b2c3d4e5f6", "b2c3d4e5f6a1", "0123456789ab", "000000000000", "ffffffffffff"],
+    "hermesIdRefuse": [
+      { "id": "dr-smith-hiv-test-results", "why": "words: an id that spells out something is not one Hermes made" },
+      { "id": "task-runner", "why": "words" },
+      { "id": "A1B2C3D4E5F6", "why": "capitals" },
+      { "id": "a1b2c3d4e5f", "why": "11 characters" },
+      { "id": "a1b2c3d4e5f67", "why": "13 characters" },
+      { "id": "a1b2c3d4e5fg", "why": "a character that is not hexadecimal" },
+      { "id": "a1b2c3d4-e5f", "why": "a dash" },
+      { "id": "0f0e0d0c-1111-2222-3333-444455556666", "why": "a uuid" },
+      { "id": "", "why": "empty" },
+      { "id": " a1b2c3d4e5f", "why": "a space" }
+    ],
     "label": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$",
-    "labelRule": "A launchd label, and a Hermes job id, are held to this form and to the connection-name rule from tests/fixtures/connections-parity.json on top (no at sign, slash, backslash, key or token start, uuid, stretch of 24 or more characters without a separator, and not this computer's username, name or home folder). One that fails is not written; it is counted in hidden. A Hermes profile is held to the connection-name rule and Hermes's profile rule as it is. A Hermes job has no name of its own in the file: see hermesJobName.",
+    "labelRule": "A launchd label is held to this form and to the connection-name rule from tests/fixtures/connections-parity.json on top (no at sign, slash, backslash, key or token start, uuid, stretch of 24 or more characters without a separator, and not this computer's username, name or home folder). One that fails is not written; it is counted in hidden. A Hermes job id is held to hermesId instead (see hermesIdRule). A Hermes profile is held to the connection-name rule and Hermes's profile rule as it is. A Hermes job has no name of its own in the file: see hermesJobName.",
     "labelAccept": [
       "local.donna.story-belt-daily",
       "local.donna.agent-status-collector",
@@ -253,7 +268,7 @@
     "a Hermes job that runs once (schedule kind at or once) is written with enabled false and cadence unknown; a job is on unless its enabled says otherwise (Hermes reads a record with no enabled key as on) or it has a pause marker - its state is paused, or it has a paused_at time - which Hermes treats as not firing even when enabled is true",
     "a Hermes last_status is written as ok, error or unknown and nothing else: ok for ok; error for error, delivery_failed, blocked_config or interrupted, in any case; every other word, and no word, is unknown",
     "a Hermes job in a profile is listed by the profile's name, with the default profile (the Hermes home itself) first, then the other profiles A to Z",
-    "hidden counts every job the collector withheld: a plist or jobs file that could not be read, a label or id that fails the safety rule (a Hermes job's stored name is never involved), a profile that fails it, and an id seen twice. The shared name rule refuses any text with sk- in it, because that is how a key starts, so task-runner, desk-helper and risk-monitor are withheld too. The rule is not loosened, and renaming in jobs.yml cannot help, because the board never sees the name; rename the job where it is made. Jobs past the cap are counted in more. The board re-checks every name, adds what it drops to hidden, and should say how many jobs were hidden by the safety rule",
+    "hidden counts every job the collector withheld: a plist or jobs file that could not be read, a label, or a Hermes id that is not 12 lowercase hex characters, or an id that fails the safety rule (a Hermes job's stored name is never involved), a profile that fails it, and an id seen twice. The shared name rule refuses any text with sk- in it, because that is how a key starts, so task-runner, desk-helper and risk-monitor are withheld too. The rule is not loosened, and renaming in jobs.yml cannot help, because the board never sees the name; rename the job where it is made. Jobs past the cap are counted in more. The board re-checks every name, adds what it drops to hidden, and should say how many jobs were hidden by the safety rule",
     "when the computer's timezone is not one this collector knows, timezone is UTC, every schedule is still written, and no due times are",
     "the file never says whether a job is on time or late; the board works that out from dueAt, dueBeforeAt and the last report or run",
     "a file older than staleAfterHours is shown as not checked since its time, never as a light",

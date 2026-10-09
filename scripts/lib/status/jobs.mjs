@@ -45,7 +45,7 @@
 
 import { readdir, stat } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
-import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, JOBS_WHY, hermesJobName } from './jobs-schema.mjs'
+import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, JOBS_WHY, HERMES_ID, hermesJobName } from './jobs-schema.mjs'
 import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
 import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
@@ -283,7 +283,10 @@ function scheduleOf(schedule, zone, profileZone) {
 // One job of the file as an item, or null when its id, or the name made from it, is one the board would
 // refuse. The job's stored name is not looked at (see the header): it is called "Hermes job <id>".
 function hermesItem(profile, row, deps, zone, profileZone) {
-  if (!isPlainObject(row) || typeof row.id !== 'string' || checkLabel(row.id, 'id', deps.identity).length) return null
+  // The id is held to the shape Hermes makes, and then to the same safety checks the gate makes (this
+  // computer's name inside a hex id, say), so a bad id is hidden here and counted instead of reaching the
+  // gate, which would refuse the whole file.
+  if (!isPlainObject(row) || typeof row.id !== 'string' || !HERMES_ID.test(row.id) || checkLabel(row.id, 'id', deps.identity).length) return null
   const name = hermesJobName(row.id)
   if (checkConnectionName(name, 'name', deps.identity).length) return null
   const { cadence, oneShot } = scheduleOf(row.schedule, zone, profileZone)

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import * as realFs from 'node:fs/promises'
 import { join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
@@ -311,16 +312,16 @@ test('names that only look like a key (task-runner, desk-helper, risk-monitor) a
   try {
     await writeHermes(fake, { now: NOW })
     await writeJobs(fake, { jobs: [
-      hermesJob({ id: 'task-runner', name: 'Task-runner brief' }),
-      hermesJob({ id: 'desk-check', name: 'Desk-check report' }),
-      hermesJob({ id: 'risk-review', name: 'Risk-review' }),
+      hermesJob({ raw: true, id: 'task-runner', name: 'Task-runner brief' }),
+      hermesJob({ raw: true, id: 'desk-check', name: 'Desk-check report' }),
+      hermesJob({ raw: true, id: 'risk-review', name: 'Risk-review' }),
       hermesJob({ id: 'fine1', name: 'Fine brief' })
     ] })
     const plists = Object.fromEntries([...labels, 'local.fine'].map((label) => [`${label}.plist`, { Label: label, StartInterval: 3600 }]))
     const doc = await collectJobs(depsFor(fake, fakePrograms({ plists, launchctl: launchctlTable([]) })), 'Mac Mini')
     assert.deepEqual(doc.launchd.items.map((item) => item.label), ['local.fine'])
     assert.equal(doc.launchd.hidden, 4, 'every label the rule withheld is counted')
-    assert.deepEqual(doc.hermes.items.map((item) => item.name), ['Hermes job fine1'])
+    assert.deepEqual(doc.hermes.items.map((item) => item.name), [`Hermes job ${hid('fine1')}`])
     assert.equal(doc.hermes.hidden, 3)
     assert.deepEqual(checkJobs(doc, fake.identity), [])
     const lines = summarizeJobs(doc)
@@ -635,15 +636,31 @@ test('a plist full of secrets: arguments, environment settings, folders, logs an
 
 const noProgram = Object.assign(async () => { throw new Error('no program may run') }, { calls: [] })
 const hermesDeps = (fake, extra = {}) => ({ home: fake.home, env: {}, platform: 'darwin', now: NOW, identity: fake.identity, stateDir: stateDirOf(fake), exec: noProgram, ...extra })
-const hermesJob = (extra = {}) => ({
-  id: 'a1b2c3d4e5f6',
-  name: 'YouTube morning brief',
-  enabled: true,
-  schedule: { kind: 'cron', expr: '30 6 * * *', timezone: ZONE },
-  last_run_at: '2026-10-09T10:30:04+00:00',
-  last_status: 'ok',
-  ...extra
-})
+// Hermes makes a job's id from 12 random lowercase hex characters (cron/jobs.py, uuid4().hex[:12]), and only
+// such an id is published. The tests below name their jobs in words; hid() turns a word into an id of that
+// shape, always the same one, and wordOf() turns it back. `raw: true` keeps an id exactly as given, for the ids
+// Hermes would never make.
+const HEX_ID = /^[0-9a-f]{12}$/
+const WORDS = new Map()
+const hid = (word) => {
+  const id = createHash('sha256').update(word).digest('hex').slice(0, 12)
+  WORDS.set(id, word)
+  return id
+}
+const wordOf = (id) => WORDS.get(id) ?? id
+const hermesJob = ({ raw = false, ...extra } = {}) => {
+  const job = {
+    id: 'a1b2c3d4e5f6',
+    name: 'YouTube morning brief',
+    enabled: true,
+    schedule: { kind: 'cron', expr: '30 6 * * *', timezone: ZONE },
+    last_run_at: '2026-10-09T10:30:04+00:00',
+    last_status: 'ok',
+    ...extra
+  }
+  if (!raw && typeof job.id === 'string' && !HEX_ID.test(job.id)) job.id = hid(job.id)
+  return job
+}
 const writeJobs = (fake, jobs, profile = null) => fake.write(`${profile ? `.hermes/profiles/${profile}` : '.hermes'}/cron/jobs.json`, jobs)
 const withProfile = (name) => ({ [name]: { 'config.yaml': 'model: gpt-5.1\n' } })
 const wholeDoc = (hermes) => ({ schema: JOBS_SCHEMA, takenAt: iso(NOW), computer: 'Mac Mini', timezone: ZONE, launchd: { status: 'not found' }, hermes })
@@ -716,7 +733,9 @@ test('each profile\'s own jobs, listed under its name: default first, then A to 
     await writeJobs(fake, { jobs: [hermesJob({ id: 'job3', name: 'Donna job' })] }, 'donna')
     await writeJobs(fake, { jobs: [hermesJob({ id: 'job4', name: 'Coder job' })] }, 'coder')
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
-    assert.deepEqual(block.items.map((item) => `${item.profile}/${item.name}`), ['default/Hermes job job1', 'default/Hermes job job2', 'coder/Hermes job job4', 'donna/Hermes job job3'])
+    const inDefault = [hid('job1'), hid('job2')].sort()
+    assert.deepEqual(block.items.map((item) => `${item.profile}/${item.id}`), [...inDefault.map((id) => `default/${id}`), `coder/${hid('job4')}`, `donna/${hid('job3')}`])
+    assert.deepEqual(block.items.map((item) => item.name), block.items.map((item) => `Hermes job ${item.id}`))
     assert.deepEqual([block.hidden, block.more], [0, 0])
   } finally {
     await fake.cleanup()
@@ -742,7 +761,7 @@ test('switched off, and run once: enabled false, no due times; a one-shot has no
       hermesJob({ id: 'completed', name: 'Completed state', enabled: true, state: 'completed' })
     ] })
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
-    const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
+    const byId = Object.fromEntries(block.items.map((item) => [wordOf(item.id), item]))
     assert.equal(byId.paused.enabled, false)
     assert.deepEqual(byId.paused.cadence, { kind: 'slots', slots: [{ minute: 30, hour: 6 }] }, 'a paused job keeps its schedule')
     assert.equal(byId.paused.dueAt, undefined)
@@ -781,7 +800,7 @@ test('a job in another timezone than the computer\'s, or one that is not a zone,
       at('mars', { kind: 'cron', expr: '30 6 * * *', timezone: 'Mars/Olympus' }),
       at('number', { kind: 'cron', expr: '30 6 * * *', timezone: 5 })
     ] })
-    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item]))
+    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [wordOf(item.id), item]))
     for (const id of ['same', 'none', 'null', 'empty']) assert.equal(byId[id].cadence.kind, 'slots', id)
     for (const id of ['london', 'mars', 'number']) {
       assert.deepEqual(byId[id].cadence, { kind: 'unknown' }, id)
@@ -789,8 +808,8 @@ test('a job in another timezone than the computer\'s, or one that is not a zone,
     }
     // The computer's zone is whatever machineZone() made of it; a job in New York on a Kolkata computer is in another zone.
     const elsewhere = await collectHermesJobs(hermesDeps(fake), 'Asia/Calcutta')
-    assert.equal(elsewhere.items.find((item) => item.id === 'same').cadence.kind, 'unknown')
-    assert.equal(elsewhere.items.find((item) => item.id === 'none').cadence.kind, 'slots')
+    assert.equal(elsewhere.items.find((item) => wordOf(item.id) === 'same').cadence.kind, 'unknown')
+    assert.equal(elsewhere.items.find((item) => wordOf(item.id) === 'none').cadence.kind, 'slots')
   } finally {
     await fake.cleanup()
   }
@@ -838,7 +857,7 @@ test('an interval job is every N minutes, whatever the zone; a bad interval has 
       at('missing', { kind: 'interval' }),
       at('huge', { kind: 'interval', minutes: 1e9 })
     ] })
-    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item]))
+    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [wordOf(item.id), item]))
     assert.deepEqual(byId.half.cadence, { kind: 'every', minutes: 30 })
     assert.equal(byId.half.dueAt, '2026-10-09T14:00:00Z', 'the check time minus the grace minus one interval')
     assert.equal(byId.half.dueBeforeAt, '2026-10-09T13:30:00Z')
@@ -908,7 +927,7 @@ test('last_status words become ok, error or unknown, whatever case or spacing; a
     const words = ['ok', 'OK', ' Ok ', 'error', 'ERROR', ' error ', 'delivery_failed', 'blocked_config', 'interrupted', 'success', 'completed', 'failed', 'running', 'skipped', 'delivered', '', null, 5, true, ['ok'], { status: 'ok' }]
     await writeJobs(fake, { jobs: words.map((word, index) => hermesJob({ id: `job-${index}`, name: `Job ${index}`, last_status: word })) })
     const items = (await collectHermesJobs(hermesDeps(fake), ZONE)).items
-    const results = items.sort((a, b) => Number(a.id.slice(4)) - Number(b.id.slice(4))).map((item) => item.lastResult)
+    const results = items.sort((a, b) => Number(wordOf(a.id).slice(4)) - Number(wordOf(b.id).slice(4))).map((item) => item.lastResult)
     assert.deepEqual(results, [...Array(3).fill('ok'), ...Array(6).fill('error'), ...Array(12).fill('unknown')])
     assert.deepEqual(Object.keys(HERMES_RESULT_WORDS), ['ok', 'error'])
   } finally {
@@ -931,7 +950,7 @@ test('last_run_at is read as Hermes writes it, and a time nobody could believe i
       zero: 0
     }
     await writeJobs(fake, { jobs: Object.entries(stamps).map(([id, stamp]) => hermesJob({ id, name: `Job ${id}`, last_run_at: stamp })) })
-    const at = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item.lastRunAt]))
+    const at = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [wordOf(item.id), item.lastRunAt]))
     for (const id of ['offset', 'zulu', 'naive', 'epoch']) assert.equal(at[id], '2026-10-09T10:30:04Z', id)
     for (const id of ['future', 'ancient', 'text', 'zero']) assert.equal(at[id], undefined, id)
   } finally {
@@ -955,15 +974,15 @@ test('a job whose id or shape the board would refuse is dropped and counted; the
       hermesJob({ id: 'numname', name: 7 }),
       // Ids the board refuses, and rows that are not jobs.
       hermesJob({ id: undefined, name: 'No id' }),
-      hermesJob({ id: 'bad/id', name: 'Slash id' }),
-      hermesJob({ id: FAKE_UUID, name: 'Uuid id' }),
+      hermesJob({ raw: true, id: 'bad/id', name: 'Slash id' }),
+      hermesJob({ raw: true, id: FAKE_UUID, name: 'Uuid id' }),
       hermesJob({ id: 'fine', name: 'Fine job again' }),
       'not an object',
       null,
       ['a list']
     ] })
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
-    assert.deepEqual(block.items.map((item) => item.id), ['dash', 'fine', 'key', 'long', 'mail', 'numname', 'path', 'user'])
+    assert.deepEqual(block.items.map((item) => item.id), ['dash', 'fine', 'key', 'long', 'mail', 'numname', 'path', 'user'].map(hid).sort())
     assert.deepEqual(block.items.map((item) => item.name), block.items.map((item) => `Hermes job ${item.id}`))
     assert.equal(block.hidden, 7, 'three bad ids, the id seen twice, and three rows that are not jobs')
     const text = JSON.stringify(block)
@@ -1030,17 +1049,71 @@ test('every Hermes job is published as "Hermes job <id>": named, auto-named, pro
   }
 })
 
-test('a Hermes id that cannot make a name the board accepts drops the job and counts it', async () => {
+// Hermes makes a job's id from 12 random lowercase hex characters (cron/jobs.py, uuid4().hex[:12]). A general
+// "looks like a label" rule would let "dr-smith-hiv-test-results" through, and the id is published in the file
+// and in the name made from it - so only the shape Hermes makes is allowed, here and in the gate.
+test('only an id Hermes could have made - 12 lowercase hex characters - is published; a word-like id is hidden and counted', async () => {
   const fake = await makeFakeHome()
   try {
     await writeHermes(fake, { now: NOW })
-    // "Hermes job " takes 11 of the 60 characters a name may have, so an id may be 49 characters.
-    const fits = `${'a'.repeat(23)}-${'b'.repeat(23)}-c`
-    await writeJobs(fake, { jobs: [hermesJob({ id: 'a1b2c3d4e5f6' }), hermesJob({ id: fits }), hermesJob({ id: `${fits}d` }), hermesJob({ id: 'x'.repeat(24) })] })
+    const good = [...fixture.names.hermesIdAccept]
+    const bad = fixture.names.hermesIdRefuse.map(({ id }) => id).filter((id) => id !== '')
+    await writeJobs(fake, { jobs: [
+      ...good.map((id) => hermesJob({ raw: true, id })),
+      ...bad.map((id) => hermesJob({ raw: true, id })),
+      hermesJob({ raw: true, id: '' }),
+      hermesJob({ raw: true, id: 123456789012 }),
+      hermesJob({ raw: true, id: 'a1b2c3d4e5f6\n' }),
+      hermesJob({ raw: true, id: '\ua1b2c3d4e5f' })
+    ] })
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
-    assert.deepEqual(block.items.map((item) => item.id), ['a1b2c3d4e5f6', fits])
-    assert.equal(block.items[1].name.length, 60)
-    assert.equal(block.hidden, 2, 'one id too long for its name, one that is a long unbroken run')
+    assert.deepEqual(block.items.map((item) => item.id), good.slice().sort())
+    assert.equal(block.hidden, bad.length + 4)
+    const text = JSON.stringify(block)
+    for (const word of ['dr-smith', 'hiv', 'task-runner', 'A1B2C3D4E5F6']) assert.ok(!text.includes(word), `the answer holds ${word}`)
+    assert.deepEqual(checkJobs(wholeDoc(block), fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a hex id that has this computer\'s name in it is hidden by the collector, not left for the gate to refuse the whole file', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    // A username of three hex letters turns up inside some ids by chance.
+    const identity = { ...fake.identity, username: 'bad' }
+    await writeJobs(fake, { jobs: [hermesJob({ raw: true, id: 'a1bad2c3d4e5' }), hermesJob({ raw: true, id: 'a1b2c3d4e5f6' })] })
+    const block = await collectHermesJobs(hermesDeps(fake, { identity }), ZONE)
+    assert.deepEqual(block.items.map((item) => item.id), ['a1b2c3d4e5f6'])
+    assert.equal(block.hidden, 1)
+    assert.deepEqual(checkJobs(wholeDoc(block), identity), [], 'the gate would have refused the file if the id had been written')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// The collector holds the rule itself. If it did not, a bad id would reach the gate, the gate would refuse the whole
+// jobs file, and every job - the launchd ones too - would be written as unavailable because of one id.
+test('a job with a bad id is hidden and counted while every other job is still written, and the file is NOT turned into "unavailable"', async () => {
+  const fake = await macHome(Object.keys(ORDINARY))
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'fine1' }),
+      hermesJob({ raw: true, id: 'dr-smith-hiv-test-results', name: 'Email Dr Smith about my HIV test results' }),
+      hermesJob({ raw: true, id: 'task-runner' }),
+      hermesJob({ id: 'fine2' })
+    ] })
+    const doc = await collectJobs(depsFor(fake, fakePrograms({ plists: ORDINARY, launchctl: ORDINARY_TABLE })), 'Mac Mini')
+    assert.equal(doc.launchd.status, 'found')
+    assert.equal(doc.launchd.items.length, Object.keys(ORDINARY).length, 'the launchd jobs are all still there')
+    assert.equal(doc.hermes.status, 'found')
+    assert.deepEqual(doc.hermes.items.map((item) => item.id), [hid('fine1'), hid('fine2')].sort())
+    assert.equal(doc.hermes.hidden, 2, 'both bad ids are counted')
+    assert.deepEqual(checkJobs(doc, fake.identity), [], 'the gate has nothing to refuse')
+    assert.ok(!JSON.stringify(doc).includes('unavailable'))
+    assert.ok(!JSON.stringify(doc).toLowerCase().includes('smith'))
   } finally {
     await fake.cleanup()
   }
@@ -1057,7 +1130,7 @@ test('a profile the board would refuse is counted and its jobs are not read; a b
     await fake.write('.hermes/profiles/broken/cron/jobs.json', '{ this is not json')
     await fake.write('.hermes/profiles/empty/cron/jobs.json', JSON.stringify({ not: 'jobs' }))
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
-    assert.deepEqual(block.items.map((item) => item.id), ['ok1', 'ok2'])
+    assert.deepEqual(block.items.map((item) => item.id), [hid('ok1'), hid('ok2')])
     assert.equal(block.hidden, 4, 'two refused profiles, a broken file, a file with no jobs list')
     assert.ok(!JSON.stringify(block).includes('Capital') && !JSON.stringify(block).includes(FAKE_USERNAME))
   } finally {
@@ -1076,7 +1149,7 @@ test('a jobs file over a megabyte is not one Hermes wrote: it is not read, and c
   }
 })
 
-test('40 jobs at most, in name order within a profile; the rest are counted in more', async () => {
+test('40 jobs at most, in id order within a profile; the rest are counted in more', async () => {
   const fake = await makeFakeHome()
   try {
     await writeHermes(fake, { now: NOW })
@@ -1085,7 +1158,7 @@ test('40 jobs at most, in name order within a profile; the rest are counted in m
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
     assert.equal(block.items.length, fixture.caps.hermes)
     assert.equal(block.more, 3)
-    assert.deepEqual(block.items.map((item) => item.id), jobs.slice(0, 40).map((job) => job.id))
+    assert.deepEqual(block.items.map((item) => item.id), jobs.map((job) => job.id).sort().slice(0, 40))
     assert.deepEqual(checkJobs(wholeDoc(block), fake.identity), [])
   } finally {
     await fake.cleanup()
@@ -1101,7 +1174,7 @@ test('with no zone, a Hermes job that names none is listed with its schedule and
       hermesJob({ id: 'zoned', name: 'Zoned' })
     ] })
     const block = await collectHermesJobs(hermesDeps(fake), null)
-    const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
+    const byId = Object.fromEntries(block.items.map((item) => [wordOf(item.id), item]))
     assert.equal(byId.plain.cadence.kind, 'slots')
     assert.equal(byId.zoned.cadence.kind, 'unknown')
     assert.ok(block.items.every((item) => item.dueAt === undefined))
@@ -1163,8 +1236,8 @@ test('a Hermes jobs file full of prompts, destinations, error text and keys: non
     const doc = wholeDoc(block)
     assert.deepEqual(checkJobs(doc, fake.identity), [], 'the gate refused the answer')
     assert.equal(block.items.length, 4)
-    assert.equal(block.items.find((item) => item.id === 'bad1').lastResult, 'error', 'it still says the job failed - only that it did')
-    assert.deepEqual(block.items.map((item) => item.name), ['Hermes job bad1', 'Hermes job bad2', 'Hermes job ok1', 'Hermes job d1'])
+    assert.equal(block.items.find((item) => wordOf(item.id) === 'bad1').lastResult, 'error', 'it still says the job failed - only that it did')
+    assert.deepEqual(block.items.map((item) => item.name), [...[hid('bad1'), hid('bad2'), hid('ok1')].sort(), hid('d1')].map((id) => `Hermes job ${id}`))
     const written = JSON.stringify(doc, null, 2)
     const planted = [
       token, refresh, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME,

@@ -19,6 +19,7 @@ import {
   EXIT_CODE,
   CADENCE,
   LABEL,
+  HERMES_ID,
   jobsPath
 } from '../scripts/lib/status/jobs-schema.mjs'
 import { MAX_COMPUTERS_SHOWN } from '../scripts/lib/status/connections-schema.mjs'
@@ -69,7 +70,7 @@ test('jobs parity: caps, grace, look-back, states, results and the exit-code ran
 test('jobs parity: a Hermes job is published under one fixed name made from its id, and the gate accepts no other', () => {
   assert.equal(fixture.hermesJobName, 'Hermes job {id}')
   assert.equal(hermesJobName('a1b2c3d4e5f6'), 'Hermes job a1b2c3d4e5f6')
-  for (const id of fixture.names.labelAccept) {
+  for (const id of fixture.names.hermesIdAccept) {
     assert.equal(hermesJobName(id), fixture.hermesJobName.replace('{id}', id))
     assert.deepEqual(checkConnectionName(hermesJobName(id), 'name', identity), [], id)
   }
@@ -127,6 +128,7 @@ test('jobs parity: the contract lists every key a file, a block, an item, a cade
 
 test('jobs parity: the label rule is written the same way on this side', () => {
   assert.equal(LABEL.pattern.source, fixture.names.label)
+  assert.equal(HERMES_ID.source, fixture.names.hermesId)
 })
 
 // --- the label rule -------------------------------------------------------------------------------------
@@ -170,7 +172,7 @@ test('the gate accepts the sample, and every accept example as a launchd label a
   for (const name of fixture.names.labelAccept) {
     const doc = clone(fixture.sample)
     doc.launchd.items = [{ label: name, cadence: { kind: 'always' }, state: 'running' }]
-    doc.hermes.items = [{ profile: 'default', id: name, name: hermesJobName(name), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }]
+    doc.hermes.items = [{ profile: 'default', id: 'a1b2c3d4e5f6', name: hermesJobName('a1b2c3d4e5f6'), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }]
     accepted(doc)
   }
 })
@@ -190,6 +192,29 @@ test('the gate refuses every refuse example wherever a label goes', () => {
     refused((doc) => { doc.launchd.items[0].label = name }, /launchd\.items\[0\]\.label/)
     refused((doc) => { doc.hermes.items[0].id = name }, /hermes\.items\[0\]\.id/)
   }
+})
+
+test('a Hermes job id is exactly what Hermes makes - 12 lowercase hex characters - in the gate, whatever else the label rule would let through', () => {
+  assert.ok(fixture.names.hermesIdAccept.length >= 5 && fixture.names.hermesIdRefuse.length >= 10)
+  for (const id of fixture.names.hermesIdAccept) {
+    const doc = clone(fixture.sample)
+    doc.hermes.items[0].id = id
+    doc.hermes.items[0].name = hermesJobName(id)
+    accepted(doc)
+  }
+  for (const { id, why } of fixture.names.hermesIdRefuse) {
+    refused((doc) => { doc.hermes.items[0].id = id; doc.hermes.items[0].name = hermesJobName(id) }, /hermes\.items\[0\]\.id: /)
+  }
+  // Ids the general label rule is happy with, and Hermes would never make.
+  for (const id of ['dr-smith-hiv-test-results', 'nightly-brief', 'job_7']) {
+    assert.deepEqual(checkLabel(id, 'id', identity), [], `${id} is a fine label`)
+    refused((doc) => { doc.hermes.items[0].id = id; doc.hermes.items[0].name = hermesJobName(id) }, /hermes\.items\[0\]\.id: is not in the expected form/)
+  }
+  // A problem about an id never repeats it.
+  const doc = clone(fixture.sample)
+  doc.hermes.items[0].id = 'dr-smith-hiv-test-results'
+  doc.hermes.items[0].name = hermesJobName('dr-smith-hiv-test-results')
+  for (const problem of checkJobs(doc, identity)) assert.ok(!problem.includes('smith') && !problem.includes('hiv'), problem)
 })
 
 test('the gate refuses every key a job\'s arguments, settings, folders, prompts or error text could travel under', () => {
@@ -330,7 +355,8 @@ test('each label once per computer, each Hermes job once per profile', () => {
 
 test('the caps are the gate\'s, not one more', () => {
   const launchd = (count) => Array.from({ length: count }, (_, index) => ({ label: `local.job-${index}`, cadence: { kind: 'always' }, state: 'running' }))
-  const hermes = (count) => Array.from({ length: count }, (_, index) => ({ profile: 'default', id: `job-${index}`, name: hermesJobName(`job-${index}`), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }))
+  const hexId = (index) => index.toString(16).padStart(12, '0')
+  const hermes = (count) => Array.from({ length: count }, (_, index) => ({ profile: 'default', id: hexId(index), name: hermesJobName(hexId(index)), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }))
   const ok = clone(fixture.sample)
   ok.launchd.items = launchd(fixture.caps.launchd)
   ok.hermes.items = hermes(fixture.caps.hermes)

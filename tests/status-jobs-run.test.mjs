@@ -457,7 +457,7 @@ test('a Mac and a Hermes full of secrets, through a whole committed run: the fil
     // What it did keep: the jobs the wall shows, each Hermes job under its id, never the name the file gives it.
     assert.deepEqual(doc.launchd.items.map((item) => item.label), ['local.donna.blog-watch', 'local.donna.security-changelog', 'local.donna.story-belt-daily'])
     assert.equal(doc.launchd.hidden, 2, 'the label with the username and the one with the email')
-    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Hermes job brief1/ok', 'default/Hermes job mail1/ok', 'default/Hermes job review1/error', 'default/Hermes job unnamed1/ok', 'donna/Hermes job donna1/error'])
+    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Hermes job a11100000004/ok', 'default/Hermes job b1ef00000001/ok', 'default/Hermes job c0de00000002/error', 'default/Hermes job dead00000003/ok', 'donna/Hermes job d0a000000005/error'])
     assert.equal(doc.hermes.hidden, 1, 'only the profile named after the person: a job called after an email is no longer a reason to hide it')
 
     const [claim] = await readdir(join(stateDir, 'claims'))
@@ -493,6 +493,34 @@ test('if even the unavailable file would not pass the gate, nothing is written: 
     assert.deepEqual(await filesUnder(result.target), [])
     assert.match(result.stderr, /Nothing written/)
     assert.match(result.stderr, /jobs: takenAt/)
+    await rm(result.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('through a whole run: a Hermes job with a bad id is hidden and counted, the other jobs are written, and the file is not turned into "unavailable"', async () => {
+  const { fake, extra } = await aMac()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const job = (id, name) => ({ id, name, enabled: true, schedule: { kind: 'cron', expr: '30 6 * * *' }, last_status: 'ok' })
+    await fake.write('.hermes/cron/jobs.json', { jobs: [
+      job('a1b2c3d4e5f6', 'Morning brief'),
+      job('dr-smith-hiv-test-results', 'Email Dr Smith about my HIV test results'),
+      job('b2c3d4e5f6a1', 'Evening brief')
+    ] })
+    const result = await run(fake, ['--only', 'jobs'], { extra })
+    assert.equal(result.code, 0, result.stderr)
+    assert.ok(!/refused by the safety check/.test(result.stderr + result.stdout), 'the jobs file was turned into unavailable')
+    const doc = await readAt(result.target, JOBS)
+    assert.equal(doc.launchd.status, 'found')
+    assert.equal(doc.launchd.items.length, 3)
+    assert.equal(doc.hermes.status, 'found')
+    assert.deepEqual(doc.hermes.items.map((item) => item.name), ['Hermes job a1b2c3d4e5f6', 'Hermes job b2c3d4e5f6a1'])
+    assert.equal(doc.hermes.hidden, 1)
+    assert.match(result.stdout, /- Hermes jobs found: 2 listed \(2 on, 0 off\), 1 hidden, 0 more/)
+    const written = JSON.stringify(doc) + result.stdout + result.stderr
+    for (const word of ['smith', 'Smith', 'HIV', 'hiv', 'Morning brief', 'Evening brief']) assert.ok(!written.includes(word), `the run holds ${word}`)
     await rm(result.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()

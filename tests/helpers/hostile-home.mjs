@@ -214,14 +214,14 @@ async function hostileHermes(fake, now) {
   const unnamedPrompt = 'private-prompt-words about client Jones and the sale of the house on the hill'
   await at('cron/jobs.json', {
     jobs: [
-      { id: 'brief1', name: 'Morning brief', enabled: true, schedule: { kind: 'cron', expr: '30 6 * * *', timezone: 'America/New_York' }, last_run_at: new Date(now - 13 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'ok', ...jobBaggage('one') },
-      { id: 'review1', name: 'Weekly review', enabled: true, schedule: { kind: 'cron', expr: '0 9 * * 1', timezone: 'America/New_York' }, last_run_at: new Date(now - 2 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'error', ...jobBaggage('two') },
+      { id: 'b1ef00000001', name: 'Morning brief', enabled: true, schedule: { kind: 'cron', expr: '30 6 * * *', timezone: 'America/New_York' }, last_run_at: new Date(now - 13 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'ok', ...jobBaggage('one') },
+      { id: 'c0de00000002', name: 'Weekly review', enabled: true, schedule: { kind: 'cron', expr: '0 9 * * 1', timezone: 'America/New_York' }, last_run_at: new Date(now - 2 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'error', ...jobBaggage('two') },
       // Hermes named this one after its prompt, as it does a job nobody named: the prompt must not come out as a name.
-      { id: 'unnamed1', name: Array.from(unnamedPrompt).slice(0, 50).join('').trim(), enabled: true, schedule: { kind: 'cron', expr: '0 8 * * *', timezone: 'America/New_York' }, last_status: 'ok', ...jobBaggage('five'), prompt: unnamedPrompt },
-      { id: 'mail1', name: FAKE_EMAIL, enabled: true, schedule: { kind: 'cron', expr: '0 7 * * *' }, last_status: 'ok', ...jobBaggage('three') }
+      { id: 'dead00000003', name: Array.from(unnamedPrompt).slice(0, 50).join('').trim(), enabled: true, schedule: { kind: 'cron', expr: '0 8 * * *', timezone: 'America/New_York' }, last_status: 'ok', ...jobBaggage('five'), prompt: unnamedPrompt },
+      { id: 'a11100000004', name: FAKE_EMAIL, enabled: true, schedule: { kind: 'cron', expr: '0 7 * * *' }, last_status: 'ok', ...jobBaggage('three') }
     ]
   })
-  await at('profiles/donna/cron/jobs.json', { jobs: [{ id: 'donna1', name: 'Donna brief', enabled: true, schedule: { kind: 'cron', expr: '15 8 * * *' }, last_status: 'error', ...jobBaggage('four') }] })
+  await at('profiles/donna/cron/jobs.json', { jobs: [{ id: 'd0a000000005', name: 'Donna brief', enabled: true, schedule: { kind: 'cron', expr: '15 8 * * *' }, last_status: 'error', ...jobBaggage('four') }] })
   if (HAVE_SQLITE) {
     await makeStateDb(join(fake.home, '.hermes', 'state.db'), [
       { id: FAKE_UUID, source: 'telegram', user_id: FAKE_EMAIL, chat_id: 'telegram-chat-77', started_at: (now - HOUR) / 1000, last_activity_at: (now - 600_000) / 1000, title: 'secret-client roadmap', cwd: `/Users/${FAKE_USERNAME}/secret-client`, billing_base_url: 'https://mcp.example.com/bill' },

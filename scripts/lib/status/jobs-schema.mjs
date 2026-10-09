@@ -59,10 +59,13 @@ export const CADENCE = {
   slotRule: 'A slot is one minute of the hour. With an hour it is one time of day; without, it is every hour. With a weekday (0 is Sunday) it is that day of the week; with a day (1 to 31) that day of the month; with neither, every day. A slot never has both a weekday and a day. Slots are written in order of day, weekday, hour, then minute, a missing value first.'
 }
 
-// A launchd label, and a Hermes job id: letters, numbers and . - _ , starting with a letter or
-// number. The connection-name rule applies on top (safe.mjs, checkLabel), so a label the board
-// would refuse is never written.
+// A launchd label: letters, numbers and . - _ , starting with a letter or number. The connection-name
+// rule applies on top (safe.mjs, checkLabel), so a label the board would refuse is never written.
 export const LABEL = { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/ }
+// A Hermes job id is exactly what Hermes makes: 12 random lowercase hex characters (cron/jobs.py,
+// uuid4().hex[:12]). Nothing else is published - a looser "looks like a label" rule would let an id that
+// spells out words through, and the id is written in the file and in the name made from it.
+export const HERMES_ID = /^[0-9a-f]{12}$/
 
 export function jobsPath(label) {
   const slug = computerSlug(label)
@@ -146,7 +149,7 @@ const hermesItemShape = {
   type: 'object',
   keys: {
     profile: { type: 'profileName' },
-    id: { type: 'label' },
+    id: { type: 'pattern', pattern: HERMES_ID },
     name: { type: 'connName' },
     enabled: { type: 'boolean' },
     cadence: cadenceShape,

@@ -292,3 +292,16 @@ test('the docs say that a refused jobs file costs the other parts nothing, and w
   const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
   assert.ok(contract.rules.some((rule) => /refuses the whole jobs file/.test(rule)))
 })
+
+test('the docs say a Hermes job id must be exactly the 12 hex characters Hermes makes, and that anything else is hidden and counted', async () => {
+  const jobs = flat(section(await read('.agent-team/status/README.md'), '## The jobs file'))
+  assert.match(jobs, /A Hermes job id must be exactly what Hermes makes: 12 lowercase hexadecimal characters, such as `a1b2c3d4e5f6`/)
+  assert.match(jobs, /Anything else, such as an id that spells out words[^.]*is not published/)
+  assert.match(jobs, /checked by the collector and again by the gate/)
+  assert.match(jobs, /one bad id never turns the file into `unavailable`/)
+  assert.doesNotMatch(jobs, /the id can be 49 characters at most/)
+  assert.doesNotMatch(jobs, /A LaunchAgent's label and a Hermes job's id must pass the same name rule/)
+  const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
+  assert.match(contract.names.hermesIdRule, /12 lowercase hexadecimal characters/)
+  assert.ok(contract.rules.some((rule) => /Hermes id that is not 12 lowercase hex characters/.test(rule)))
+})

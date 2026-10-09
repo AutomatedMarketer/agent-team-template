@@ -537,12 +537,15 @@ nothing to install and no command to run. The name lives in the team repo, where
 purpose; the collector never reads it. To keep a job off the wall instead, ask Claude to add
 `hide: true` to its entry.
 
-**Names of the rest.** A LaunchAgent's label and a Hermes job's id must pass the same name rule as the
-Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this computer's
-username or name), and also letters, numbers and `.` `-` `_` only. A Hermes job's name is made from its
-id, so it must pass too: after the 11 characters of `Hermes job ` the id can be 49 characters at most,
-and a name is 60 at most. One that fails is **not written**: it is counted in `hidden`, so the wall can
-say "n jobs not shown". The name rule refuses anything with `sk-` in it, because that is how a key starts, so a job
+**Ids and labels.** A Hermes job id must be exactly what Hermes makes: 12 lowercase hexadecimal
+characters, such as `a1b2c3d4e5f6`. Anything else, such as an id that spells out words
+(`dr-smith-hiv-test-results`), is not published; the shape is checked by the collector and again by the
+gate. A LaunchAgent's label must pass the same name rule as the Connections wall (no at sign, slash,
+key, token start, id, long unbroken run, and not this computer's username or name), and also letters,
+numbers and `.` `-` `_` only. A Hermes job's name is made from its id (`Hermes job ` and the id, 23
+characters), so it passes the rule too. One that fails is **not written**: it is counted in `hidden`,
+so the wall can say "n jobs not shown", and one bad id never turns the file into `unavailable`: the
+other jobs are written as usual. The name rule refuses anything with `sk-` in it, because that is how a key starts, so a job
 called `task-runner`, `desk-helper` or `risk-monitor` is withheld too. It is counted in `hidden`, in the
 file and in the log line, so the dashboard can say how many jobs hidden by the safety rule there are;
 the rule is shared with the whole dashboard and is not loosened. Renaming it in `jobs.yml` cannot help,

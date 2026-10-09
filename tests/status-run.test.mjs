@@ -56,7 +56,7 @@ test('LEAK TEST: nothing from the hostile home reaches the file, stdout or stder
     assert.equal(doc.claude.activity.days[0].replies, 1)
     // The jobs part read the hostile Hermes too: every job is there under its id, and none of what sat beside it.
     const jobs = JSON.parse(await readFile(join(written.target, '.agent-team', 'status', 'jobs', 'test-pc.json'), 'utf8'))
-    assert.deepEqual(jobs.hermes.items.map((item) => item.name), ['Hermes job brief1', 'Hermes job mail1', 'Hermes job review1', 'Hermes job unnamed1', 'Hermes job donna1'])
+    assert.deepEqual(jobs.hermes.items.map((item) => item.name), ['Hermes job a11100000004', 'Hermes job b1ef00000001', 'Hermes job c0de00000002', 'Hermes job dead00000003', 'Hermes job d0a000000005'])
     assert.deepEqual(jobs.hermes.items.map((item) => item.lastResult), ['ok', 'ok', 'error', 'ok', 'error'])
     // The echoed-token run read the saved reading instead, which is also free of the token.
     assert.equal(JSON.parse(outputs[7]).claude.limits.source, 'claude-code-saved')
