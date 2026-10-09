@@ -30,6 +30,10 @@
     "unknown"
   ],
   "unnamedJob": "Unnamed job",
+  "whyCodes": {
+    "unreadable": "could not be read",
+    "refused": "refused by the safety check"
+  },
   "exitCode": {
     "min": -255,
     "max": 255
@@ -234,7 +238,7 @@
     {"why": "an unknown schedule has no due time", "zone": "America/New_York", "cadence": {"kind": "unknown"}, "takenAt": "2026-10-09T15:00:00Z"}
   ],
   "rules": [
-    "a block (launchd, hermes) with any status other than found carries only status and an optional why",
+    "a block (launchd, hermes) with any status other than found carries only status and an optional why; why is one of whyCodes - never a message and never a word of what was refused. If the safety check refuses the whole jobs file, both blocks are written unavailable with the refused code, the timezone is UTC, and the other parts are written as usual",
     "launchd is not found when the computer is not a Mac or has no ~/Library/LaunchAgents folder; only that user folder is read, never /Library; hermes is not found when Hermes is not on the computer",
     "launchd state is running when launchctl lists the label with a process, loaded when it lists it without one, and not loaded when it does not list it; lastExit is launchctl's last exit status and is written only for a job that is listed",
     "lastReportAt on a launchd job is the newest modified time of its two log files (standard out and standard error); the files are never opened and their paths are never kept",

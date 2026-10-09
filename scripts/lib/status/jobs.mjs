@@ -45,7 +45,7 @@
 
 import { readdir, stat } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
-import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, UNNAMED_JOB } from './jobs-schema.mjs'
+import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, JOBS_WHY, UNNAMED_JOB } from './jobs-schema.mjs'
 import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
 import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
@@ -55,7 +55,7 @@ import { isoSeconds, isPlainObject } from './util.mjs'
 const LAUNCHCTL = '/bin/launchctl'
 const PLUTIL = '/usr/bin/plutil'
 const NOT_FOUND = { status: 'not found' }
-const UNREADABLE = { status: 'unavailable', why: 'could not be read' }
+const UNREADABLE = { status: 'unavailable', why: JOBS_WHY.unreadable }
 const DAY_MS = 86400_000
 // Before 2000, or more than a day ahead of the check, a file time is a broken clock, not a report.
 const EARLIEST_BELIEVABLE_MS = Date.parse('2000-01-01T00:00:00Z')

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { runCollector, partsFrom, summarizeJobs, jobsStatuses } from '../scripts/lib/status/run.mjs'
 import { PARTS, RECEIPT_SHAPE } from '../scripts/lib/status/schema.mjs'
 import { checkAgainst, checkJobs } from '../scripts/lib/status/safe.mjs'
-import { JOBS_SCHEMA } from '../scripts/lib/status/jobs-schema.mjs'
+import { JOBS_SCHEMA, JOBS_WHY } from '../scripts/lib/status/jobs-schema.mjs'
 import { makeFakeHome, FAKE_EMAIL, FAKE_USERNAME, fakeClaudeToken } from './helpers/fake-home.mjs'
 import { hostileHome, hostileMac, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
 import { writeHermes } from './helpers/hermes-home.mjs'
@@ -224,39 +224,119 @@ test('a run with no --only writes all four parts, and --help names the jobs part
 
 // --- the gate and the links ------------------------------------------------------------------------------------------
 
-test('all or nothing: a jobs file the gate refuses stops every part, and the problem names the field, not the value', async () => {
+// The jobs part is the newest and reads the most unfamiliar files, so a refusal of its file is not allowed to
+// cost the three older parts their snapshot. The refused jobs file is replaced by one that says it is
+// unavailable, with a fixed reason and none of what was refused. Every other part keeps the rule it had:
+// a part the gate refuses stops the whole run, and nothing is written.
+const leakyJobs = async (deps, computer) => ({
+  schema: JOBS_SCHEMA,
+  takenAt: '2026-10-07T20:00:00Z',
+  computer,
+  timezone: 'America/New_York',
+  launchd: { status: 'found', items: [{ label: `local.${FAKE_EMAIL}`, cadence: { kind: 'always' }, state: 'running', args: [fakeClaudeToken()] }], hidden: 0, more: 0 },
+  hermes: { status: 'not found' }
+})
+
+test('a jobs file the gate refuses is written as unavailable with a fixed reason, and the other three files are still written', async () => {
   const fake = await makeFakeHome()
   try {
-    const leaky = async (deps, computer) => ({
+    const result = await run(fake, [], { extra: { sources: { jobs: leakyJobs } } })
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(await relativeFiles(result.target), [CONNECTIONS, HERMES, JOBS, USAGE])
+    const doc = await readAt(result.target, JOBS)
+    assert.deepEqual(doc, {
       schema: JOBS_SCHEMA,
-      takenAt: '2026-10-07T20:00:00Z',
-      computer,
-      timezone: 'America/New_York',
-      launchd: { status: 'found', items: [{ label: `local.${FAKE_EMAIL}`, cadence: { kind: 'always' }, state: 'running' }], hidden: 0, more: 0 },
-      hermes: { status: 'not found' }
+      takenAt: new Date(NOW).toISOString().replace('.000Z', 'Z'),
+      computer: 'Test PC',
+      timezone: 'UTC',
+      launchd: { status: 'unavailable', why: JOBS_WHY.refused },
+      hermes: { status: 'unavailable', why: JOBS_WHY.refused }
     })
-    const result = await run(fake, [], { extra: { sources: { jobs: leaky } } })
-    assert.equal(result.code, 1)
-    assert.deepEqual(await filesUnder(result.target), [], 'another part was written although jobs was refused')
+    assert.equal(JOBS_WHY.refused, 'refused by the safety check')
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+    // The other parts are what they would have been.
+    assert.equal((await readAt(result.target, USAGE)).schema, 'agent-status/usage/v1')
+    assert.equal((await readAt(result.target, CONNECTIONS)).schema, 'agent-status/connections/v1')
+    assert.equal((await readAt(result.target, HERMES)).schema, 'agent-status/hermes/v1')
+    // It says so, naming the fields and never the values.
+    assert.match(result.stderr, /The jobs file was refused by the safety check/)
     assert.match(result.stderr, /jobs: launchd\.items\[0\]\.label/)
-    assert.ok(!result.stderr.includes(FAKE_EMAIL))
+    assert.match(result.stderr, /jobs: launchd\.items\[0\]\.args: is not an allowed key/)
+    assert.match(result.stderr, /The other files are written/)
+    for (const file of await filesUnder(result.target)) {
+      const text = await readFile(file, 'utf8')
+      assert.ok(!text.includes(FAKE_EMAIL) && !text.includes('sk-'), `${file} holds something that was refused`)
+    }
+    assert.ok(!result.stderr.includes(FAKE_EMAIL) && !result.stderr.includes('sk-') && !result.stdout.includes(FAKE_EMAIL))
+    assert.match(result.stdout, /- launchd unavailable \(refused by the safety check\)/)
     await rm(result.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()
   }
 })
 
-test('a jobs source that hands back something the gate would refuse stops the run, and nothing it carried is printed', async () => {
+test('--only jobs with a refused file writes the unavailable file alone, and a source that returns rubbish does the same', async () => {
   const fake = await makeFakeHome()
   try {
-    const extra = { sources: { jobs: async () => ({ schema: JOBS_SCHEMA, takenAt: 'now', computer: 'Test PC', timezone: 'America/New_York', launchd: { status: 'found', items: [] }, hermes: { status: 'not found' }, token: fakeClaudeToken() }) } }
-    const result = await run(fake, ['--only', 'jobs'], { extra })
-    assert.equal(result.code, 1)
-    assert.deepEqual(await filesUnder(result.target), [])
-    assert.ok(!result.stderr.includes('sk-'))
-    await rm(result.target, { recursive: true, force: true })
+    for (const source of [leakyJobs, async () => 'not even an object', async () => null, async () => ({ token: fakeClaudeToken() })]) {
+      const result = await run(fake, ['--only', 'jobs'], { extra: { sources: { jobs: source } } })
+      assert.equal(result.code, 0, result.stderr)
+      assert.deepEqual(await relativeFiles(result.target), [JOBS])
+      assert.deepEqual((await readAt(result.target, JOBS)).launchd, { status: 'unavailable', why: JOBS_WHY.refused })
+      assert.ok(!result.stderr.includes('sk-') && !result.stdout.includes('sk-'), 'a refused value was printed')
+      await rm(result.target, { recursive: true, force: true })
+    }
   } finally {
     await fake.cleanup()
+  }
+})
+
+test('the other parts keep their rule: if one of them is refused the whole run still stops, jobs or no jobs', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const leakyConnections = async (deps, computer) => ({
+      schema: 'agent-status/connections/v1',
+      takenAt: '2026-10-07T20:00:00Z',
+      computer,
+      tools: [],
+      claude: { status: 'found', live: 'checked', servers: [{ name: FAKE_EMAIL, scope: 'user', transport: 'web', state: 'connected' }], projectServers: 0, hidden: 0, more: 0 },
+      codex: { status: 'not found' }
+    })
+    for (const sources of [{ connections: leakyConnections }, { connections: leakyConnections, jobs: leakyJobs }]) {
+      const result = await run(fake, [], { extra: { sources } })
+      assert.equal(result.code, 1)
+      assert.deepEqual(await filesUnder(result.target), [], 'a file was written although another part was refused')
+      assert.match(result.stderr, /Nothing written/)
+      assert.match(result.stderr, /connections: claude\.servers\[0\]\.name/)
+      assert.ok(!result.stderr.includes(FAKE_EMAIL))
+      await rm(result.target, { recursive: true, force: true })
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('--commit with a refused jobs file: all four files go in the one commit, and the receipt says jobs was unavailable', async () => {
+  const repo = await makeRemote()
+  const fake = await makeFakeHome()
+  try {
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir, extra: { sources: { jobs: leakyJobs } } })
+    assert.equal(result.code, 0, result.stderr)
+    const files = (await git(['show', '--name-only', '--format=', 'HEAD'], repo.work)).stdout.trim().split('\n').sort()
+    assert.deepEqual(files, [CONNECTIONS, HERMES, JOBS, USAGE])
+    const [claim] = await readdir(join(stateDir, 'claims'))
+    const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
+    assert.deepEqual(receipt.sources.jobs, { launchd: 'unavailable', hermes: 'unavailable', items: 0 })
+    assert.deepEqual(checkAgainst(receipt, RECEIPT_SHAPE, fake.identity), [])
+    const final = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'final.json'), 'utf8'))
+    assert.equal(final.outcome, 'pushed')
+    const pushed = (await git(['show', 'main:' + JOBS], repo.remote)).stdout
+    assert.ok(!pushed.includes(FAKE_EMAIL) && !pushed.includes('sk-'))
+    assert.match(result.stderr, /The jobs file was refused by the safety check/)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
   }
 })
 
@@ -400,5 +480,21 @@ test('a Mac and a Hermes full of secrets, through a whole committed run: the fil
   } finally {
     await fake.cleanup()
     await repo.cleanup()
+  }
+})
+
+test('if even the unavailable file would not pass the gate, nothing is written: the fallback is checked like any file', async () => {
+  const fake = await makeFakeHome()
+  try {
+    // A clock that gives no time makes the file's own time invalid, so the file is refused - and so is the
+    // fallback, which carries the same time. The run must stop, not write a file the gate has not passed.
+    const result = await run(fake, ['--only', 'jobs'], { extra: { now: NaN } })
+    assert.equal(result.code, 1)
+    assert.deepEqual(await filesUnder(result.target), [])
+    assert.match(result.stderr, /Nothing written/)
+    assert.match(result.stderr, /jobs: takenAt/)
+    await rm(result.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
   }
 })

@@ -15,6 +15,7 @@ import {
   LAUNCHD_STATES,
   HERMES_RESULTS,
   UNNAMED_JOB,
+  JOBS_WHY,
   EXIT_CODE,
   CADENCE,
   LABEL,
@@ -70,6 +71,17 @@ test('jobs parity: the name a nameless job is shown under matches', () => {
   assert.equal(UNNAMED_JOB, 'Unnamed job')
   // It passes the name rule it stands in for.
   assert.deepEqual(checkConnectionName(UNNAMED_JOB, 'name', identity), [])
+})
+
+test('jobs parity: the two reasons a block can give for being unavailable match, and fit a block', () => {
+  assert.deepEqual(JOBS_WHY, fixture.whyCodes)
+  assert.deepEqual(JOBS_WHY, { unreadable: 'could not be read', refused: 'refused by the safety check' })
+  for (const why of Object.values(JOBS_WHY)) {
+    const doc = clone(fixture.sample)
+    doc.launchd = { status: 'unavailable', why }
+    doc.hermes = { status: 'unavailable', why }
+    assert.deepEqual(checkJobs(doc, identity), [], why)
+  }
 })
 
 test('jobs parity: the four cadence kinds and every bound on them match', () => {

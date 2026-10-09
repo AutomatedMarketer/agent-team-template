@@ -32,7 +32,8 @@ file name: `--computer "Mac Mini"` writes `mac-mini.json`. With no label the fil
 often its owner's name.
 
 A run collects every part unless `--only` picks some. The parts travel together: every part passes
-the safety check before **any** file is written, and `--commit` puts all of them in one commit.
+the safety check before **any** file is written, and `--commit` puts all of them in one commit -
+except that a refused jobs file is written as unavailable instead (see [The jobs file](#the-jobs-file)).
 
 ## Run it
 
@@ -532,6 +533,14 @@ schedules are given up first (the job stays, its schedule `unknown`).
 **Without a Mac, without Hermes, without a known timezone.** Off a Mac, `launchd` is `not found`
 and no program runs. With no Hermes, `hermes` is `not found`. If the computer's timezone is not one
 this runtime knows, the file says `UTC`, still lists every schedule, and writes no due times.
+
+**If the safety check refuses the jobs file**, the other three files are still written. The jobs part
+reads the most unfamiliar files, so it is the one part whose refusal does not stop the run: its file is
+replaced by one that says both blocks `unavailable` with the reason `refused by the safety check`
+(`UTC` as the zone, and nothing from the refused file). The run prints "The jobs file was refused by the
+safety check" with the fields that failed - the field, never the value - and ends with exit code 0; the
+receipt records `unavailable` for both blocks. Every other part keeps its rule: if one of them is
+refused, nothing is written.
 
 A file older than 8 hours is shown as "not checked since", never as a light. A job can be renamed
 or hidden on the wall by asking Claude to edit `jobs.yml` in the team repo; the dashboard never

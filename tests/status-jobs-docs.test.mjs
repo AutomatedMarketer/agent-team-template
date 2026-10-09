@@ -242,3 +242,18 @@ test('the docs say a job that runs only on the 31st can have no due time inside 
   assert.match(jobs, /`schedule` \(`kind`, `expr`, `minutes`, `timezone`/)
   for (const key of contract.keysRead.plist.slice(0, 6)) assert.ok(jobs.includes(key), `the jobs section does not name the plist key ${key}`)
 })
+
+test('the docs say that a refused jobs file costs the other parts nothing, and what the file says instead', async () => {
+  const doc = await read('.agent-team/status/README.md')
+  const jobs = flat(section(doc, '## The jobs file'))
+  assert.match(jobs, /If the safety check refuses the jobs file\*\*, the other three files are still written/)
+  assert.match(jobs, /both blocks `unavailable` with the reason `refused by the safety check`/)
+  assert.match(jobs, /The jobs file was refused by the safety check/)
+  assert.match(jobs, /never the value/)
+  assert.match(jobs, /exit code 0/)
+  const intro = flat(doc.slice(0, doc.indexOf('## Run it')))
+  assert.match(intro, /every part passes the safety check before \*\*any\*\* file is written/)
+  assert.match(intro, /except that a refused jobs file is written as unavailable instead/)
+  const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
+  assert.ok(contract.rules.some((rule) => /refuses the whole jobs file/.test(rule)))
+})

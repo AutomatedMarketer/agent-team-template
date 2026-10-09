@@ -26,7 +26,7 @@ import {
 } from './schema.mjs'
 import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
 import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
-import { jobsPath } from './jobs-schema.mjs'
+import { jobsPath, JOBS_SCHEMA, JOBS_WHY } from './jobs-schema.mjs'
 import { checkUsage, checkConnections, checkHermes, checkJobs, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 import { writeSnapshots, assertNoLinks, LinkedPath, PartlyWritten } from './write.mjs'
@@ -209,6 +209,14 @@ export function jobsStatuses(doc) {
   return { launchd: doc.launchd.status, hermes: doc.hermes.status, items: itemsOf(doc.launchd).length + itemsOf(doc.hermes).length }
 }
 
+// What the jobs file says when the safety check refused the one it collected: both blocks unavailable, with
+// the fixed reason and nothing else. It does not depend on anything the refused file held - the time is the
+// run's, the zone is fixed - so there is nothing in it to refuse.
+function jobsRefused(doc, deps, computer) {
+  const refused = { status: 'unavailable', why: JOBS_WHY.refused }
+  return { schema: JOBS_SCHEMA, takenAt: isoSeconds(deps.now), computer, timezone: 'UTC', launchd: { ...refused }, hermes: { ...refused } }
+}
+
 // Each part: where it goes, how it is collected, the gate it passes, and what the log says.
 // `alsoWrites` lists the paths a part may write besides its own file - they are link-checked before
 // anything is read, like the part's own - and `extras` builds those files from the part's document.
@@ -244,6 +252,9 @@ const PART_TABLE = {
     path: jobsPath,
     collect: (deps, computer) => (deps.sources?.jobs ?? collectJobs)(deps, computer),
     check: checkJobs,
+    // The newest part reads the most unfamiliar files, so the gate refusing its file does not cost the others
+    // theirs: it is written as unavailable instead. Every other part stops the whole run, as it always did.
+    whenRefused: jobsRefused,
     summarize: (doc) => summarizeJobs(doc),
     statuses: jobsStatuses
   }
@@ -269,8 +280,9 @@ export function partsFrom(only) {
 }
 
 // Collects every part asked for, then holds every one to the gate, and every extra file to its own.
-// Returns { snapshots, files } when all passed - snapshots per part, files every file to write, in
-// order - or { problems } naming each refused field with its part. Nothing is written either way.
+// Returns { snapshots, files, degraded } when all passed - snapshots per part, files every file to write, in
+// order, and a line for each part whose file was replaced by an unavailable one (the jobs part only) - or
+// { problems } naming each refused field with its part. Nothing is written either way.
 async function collectParts(parts, deps, computer, identity) {
   // A run that crashed while counting Hermes's sessions may have left its private copy behind.
   await removeLeftoverCopies(deps.stateDir)
@@ -281,7 +293,21 @@ async function collectParts(parts, deps, computer, identity) {
     const doc = await entry.collect(deps, computer, trail)
     snapshots.push({ part, entry, trail, doc, relativePath: entry.path(computer), text: `${JSON.stringify(doc, null, 2)}\n` })
   }
-  const problems = snapshots.flatMap(({ part, entry, doc }) => entry.check(doc, identity).map((problem) => `${part}: ${problem}`))
+  const problems = []
+  const degraded = []
+  for (const snapshot of snapshots) {
+    const { part, entry, doc } = snapshot
+    const found = entry.check(doc, identity).map((problem) => `${part}: ${problem}`)
+    if (!found.length) continue
+    const instead = entry.whenRefused?.(doc, deps, computer)
+    if (instead && entry.check(instead, identity).length === 0) {
+      snapshot.doc = instead
+      snapshot.text = `${JSON.stringify(instead, null, 2)}\n`
+      degraded.push(`The ${part} file was refused by the safety check (${found.join('; ')}), so it says it is unavailable. The other files are written.`)
+    } else {
+      problems.push(...found)
+    }
+  }
   if (problems.length) return { problems }
   const files = []
   for (const snapshot of snapshots) {
@@ -292,7 +318,7 @@ async function collectParts(parts, deps, computer, identity) {
       files.push({ relativePath: extra.relativePath, text: `${JSON.stringify(extra.doc, null, 2)}\n` })
     }
   }
-  return { snapshots, files }
+  return { snapshots, files, degraded }
 }
 
 function report(snapshots, say) {
@@ -441,6 +467,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     return 1
   }
   const { snapshots, files } = collected
+  collected.degraded.forEach(complain)
 
   if (values['dry-run']) {
     for (const { text, relativePath } of files) {
@@ -565,6 +592,7 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
         return 1
       }
       const { snapshots, files } = collected
+      collected.degraded.forEach(complain)
       const write = () => writeAll(target, files, { git })
       try {
         await write()

@@ -33,6 +33,9 @@ export const GRACE_MINUTES = 30
 export const LOOKBACK_DAYS = 32
 
 export const LAUNCHD_STATES = ['running', 'loaded', 'not loaded']
+// The two fixed reasons a block can give for being unavailable (its `why`). Never a message, and never
+// anything the file held: `refused` is what the jobs part says when the safety check refused its file.
+export const JOBS_WHY = { unreadable: 'could not be read', refused: 'refused by the safety check' }
 // What a Hermes job is called when it has no name of its own, or Hermes copied its name from what it runs.
 export const UNNAMED_JOB = 'Unnamed job'
 export const HERMES_RESULTS = ['ok', 'error', 'unknown']
