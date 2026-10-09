@@ -21,6 +21,7 @@ import { git } from './helpers/git.mjs'
 const USAGE = '.agent-team/status/usage/test-pc.json'
 const CONNECTIONS = '.agent-team/status/connections/test-pc.json'
 const HERMES = '.agent-team/status/hermes/test-pc.json'
+const JOBS = '.agent-team/status/jobs/test-pc.json'
 
 const relativeFiles = async (target) => (await filesUnder(target)).map((file) => file.slice(target.length + 1).replaceAll('\\', '/')).sort()
 
@@ -60,13 +61,13 @@ async function collect(fake, args, { repo, stateDir, extra = {} }) {
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') }
 }
 
-test('the parts are usage, connections and hermes, and a run with no --only writes them all', async () => {
-  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes'])
+test('the parts are usage, connections, hermes and jobs, and a run with no --only writes them all', async () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs'])
   const fake = await makeFakeHome()
   try {
     const result = await runIn(fake, ['--computer', 'Test PC'])
     assert.equal(result.code, 0, result.stderr)
-    assert.deepEqual(await relativeFiles(result.target), [CONNECTIONS, HERMES, USAGE])
+    assert.deepEqual(await relativeFiles(result.target), [CONNECTIONS, HERMES, JOBS, USAGE])
     assert.match(result.stdout, /\.agent-team\/status\/usage\/test-pc\.json/)
     assert.match(result.stdout, /\.agent-team\/status\/hermes\/test-pc\.json/)
     assert.match(result.stdout, /\.agent-team\/status\/connections\/test-pc\.json/)
@@ -185,7 +186,7 @@ test('several files, one commit, with the new subject, and other staged work lef
     const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 0, result.stderr)
     const files = (await git(['show', '--name-only', '--format=', 'HEAD'], repo.work)).stdout.trim().split('\n').sort()
-    assert.deepEqual(files, [CONNECTIONS, HERMES, USAGE])
+    assert.deepEqual(files, [CONNECTIONS, HERMES, JOBS, USAGE])
     assert.equal(SNAPSHOT_SUBJECT, 'Status snapshot from ')
     const subjects = (await git(['log', '--format=%s', 'origin/main'], repo.work)).stdout.trim().split('\n')
     assert.deepEqual(subjects, ['Status snapshot from Test PC', 'start'], 'one commit carried both files')
@@ -264,13 +265,13 @@ test('the receipt lists every file written with its hash, and the parts', async 
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
     assert.equal(receipt.schema, 'agent-status/receipt/v2')
-    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes'])
-    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, JOBS])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
       assert.equal(entry.sha256, createHash('sha256').update(bytes).digest('hex'))
     }
-    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes'])
+    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes', 'jobs'])
     assert.deepEqual(Object.keys(receipt.sources.connections).sort(), ['claude', 'codex', 'tools'])
     assert.deepEqual(checkAgainst(receipt, RECEIPT_SHAPE, fake.identity), [])
   } finally {

@@ -1,0 +1,32 @@
+# Names and hiding for the Readiness wall - every scheduled job, one light each.
+#
+# The dashboard's Readiness screen lists the jobs it finds: your team's workflows, the routines
+# that run them, the Mac's LaunchAgents and Hermes's cron jobs (those last two come from the
+# status collector, scripts/collect-status.mjs, running on your always-on Mac). A job's name is
+# made readable on its own - local.donna.story-belt-daily is shown as "Story belt daily". If one
+# is still unclear, or you do not want a job on the wall at all, say so here.
+#
+# The dashboard only reads this file. It never writes it, so you change it by asking Claude:
+# "call local.donna.blog-watch 'Blog watch'" or "hide the Hermes job b2c3d4e5f6a1".
+#
+# Each entry has an id, then a name (what the wall shows) or `hide: true` (the job is listed under
+# "Switched off" instead of getting a light). The id says where the job comes from:
+#
+#   launchd:<label>            a Mac LaunchAgent: its label
+#   hermes:<profile>/<id>      a Hermes cron job: its profile (default for the main one) and job id
+#   workflow:<slug>            a workflow in workflows/: the file name without .yml
+#   routine:<name>             a routine that has no workflow file: its name
+#
+# Examples, commented out until you have them:
+
+# jobs:
+#   - id: launchd:local.donna.story-belt-daily
+#     name: Story belt, daily
+#   - id: hermes:donna/b2c3d4e5f6a1
+#     hide: true
+#   - id: workflow:weekly-review
+#     name: Weekly review
+#   - id: routine:old-experiment
+#     hide: true
+
+jobs: []

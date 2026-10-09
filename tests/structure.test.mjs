@@ -26,6 +26,7 @@ const REQUIRED_PATHS = [
   'tiles/catalogue.json',
   'tiles.yml',
   'runtimes.yml',
+  'jobs.yml',
   'connections/register.yml',
   'stack.yml',
   '.claude/skills/install-stack/SKILL.md',

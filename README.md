@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 1128
+ℹ tests 1153
 ℹ fail 0
 ```
 
@@ -279,6 +279,17 @@ Hermes's own files, never by running Hermes.
   fill it, and what each word on it means. Or ask Claude: **/snapshot**.
 - **How it works:** [How the Connections wall works](docs/guides/connections-wall-how-it-works.md) -
   every file it reads, what it keeps, and what is never kept.
+
+## The Readiness wall
+
+The same script also lists every scheduled job on your always-on computer - the Mac's LaunchAgents
+and Hermes's cron jobs - by name, schedule and how its last run went, so the dashboard's Readiness
+screen can show one light per job. It reads names, schedules, times and exit codes only; it never
+reads a job's arguments, settings, prompts, error text or logs. To rename a job on the wall or hide
+it, ask Claude to edit [`jobs.yml`](jobs.yml).
+
+- **How it works:** [The jobs file](.agent-team/status/README.md#the-jobs-file) - what it reads,
+  what it keeps, and what is never kept.
 
 ---
 

@@ -35,7 +35,7 @@ test('LEAK TEST: nothing from the hostile home reaches the file, stdout or stder
     const usageFile = (result) => join(result.target, '.agent-team', 'status', 'usage', 'test-pc.json')
     for (const result of [written, hostile]) {
       const files = await filesUnder(result.target)
-      assert.equal(files.length, 4, 'exactly one file per part is written, and the Hermes heartbeat')
+      assert.equal(files.length, 5, 'exactly one file per part is written, and the Hermes heartbeat')
       outputs.push(await readFile(usageFile(result), 'utf8'))
     }
     for (const result of [written, hostile]) {
@@ -54,6 +54,10 @@ test('LEAK TEST: nothing from the hostile home reaches the file, stdout or stder
     assert.equal(doc.codex.plan.name, 'Pro')
     assert.equal(doc.codex.limits.windows[0].usedPercent, 3)
     assert.equal(doc.claude.activity.days[0].replies, 1)
+    // The jobs part read the hostile Hermes too: its three good names are there, and none of what sat beside them.
+    const jobs = JSON.parse(await readFile(join(written.target, '.agent-team', 'status', 'jobs', 'test-pc.json'), 'utf8'))
+    assert.deepEqual(jobs.hermes.items.map((item) => item.name), ['Morning brief', 'Weekly review', 'Donna brief'])
+    assert.deepEqual(jobs.hermes.items.map((item) => item.lastResult), ['ok', 'error', 'error'])
     // The echoed-token run read the saved reading instead, which is also free of the token.
     assert.equal(JSON.parse(outputs[7]).claude.limits.source, 'claude-code-saved')
     for (const result of [written, dry, hostile]) await rm(result.target, { recursive: true, force: true })

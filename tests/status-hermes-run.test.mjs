@@ -26,6 +26,7 @@ import { git } from './helpers/git.mjs'
 
 const execFileP = promisify(execFile)
 const HERMES = '.agent-team/status/hermes/test-pc.json'
+const JOBS = '.agent-team/status/jobs/test-pc.json'
 const USAGE = '.agent-team/status/usage/test-pc.json'
 const CONNECTIONS = '.agent-team/status/connections/test-pc.json'
 const BEAT = 'runs/heartbeat/hermes.json'
@@ -70,11 +71,11 @@ async function makeRemote() {
   return { root, remote, work, clone, cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
-test('the parts are usage, connections and hermes; --only hermes is a part now', () => {
-  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes'])
+test('the parts are usage, connections, hermes and jobs; --only hermes is a part', () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs'])
   assert.deepEqual(partsFrom('hermes'), { parts: ['hermes'] })
   assert.deepEqual(partsFrom('hermes,usage'), { parts: ['usage', 'hermes'] })
-  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes'] })
+  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes', 'jobs'] })
   assert.ok(partsFrom('hermes,bogus').refusal)
 })
 
@@ -191,13 +192,13 @@ test('one commit carries every status file and the heartbeat; the receipt lists 
     })
     assert.equal(code, 0, stderr.join('\n'))
     const files = (await git(['show', '--name-only', '--format=', 'HEAD'], repo.work)).stdout.trim().split('\n').sort()
-    assert.deepEqual(files, [CONNECTIONS, HERMES, USAGE, BEAT].sort())
+    assert.deepEqual(files, [CONNECTIONS, HERMES, JOBS, USAGE, BEAT].sort())
     const subjects = (await git(['log', '--format=%s', 'origin/main'], repo.work)).stdout.trim().split('\n')
     assert.deepEqual(subjects, ['Status snapshot from Test PC', 'start'])
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
-    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes'])
-    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, BEAT])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, BEAT, JOBS])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
       assert.equal(entry.sha256, createHash('sha256').update(bytes).digest('hex'))

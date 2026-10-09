@@ -4,7 +4,7 @@
 // programs, identity - so the tests can run the whole thing against a fake home with a fake
 // network, and the leak test exercises exactly the code that runs on the real machine.
 //
-// A run collects one or more parts (schema.mjs, PARTS): usage, connections, hermes. They travel
+// A run collects one or more parts (schema.mjs, PARTS): usage, connections, hermes, jobs. They travel
 // together: every part passes the gate before anything is written, and in commit mode every file
 // goes into one commit. The Hermes part can bring one more file: Hermes's heartbeat, written only
 // when the alive rule holds (hermes-schema.mjs), checked and committed with the rest.
@@ -26,7 +26,8 @@ import {
 } from './schema.mjs'
 import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
 import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
-import { checkUsage, checkConnections, checkHermes, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
+import { jobsPath } from './jobs-schema.mjs'
+import { checkUsage, checkConnections, checkHermes, checkJobs, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 import { writeSnapshots, assertNoLinks, LinkedPath, PartlyWritten } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
@@ -35,6 +36,7 @@ import { collectCodexLimits } from './codex-limits.mjs'
 import { claudePlan, collectCodexPlan } from './plans.mjs'
 import { collectConnections } from './connections.mjs'
 import { collectHermes, removeLeftoverCopies } from './hermes.mjs'
+import { collectJobs } from './jobs.mjs'
 import {
   takeLock,
   releaseLock,
@@ -182,6 +184,31 @@ export function hermesHeartbeat(doc) {
   return [{ relativePath: HEARTBEAT.path, doc: { runtime: HEARTBEAT.runtime, at }, shape: HEARTBEAT_SHAPE }]
 }
 
+const itemsOf = (block) => (block.status === 'found' ? block.items : [])
+
+// Counts only - never a label or a job name, which are the person's own words.
+export function summarizeJobs(doc) {
+  const { launchd, hermes } = doc
+  const states = { running: 0, loaded: 0, 'not loaded': 0 }
+  for (const item of itemsOf(launchd)) states[item.state] += 1
+  const on = itemsOf(hermes).filter((item) => item.enabled).length
+  const kinds = { slots: 0, every: 0, always: 0, unknown: 0 }
+  for (const item of [...itemsOf(launchd), ...itemsOf(hermes)]) kinds[item.cadence.kind] += 1
+  return [
+    launchd.status === 'found'
+      ? `- launchd found: ${launchd.items.length} listed (${states.running} running, ${states.loaded} loaded, ${states['not loaded']} not loaded), ${launchd.hidden} hidden, ${launchd.more} more`
+      : `- launchd ${blockDetail(launchd)}`,
+    hermes.status === 'found'
+      ? `- Hermes jobs found: ${hermes.items.length} listed (${on} on, ${hermes.items.length - on} off), ${hermes.hidden} hidden, ${hermes.more} more`
+      : `- Hermes jobs ${blockDetail(hermes)}`,
+    `- Schedules: ${kinds.slots} at set times, ${kinds.every} every N minutes, ${kinds.always} always on, ${kinds.unknown} not known`
+  ]
+}
+
+export function jobsStatuses(doc) {
+  return { launchd: doc.launchd.status, hermes: doc.hermes.status, items: itemsOf(doc.launchd).length + itemsOf(doc.hermes).length }
+}
+
 // Each part: where it goes, how it is collected, the gate it passes, and what the log says.
 // `alsoWrites` lists the paths a part may write besides its own file - they are link-checked before
 // anything is read, like the part's own - and `extras` builds those files from the part's document.
@@ -211,6 +238,14 @@ const PART_TABLE = {
     extras: hermesHeartbeat,
     summarize: (doc) => summarizeHermes(doc),
     statuses: hermesStatuses
+  },
+  jobs: {
+    title: 'Jobs',
+    path: jobsPath,
+    collect: (deps, computer) => (deps.sources?.jobs ?? collectJobs)(deps, computer),
+    check: checkJobs,
+    summarize: (doc) => summarizeJobs(doc),
+    statuses: jobsStatuses
   }
 }
 
@@ -268,7 +303,7 @@ function report(snapshots, say) {
 }
 
 const USAGE_TEXT = [
-  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes] [--dry-run]',
+  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes,jobs] [--dry-run]',
   '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
   'Parts (every one, unless --only picks some):',
   '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
@@ -276,6 +311,8 @@ const USAGE_TEXT = [
   '               It runs `claude mcp list`, which starts every server, for 2 minutes at most.',
   "  hermes: Hermes's version, gateway and profiles - counts, times and names only, from its",
   '          files. It never runs hermes. When Hermes is alive it also writes runs/heartbeat/hermes.json.',
+  '  jobs: scheduled jobs - Mac LaunchAgents and Hermes cron jobs - names, times and states only.',
+  '        On a Mac it runs /usr/bin/plutil and /bin/launchctl list; it never runs hermes.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 

@@ -199,12 +199,61 @@ async function hostileHermes(fake, now) {
   await at('profiles/donna/config.yaml', lines('model:', '  default: gpt-5.1', '  provider: openai', `  base_url: https://mcp.example.com/donna?key=${fakeRefreshToken()}`))
   await at('profiles/donna/SOUL.md', lines('soul-secret-words for donna'))
   await at(`profiles/${FAKE_USERNAME}/config.yaml`, lines('model: x'))
+  // Scheduled jobs: each carries its prompt, where it delivers, and the text of its last error, none of
+  // which the jobs part may write. One job has a good name, one fails, one is named after an email.
+  const jobBaggage = (tag) => ({
+    prompt: `prompt-secret-words ${tag} for ${FAKE_EMAIL} with ${fakeClaudeToken()} in /Users/${FAKE_USERNAME}/secret-client`,
+    deliver: `telegram:telegram-chat-77-${tag}`,
+    origin: { platform: 'telegram', chat_id: 'telegram-chat-77', user: FAKE_EMAIL },
+    last_error: `error-secret-words Bearer ${fakeClaudeToken()} at /Users/${FAKE_USERNAME}/secret-client/run.py`,
+    last_delivery_error: `delivery-secret-words ${fakeRefreshToken()}`,
+    next_run_at: new Date(now + HOUR).toISOString().replace('Z', '+00:00')
+  })
+  await at('cron/jobs.json', {
+    jobs: [
+      { id: 'brief1', name: 'Morning brief', enabled: true, schedule: { kind: 'cron', expr: '30 6 * * *', timezone: 'America/New_York' }, last_run_at: new Date(now - 13 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'ok', ...jobBaggage('one') },
+      { id: 'review1', name: 'Weekly review', enabled: true, schedule: { kind: 'cron', expr: '0 9 * * 1', timezone: 'America/New_York' }, last_run_at: new Date(now - 2 * HOUR).toISOString().replace('Z', '+00:00'), last_status: 'error', ...jobBaggage('two') },
+      { id: 'mail1', name: FAKE_EMAIL, enabled: true, schedule: { kind: 'cron', expr: '0 7 * * *' }, last_status: 'ok', ...jobBaggage('three') }
+    ]
+  })
+  await at('profiles/donna/cron/jobs.json', { jobs: [{ id: 'donna1', name: 'Donna brief', enabled: true, schedule: { kind: 'cron', expr: '15 8 * * *' }, last_status: 'error', ...jobBaggage('four') }] })
   if (HAVE_SQLITE) {
     await makeStateDb(join(fake.home, '.hermes', 'state.db'), [
       { id: FAKE_UUID, source: 'telegram', user_id: FAKE_EMAIL, chat_id: 'telegram-chat-77', started_at: (now - HOUR) / 1000, last_activity_at: (now - 600_000) / 1000, title: 'secret-client roadmap', cwd: `/Users/${FAKE_USERNAME}/secret-client`, billing_base_url: 'https://mcp.example.com/bill' },
       { id: 'cron-1', source: 'cron', started_at: (now - 2 * HOUR) / 1000, title: 'secret-client nightly' }
     ])
   }
+}
+
+// A Mac's LaunchAgents folder in `fake`, for a run on platform darwin: a plist holds the program and its
+// arguments, environment settings with keys, folders with the username, sockets and more, and the logs
+// hold whatever the job printed. Returns what mac-programs.mjs needs to answer for plutil and launchctl.
+export async function hostileMac(fake, now) {
+  const home = `/Users/${FAKE_USERNAME}`
+  const logs = {
+    out: await fake.write('Library/Logs/secret-client.out.log', `plist-secret-words ${fakeClaudeToken()} ${home}/secret-client`),
+    err: await fake.write('Library/Logs/secret-client.err.log', `plist-secret-words ${FAKE_EMAIL}`)
+  }
+  await setMtime(logs.out, now - HOUR)
+  await setMtime(logs.err, now - 2 * HOUR)
+  const baggage = {
+    ProgramArguments: [`${home}/bin/run`, '--token', fakeClaudeToken(), `--owner=${FAKE_EMAIL}`],
+    EnvironmentVariables: { ANTHROPIC_API_KEY: fakeClaudeToken(), DB_PASSWORD: fakeRefreshToken(), OWNER: FAKE_EMAIL, NOTE: 'env-secret-words' },
+    WorkingDirectory: `${home}/secret-client`,
+    UserName: FAKE_USERNAME,
+    Sockets: { Listeners: { SockServiceName: 'secret-client-port' } },
+    WatchPaths: [`${home}/secret-client/inbox`]
+  }
+  const plists = {
+    'local.donna.story-belt-daily.plist': { ...baggage, Label: 'local.donna.story-belt-daily', StartCalendarInterval: { Hour: 6, Minute: 15 }, StandardOutPath: logs.out, StandardErrorPath: logs.err },
+    'local.donna.blog-watch.plist': { ...baggage, Label: 'local.donna.blog-watch', StartInterval: 900 },
+    'local.donna.security-changelog.plist': { ...baggage, Label: 'local.donna.security-changelog', RunAtLoad: true, KeepAlive: false },
+    [`local.${FAKE_USERNAME}.private.plist`]: { ...baggage, Label: `local.${FAKE_USERNAME}.private`, RunAtLoad: true },
+    [`local.${FAKE_EMAIL}.plist`]: { ...baggage, Label: `local.${FAKE_EMAIL}`, RunAtLoad: true }
+  }
+  for (const name of Object.keys(plists)) await fake.write(`Library/LaunchAgents/${name}`, `<plist/> plist-secret-words ${home}`)
+  const launchctl = ['PID\tStatus\tLabel', '-\t0\tlocal.donna.story-belt-daily', '-\t78\tlocal.donna.blog-watch', '4242\t0\tlocal.donna.security-changelog'].join('\n')
+  return { plists, launchctl }
 }
 
 export const FORBIDDEN = () => [
@@ -245,7 +294,19 @@ export const FORBIDDEN = () => [
   'venv',
   'f88c6fc46e',
   'roadmap',
-  'nightly'
+  'nightly',
+  // What a scheduled job and a LaunchAgent keep beside the name, schedule and result the wall shows.
+  'prompt-secret-words',
+  'error-secret-words',
+  'delivery-secret-words',
+  'plist-secret-words',
+  'env-secret-words',
+  'DB_PASSWORD',
+  'ANTHROPIC_API_KEY',
+  'ProgramArguments',
+  'EnvironmentVariables',
+  'run.py',
+  '--owner'
 ]
 
 export function depsFor(fake, extra = {}) {

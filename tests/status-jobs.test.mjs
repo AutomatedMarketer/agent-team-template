@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as realFs from 'node:fs/promises'
-import { join, basename } from 'node:path'
+import { join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import { collectLaunchd, collectHermesJobs, collectJobs, machineZone, fitToFile, parseLaunchctlList, MAX_PLISTS_READ, HERMES_RESULT_WORDS } from '../scripts/lib/status/jobs.mjs'
 import { checkJobs } from '../scripts/lib/status/safe.mjs'
@@ -18,6 +18,7 @@ import {
   FAKE_UUID
 } from './helpers/fake-home.mjs'
 import { writeHermes, fingerprint } from './helpers/hermes-home.mjs'
+import { fakePrograms, launchctlTable } from './helpers/mac-programs.mjs'
 
 /* The launchd half of the jobs part: which LaunchAgents a Mac has, how each is scheduled, whether
    launchd has it loaded and how its last run ended - and nothing else. A plist holds a great deal
@@ -32,28 +33,6 @@ const ZONE = 'America/New_York'
 const MINUTE = 60_000
 const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
 
-// The two programs a Mac's jobs are read through. plutil prints a plist as JSON; launchctl lists
-// what is loaded. Each answer is whatever the test hands over, and every call is recorded.
-function fakePrograms({ plists = {}, launchctl = null, launchctlFails = false } = {}) {
-  const calls = []
-  const exec = async (file, args, options) => {
-    calls.push({ file, args: [...args], options })
-    if (file === '/bin/launchctl' && args.length === 1 && args[0] === 'list') {
-      if (launchctlFails) throw new Error(`launchctl failed at /Users/${FAKE_USERNAME}`)
-      return { stdout: launchctl ?? '', code: 0 }
-    }
-    if (file === '/usr/bin/plutil' && args[0] === '-convert' && args[1] === 'json' && args[2] === '-o' && args[3] === '-' && args.length === 5) {
-      const entry = plists[basename(args[4])]
-      if (entry === undefined) throw new Error('no such plist')
-      if (entry instanceof Error) throw entry
-      return { stdout: typeof entry === 'string' ? entry : JSON.stringify(entry), code: 0 }
-    }
-    throw new Error(`a program nobody expected: ${file}`)
-  }
-  exec.calls = calls
-  return exec
-}
-
 // A Mac's home with a plist file for each name given (their contents are only ever read by plutil,
 // which is pretend here), plus any other files.
 async function macHome(names, others = {}) {
@@ -66,7 +45,6 @@ const stateDirOf = (fake) => join(fake.root, 'state')
 function depsFor(fake, exec, extra = {}) {
   return { home: fake.home, env: {}, platform: 'darwin', now: NOW, timezone: ZONE, identity: fake.identity, stateDir: stateDirOf(fake), exec, ...extra }
 }
-const launchctlTable = (rows) => ['PID\tStatus\tLabel', ...rows.map(([pid, status, label]) => `${pid}\t${status}\t${label}`)].join('\n')
 
 // A recording stand-in for node:fs/promises. A property outside `allowed` throws the moment it is
 // reached, so a test that wants "nothing but stat and readdir" does not depend on the code being

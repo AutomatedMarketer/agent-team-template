@@ -4,7 +4,7 @@ This folder holds small files that describe a computer, written by a script on t
 read by the dashboard. The dashboard runs in the cloud and cannot look at your machine, so the
 machine writes down what it sees and commits it here.
 
-It writes three kinds, called **parts**:
+It writes four kinds, called **parts**:
 
 - **usage** (Phase 4) - how much of your Claude and Codex plan limits are used, which plan you are
   on, and an estimate of how much Claude Code you have been using.
@@ -14,11 +14,15 @@ It writes three kinds, called **parts**:
 - **hermes** (Phase 6) - the Hermes card: Hermes's version, whether its gateway and scheduler are
   beating, and per profile the model, how many skills, and how many conversations and scheduled
   runs in the last week. **Counts, times and names only** - see [The Hermes file](#the-hermes-file).
+- **jobs** - the Readiness wall: every scheduled job on this computer, one row each - the Mac's
+  LaunchAgents and Hermes's cron jobs - with how it is scheduled, when it last reported and when it
+  should have. **Names, schedules, times and states only** - see [The jobs file](#the-jobs-file).
 
 ```
 .agent-team/status/usage/<computer>.json
 .agent-team/status/connections/<computer>.json
 .agent-team/status/hermes/<computer>.json
+.agent-team/status/jobs/<computer>.json
 runs/heartbeat/hermes.json                       (only when Hermes is alive - see below)
 ```
 
@@ -38,6 +42,7 @@ npm run collect:status -- --computer "Mac Mini"           # write the files here
 npm run collect:status -- --computer "Mac Mini" --commit  # write them, commit only them, push
 npm run collect:status -- --only connections --dry-run    # one part only
 npm run collect:status -- --only hermes --dry-run         # the Hermes card only
+npm run collect:status -- --only jobs --dry-run           # the Readiness wall's jobs only
 ```
 
 | Option | What it does |
@@ -47,7 +52,7 @@ npm run collect:status -- --only hermes --dry-run         # the Hermes card only
 | `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
 | `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, and the private copies of Hermes's sessions are made here too. Refused (exit 2) when it is inside the `--clone` folder |
-| `--only usage,connections,hermes` | Only these parts, in any order: one, two or all three |
+| `--only usage,connections,hermes,jobs` | Only these parts, in any order: one, two, three or all four |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
 slot was already claimed). 1 means it refused or failed after reading, or could not reach the team
@@ -409,6 +414,115 @@ If it fails after some files were already renamed into place, it says **Some sna
 have been written; check .agent-team/status and runs/heartbeat** - run it again to put every file
 back in step.
 
+## The jobs file
+
+What the Readiness wall shows: every scheduled job on this computer - the Mac's LaunchAgents and
+Hermes's cron jobs - one row each, with how it is scheduled, how its last run went, and when it
+should have last run. **Names, schedules, times and states only.** On a Mac the collector runs two
+short programs for this, `/usr/bin/plutil` and `/bin/launchctl list`. It **never runs `hermes`**,
+and it starts no program for Hermes at all: everything comes from Hermes's own files.
+
+```json
+{
+  "schema": "agent-status/jobs/v1",
+  "takenAt": "2026-10-09T15:00:00Z",
+  "computer": "Mac Mini",
+  "timezone": "America/New_York",
+  "launchd": {
+    "status": "found",
+    "items": [
+      {
+        "label": "local.donna.story-belt-daily",
+        "cadence": { "kind": "slots", "slots": [{ "minute": 15, "hour": 6 }] },
+        "state": "loaded", "lastExit": 0, "lastReportAt": "2026-10-09T10:15:22Z",
+        "dueAt": "2026-10-09T10:15:00Z", "dueBeforeAt": "2026-10-08T10:15:00Z"
+      },
+      { "label": "local.donna.security-changelog", "cadence": { "kind": "always" }, "state": "running" }
+    ],
+    "hidden": 1, "more": 0
+  },
+  "hermes": {
+    "status": "found",
+    "items": [
+      {
+        "profile": "default", "id": "a1b2c3d4e5f6", "name": "YouTube morning brief", "enabled": true,
+        "cadence": { "kind": "slots", "slots": [{ "minute": 30, "hour": 6 }] },
+        "lastRunAt": "2026-10-09T10:30:04Z", "lastResult": "ok",
+        "dueAt": "2026-10-09T10:30:00Z", "dueBeforeAt": "2026-10-08T10:30:00Z"
+      }
+    ],
+    "hidden": 0, "more": 0
+  }
+}
+```
+
+| What | Read from | Kept |
+|---|---|---|
+| LaunchAgents | the plists in `~/Library/LaunchAgents` - the user's own folder, **never `/Library`** - turned into JSON by `/usr/bin/plutil`, in memory, from the empty folder | `Label`, `StartCalendarInterval`, `StartInterval`, `KeepAlive`, `RunAtLoad`, `Disabled`. The rest of the plist is dropped the moment these are taken |
+| Loaded or not | `/bin/launchctl list` | `running` (it has a process), `loaded` (listed, no process), `not loaded` (not listed); and the last exit status (-255 to 255) of a job it lists |
+| When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
+| The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
+| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on, its schedule (a cron expression and its timezone), when it last ran (`last_run_at`) and how it ended (`last_status`) |
+
+A Hermes job's `last_status` is written as `ok`, `error` or `unknown` and nothing more: `ok` for
+`ok`, `success`, `succeeded` or `completed`; `error` for `error`, `failed`, `failure` or `timeout`, in
+any case; every other word, and no word, is `unknown`. Hermes keeps the reason; it is never kept here.
+
+**How a job is scheduled** - its `cadence`, one of four kinds:
+
+| Kind | When | Written as |
+|---|---|---|
+| `always` | a LaunchAgent with `KeepAlive` set to true, or with `RunAtLoad` true and no schedule | nothing more |
+| `every` | a `StartInterval` (seconds, rounded to whole minutes, at least one), or a cron minute step that divides the hour (`*/15 * * * *`) | the number of minutes |
+| `slots` | `StartCalendarInterval` entries, or a cron expression with lists, ranges and steps for minute, hour and weekday and a single day of the month - at most 48 slots | each slot: a minute, and optionally an hour, a weekday (0 is Sunday) or a day of the month |
+| `unknown` | anything else | nothing more |
+
+A schedule is `unknown`, never guessed, when it has a month; a day of the month together with a
+weekday (cron says "or", launchd does not say); a calendar entry with no minute (that means every
+minute); both a calendar and an interval; a `KeepAlive` that is a condition (restart on failure,
+while the network is up); more than 48 slots; for a Hermes job, a kind other than `cron`, a cron
+expression that is not five plain fields (names and nicknames such as `MON` or `@daily` are not
+read), or a timezone other than the computer's. A job that names no timezone runs in the
+computer's.
+
+**When it should have run.** For a job with a schedule the Mac works out `dueAt` and `dueBeforeAt`:
+the two most recent times it was expected to run, at or before the check time minus 30 minutes (the
+grace for a run that has only just started), in the job's own timezone, looking back 32 days. The
+board compares them with the last report; the file **never says whether a job is on time or late**.
+When the clocks jump forward, a time that does not exist that day is skipped; when they go back, a
+time that happens twice takes the earlier one. An `every` job's start is not known, so its times are
+placed N and 2N minutes before the limit. A job with an `always` or `unknown` schedule, and a job
+that is switched off, has no due times, and `dueBeforeAt` is also left out when fewer than two
+expected runs fall in the 32 days (a monthly job often has only one).
+
+**Switched off.** A LaunchAgent is `disabled: true` when its plist says `Disabled` and `launchctl`
+does not list it (a loaded job is on). A Hermes job is `enabled: false` when it is paused, when it
+does not say it is on, or when it runs once (`at` or `once`): a one-shot has no schedule to keep
+checking.
+
+**Names.** A LaunchAgent's label, a Hermes job's id, and a job's name must pass the same name rule
+as the Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this
+computer's username or name), a label and an id also letters, numbers and `.` `-` `_` only, and a
+name also its characters (letters, numbers, spaces and `. , ' ’ ( ) + & : _ -`) and 60 characters at
+most. One that fails is **not written**: it is counted in `hidden`, so the wall can say "n jobs not
+shown". A jobs file or plist that cannot be read counts as one. At most 60 LaunchAgents and 40
+Hermes jobs are written (the first by label, or by profile and name) and at most 200 plists are
+read; the rest are counted in `more`. The file stays under 64 KB: if it ever would not, the biggest
+schedules are given up first (the job stays, its schedule `unknown`).
+
+**Without a Mac, without Hermes, without a known timezone.** Off a Mac, `launchd` is `not found`
+and no program runs. With no Hermes, `hermes` is `not found`. If the computer's timezone is not one
+this runtime knows, the file says `UTC`, still lists every schedule, and writes no due times.
+
+A file older than 8 hours is shown as "not checked since", never as a light. A job can be renamed
+or hidden on the wall by asking Claude to edit `jobs.yml` in the team repo; the dashboard never
+writes it.
+
+The contract the dashboard reads this by is `scripts/lib/status/jobs-schema.mjs` and
+`tests/fixtures/jobs-parity.json`: the caps, the cadence kinds and bounds, accept and refuse
+examples for labels, the schedule examples (cron, calendar, interval), the due times for the days the
+clocks change, and a full sample.
+
 ## What is never written
 
 Every file, receipt and printed line passes a safety check (`scripts/lib/status/safe.mjs`) before
@@ -428,6 +542,11 @@ never the value. These are never written:
   (`argv`) and process id, and which chat apps it serves; any `config.yaml` key but
   `model.default` and `model.provider` - never `base_url`; a profile or model name that fails the
   name rule
+- from jobs: a LaunchAgent's program and its arguments (`ProgramArguments`), its environment
+  (`EnvironmentVariables`), its folders (`WorkingDirectory`) and every other key of its plist; the
+  contents of its logs, which are never opened; a Hermes job's prompt and script, where a job
+  delivers or came from, its model and skills, `last_error` and every other word of error text; a
+  label, id or job name that fails the name rule
 
 ## Receipts
 
@@ -443,7 +562,7 @@ own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), 
 later always takes a fresh reading. It writes `receipt.json` there once the snapshots are
 written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`, which includes
 `runs/heartbeat/hermes.json` when it was written), and which sources were found (for Hermes:
-install, gateway and profiles, and whether a heartbeat was written) - and `final.json` when it is
+install, gateway and profiles, and whether a heartbeat was written; for jobs: launchd and Hermes statuses and how many jobs were listed) - and `final.json` when it is
 done: the outcome and the commit id. A claim with a
 receipt and no final record means the outcome is unknown; look before running it again.
 
@@ -621,13 +740,14 @@ reloading.
 ### What changes when you move the pin to this version
 
 The plist runs the collector with **no `--only`**, so it collects **every part** the code it runs
-knows. A pin still on the Phase 4 code collects usage only. Moving the pin to this version adds two
+knows. A pin still on the Phase 4 code collects usage only. Moving the pin to this version adds three
 parts to every scheduled run, with nothing changed in the plist:
 
 | Part | What starts happening every 3 hours |
 |---|---|
 | **connections** | It reads Claude Code's and Codex's settings files for names, and **runs `claude mcp list`** from the empty folder, which **starts every local server** on that list and asks every web server to connect - up to 2 minutes. It also runs `--version` for Claude Code, Codex, Git, GitHub CLI and Tailscale, and reads the apps' `Info.plist`. |
 | **hermes** | It reads Hermes's files under `~/.hermes` (version, gateway and scheduler times, each profile's model lines and skill count) and copies each profile's `state.db` into `<state-dir>/hermes-db-...` to count sessions, then deletes the copy. It runs nothing. When Hermes is alive it also commits `runs/heartbeat/hermes.json`. |
+| **jobs** | It reads the plists in `~/Library/LaunchAgents` through `/usr/bin/plutil` and asks `/bin/launchctl list` which are loaded - two short programs, from the empty folder - and looks at the modified time of each job's log files. It reads Hermes's `cron/jobs.json` files and starts nothing for Hermes. |
 
 Nuno approved the live check every 3 hours (decision D1). Whether `claude mcp list`, run from the
 empty folder, records that folder as a project in `~/.claude.json` is **not verified yet** (below).
@@ -644,8 +764,9 @@ after `Mac Mini`:
     <string>usage,hermes</string>
 ```
 
-`usage,hermes` leaves out the connections part and with it `claude mcp list`; `usage,connections`
-leaves out Hermes; `usage` is the Phase 4 behaviour. After editing the plist, reload it:
+`usage,hermes` leaves out the connections part and the jobs part, and with the connections part
+`claude mcp list`; `usage,connections,hermes` leaves out only the jobs part; `usage,connections`
+leaves out Hermes and the jobs; `usage` is the Phase 4 behaviour. After editing the plist, reload it:
 `launchctl bootout gui/$(id -u)/local.donna.agent-status-collector`, then
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.donna.agent-status-collector.plist`.
 A part left out keeps its last file on the dashboard until that file goes stale (8 hours).
@@ -688,6 +809,19 @@ These are checked on the first live run on the Mac, not assumed:
   profile's `state.db` and `cron/ticker_heartbeat` are there and in the shape read here, and how
   often the gateway re-stamps its file. All of this was read from the Hermes source and the Windows
   PC's copy only
+- jobs on the Mac: that launchd sets `XPC_SERVICE_NAME` to the collector's label when it runs the
+  schedule (it is how the collector's own row is marked `self`); that `launchctl list`, run from the
+  collector's LaunchAgent, lists the same agents you see in a Terminal, and that the long-running
+  owners with `RunAtLoad` show a process; and that each calendar job writes its log file on every
+  run, because the log file's modified time is its last report (a job with no log has none)
+- jobs in Hermes: that `schedule.kind` is `cron` for cron jobs and what the other kinds are called
+  (an interval kind is read as `unknown` here); the timezone field; the words `last_status` takes;
+  that Hermes job ids are letters and digits within 60 characters and not a uuid (a job whose id is
+  not is counted in `hidden`); whether `last_run_at` is the start or the
+  finish of the run; and whether a job name with a dash, a slash or more than 60 characters turns up
+  - those jobs are counted in `hidden`, not shown
+- which of the Mac's LaunchAgents use a `KeepAlive` that is a condition rather than plain `true`:
+  those are read as an unknown schedule
 - the Mac's Node version: session counts need `node:sqlite` (Node 22.13 or newer); older says
   "needs a newer Node"
 - that a copy of `state.db` and `state.db-wal` taken while Hermes is writing reads cleanly: a

@@ -20,6 +20,7 @@ import { git } from './helpers/git.mjs'
 const OWN = '.agent-team/status/usage/test-pc.json'
 const OWN_CONNECTIONS = '.agent-team/status/connections/test-pc.json'
 const OWN_HERMES = '.agent-team/status/hermes/test-pc.json'
+const OWN_JOBS = '.agent-team/status/jobs/test-pc.json'
 
 async function makeRemote() {
   const root = await mkdtemp(join(tmpdir(), 'agent-status-git-'))
@@ -86,7 +87,7 @@ test('working copy: commits only its own file, leaves other staged work staged, 
     await git(['add', 'notes.md'], repo.work)
     const result = await collect(fake, ['--commit'], { repo: repo.work, stateDir: join(repo.root, 'state') })
     assert.equal(result.code, 0, result.stderr)
-    assert.deepEqual(await filesIn(repo.work), [OWN_CONNECTIONS, OWN_HERMES, OWN])
+    assert.deepEqual(await filesIn(repo.work), [OWN_CONNECTIONS, OWN_HERMES, OWN_JOBS, OWN])
     assert.equal((await log(repo.work))[0], 'Status snapshot from Test PC')
     const staged = (await git(['diff', '--cached', '--name-only'], repo.work)).stdout.trim()
     assert.equal(staged, 'notes.md', 'the other staged file was committed or unstaged')
@@ -611,7 +612,7 @@ test('a commit run leaves a claim with a receipt and a final record, statuses an
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claims[0], 'receipt.json'), 'utf8'))
     const final = JSON.parse(await readFile(join(stateDir, 'claims', claims[0], 'final.json'), 'utf8'))
     assert.equal(receipt.schema, 'agent-status/receipt/v2')
-    assert.deepEqual(receipt.files.map((entry) => entry.file), [OWN, OWN_CONNECTIONS, OWN_HERMES])
+    assert.deepEqual(receipt.files.map((entry) => entry.file), [OWN, OWN_CONNECTIONS, OWN_HERMES, OWN_JOBS])
     for (const entry of receipt.files) assert.match(entry.sha256, /^[0-9a-f]{64}$/)
     assert.deepEqual(Object.keys(receipt.sources.usage).sort(), ['claudeActivity', 'claudeLimits', 'claudePlan', 'codexLimits', 'codexPlan'])
     assert.equal(final.schema, 'agent-status/final/v1')
