@@ -304,6 +304,10 @@ export const FORBIDDEN = () => [
   'prompt-secret-words',
   'private-prompt-words',
   'client Jones',
+  // The names the hostile jobs file gives its jobs: a Hermes job is published under its id, never under its name.
+  'Morning brief',
+  'Weekly review',
+  'Donna brief',
   'error-secret-words',
   'delivery-secret-words',
   'plist-secret-words',

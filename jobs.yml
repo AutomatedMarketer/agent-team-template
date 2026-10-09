@@ -6,6 +6,8 @@
 # made readable on its own - local.donna.story-belt-daily is shown as "Story belt daily". If one
 # is still unclear, or you do not want a job on the wall at all, say so here.
 #
+# Hermes jobs are shown as "Hermes job <id>" until you name them here: the collector never uses a Hermes job's own name or prompt.
+#
 # The dashboard only reads this file. It never writes it, so you change it by asking Claude:
 # "call local.donna.blog-watch 'Blog watch'" or "hide the Hermes job b2c3d4e5f6a1".
 #
@@ -24,6 +26,8 @@
 # Examples, commented out until you have them:
 
 # jobs:
+#   - id: hermes:default/a1b2c3d4e5f6
+#     name: YouTube morning brief
 #   - id: launchd:local.donna.story-belt-daily
 #     name: Story belt, daily
 #   - id: hermes:donna/b2c3d4e5f6a1

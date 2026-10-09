@@ -446,7 +446,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
     "status": "found",
     "items": [
       {
-        "profile": "default", "id": "a1b2c3d4e5f6", "name": "YouTube morning brief", "enabled": true,
+        "profile": "default", "id": "a1b2c3d4e5f6", "name": "Hermes job a1b2c3d4e5f6", "enabled": true,
         "cadence": { "kind": "slots", "slots": [{ "minute": 30, "hour": 6 }] },
         "lastRunAt": "2026-10-09T10:30:04Z", "lastResult": "ok",
         "dueAt": "2026-10-09T10:30:00Z", "dueBeforeAt": "2026-10-08T10:30:00Z"
@@ -463,8 +463,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
 | Loaded or not | `/bin/launchctl list` | `running` (it has a process), `loaded` (listed, no process), `not loaded` (not listed); and the last exit status (-255 to 255) of a job it lists |
 | When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
 | The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
-| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on (`enabled`, and whether `state` or `paused_at` marks it paused), its `schedule` (`kind`, `expr`, `minutes`, `timezone`: a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
-| A name Hermes copied | the same job's `prompt`, `skills` and `script`, in memory, only to compare with the name | nothing. Hermes names a job nobody named after the first 50 characters of its prompt (else its first skill, else its script); a name equal to one of those, or no name at all, is written as `Unnamed job`. No part of the prompt is written, not shortened and not hashed - the job's `id` says which job it is |
+| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each. It is one JSON file, so it is parsed whole in memory; only the keys named here are then used | the job's `id` (it is published as `Hermes job a1b2c3d4e5f6`, never under the name the file gives it), whether it is on (`enabled`, and whether `state` or `paused_at` marks it paused), its `schedule` (`kind`, `expr`, `minutes`, `timezone`: a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
 | Hermes's timezone | each profile's `config.yaml`: the top-level `timezone:` line, and no other line | nothing is written: the zone is only compared with the computer's, to decide whether a cron time can be judged |
 
 A Hermes job's `last_status` is written as `ok`, `error` or `unknown` and nothing more. The words are
@@ -513,20 +512,44 @@ as Hermes reads it, a record with no `enabled` key is on - or when it has a paus
 Hermes does not fire a job whose `state` is `paused`, or that has a `paused_at` time, even if it says
 `enabled` - or when it runs once (`once`, or `at`): a one-shot has no schedule to keep checking.
 
-**Names.** A LaunchAgent's label, a Hermes job's id, and a job's name must pass the same name rule
-as the Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this
-computer's username or name), a label and an id also letters, numbers and `.` `-` `_` only, and a
-name also its characters (letters, numbers, spaces and `. , ' ’ ( ) + & : _ -`) and 60 characters at
-most. One that fails is **not written**: it is counted in `hidden`, so the wall can say "n jobs not
-shown". The name rule refuses anything with `sk-` in it, because that is how a key starts, so a job
+**A Hermes job's name.** A Hermes job's stored name is never published. Hermes copies the first 50
+characters of the prompt into the name of a job nobody named, and does not rename the job when its
+prompt is edited, so a stored name can carry a prompt that is written nowhere else - and nothing on the
+Mac can tell which names are like that. So every Hermes job is published as `Hermes job a1b2c3d4e5f6`,
+with its own 12-character id, and the gate refuses any other name. A job's name, prompt, skills and
+script are not used, kept or written, in any form - not whole, not shortened, not hashed. (The jobs file
+is one JSON file, so it is parsed whole in memory; the collector then uses only the keys in the table.)
+You give a job a friendly name yourself, below.
+
+### How to name your Hermes jobs on the board
+
+The wall shows each Hermes job as `Hermes job` and its id until you name it. The id is the 12-character
+code Hermes gave the job, the part after `Hermes job `.
+
+1. Ask Claude, in the team repo: "call the Hermes job a1b2c3d4e5f6 'YouTube morning brief'". Say which
+   profile it is in; the main one is `default`.
+2. Claude adds an entry to `jobs.yml` with the id `hermes:<profile>/<id>` - for the main profile,
+   `hermes:default/a1b2c3d4e5f6` - and a `name:`, and commits it.
+3. The board applies the name the next time it loads.
+
+This is the same on Windows and on a Mac: `jobs.yml` is a text file in the team repo, so there is
+nothing to install and no command to run. The name lives in the team repo, where you wrote it on
+purpose; the collector never reads it. To keep a job off the wall instead, ask Claude to add
+`hide: true` to its entry.
+
+**Names of the rest.** A LaunchAgent's label and a Hermes job's id must pass the same name rule as the
+Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this computer's
+username or name), and also letters, numbers and `.` `-` `_` only. A Hermes job's name is made from its
+id, so it must pass too: after the 11 characters of `Hermes job ` the id can be 49 characters at most,
+and a name is 60 at most. One that fails is **not written**: it is counted in `hidden`, so the wall can
+say "n jobs not shown". The name rule refuses anything with `sk-` in it, because that is how a key starts, so a job
 called `task-runner`, `desk-helper` or `risk-monitor` is withheld too. It is counted in `hidden`, in the
 file and in the log line, so the dashboard can say how many jobs hidden by the safety rule there are;
 the rule is shared with the whole dashboard and is not loosened. Renaming it in `jobs.yml` cannot help,
 because the collector refuses the name before anything is written and the dashboard never sees it:
-rename the job where it is made (the LaunchAgent's label, the Hermes job's name). A job Hermes named after its own prompt is shown as `Unnamed job` (see the table above), not
-hidden; give it a name of your own in Hermes if you want it called something. A jobs file or plist
+rename the LaunchAgent where it is made (its label). A jobs file or plist
 that cannot be read counts as one. At most 60 LaunchAgents and 40
-Hermes jobs are written (the first by label, or by profile and name) and at most 200 plists are
+Hermes jobs are written (the first by label, or by profile and id) and at most 200 plists are
 read; the rest are counted in `more`. The file stays under 64 KB: if it ever would not, the biggest
 schedules are given up first (the job stays, its schedule `unknown`).
 
@@ -573,10 +596,10 @@ never the value. These are never written:
   name rule
 - from jobs: a LaunchAgent's program and its arguments (`ProgramArguments`), its environment
   (`EnvironmentVariables`), its folders (`WorkingDirectory`) and every other key of its plist; the
-  contents of its logs, which are never opened; a Hermes job's prompt and script (the collector looks at
-  them in memory only to notice a name copied from them, and writes `Unnamed job` instead), where a job
-  delivers or came from, its model and skills, `last_error` and every other word of error text; a
-  label, id or job name that fails the name rule
+  contents of its logs, which are never opened; a Hermes job's name, prompt, skills and script, which are not used, kept or written
+  (a Hermes job is published as `Hermes job <id>`); where a job
+  delivers or came from, its model, `last_error` and every other word of error text; a
+  label or id that fails the name rule
 
 ## Receipts
 

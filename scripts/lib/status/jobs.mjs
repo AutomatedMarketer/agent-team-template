@@ -24,28 +24,28 @@
 // Hermes (any computer it is on). Hermes is NEVER run - this half starts no program at all. Where it
 // lives is worked out the way hermes.mjs works it out, and every profile's folder is visited the same
 // way (the default profile first, then the others A to Z):
-//   <profile>/cron/jobs.json          up to 1 MB, parsed in memory. From each job, only: id, name,
+//   <profile>/cron/jobs.json          up to 1 MB. It is one JSON file, so it is parsed whole in
+//                                     memory; from each job only these keys are then used: id,
 //                                     enabled, state and paused_at (only whether it is paused),
 //                                     schedule.kind, schedule.expr, schedule.minutes,
 //                                     schedule.timezone, last_run_at, last_status. last_status
 //                                     becomes ok, error or unknown and nothing more.
-//                                     Also looked at, and not kept: the prompt, the skills and the
-//                                     script - only to tell whether the name is a copy of the first
-//                                     50 characters of one of them, as Hermes makes when nobody names
-//                                     a job. A copied name is written as "Unnamed job". Nothing of
-//                                     what they say, not a hash of it, is written.
+//                                     The job's name, prompt, skills and script are not used, kept
+//                                     or written, in any form. A job is published as "Hermes job
+//                                     <id>": Hermes copies the start of the prompt into the name of
+//                                     a job nobody named and never renames it when the prompt is
+//                                     edited, so no stored name can be trusted, and nothing here can
+//                                     tell. The owner names a job in jobs.yml, which the board reads.
 //   <profile>/config.yaml             the one top-level `timezone:` line, and no other line: it is
 //                                     the zone Hermes reads that profile's cron expressions in
 //                                     (hermes_time.py), so the times are only judged when it is the
 //                                     computer's own.
-// Never kept: the prompt, the script, where the job delivers or came from, its model, skills and
-// settings, and last_error and every other word of error text. Those are in the same file and are
-// dropped the moment the few values above are taken (the prompt, skills and script after the name
-// check above).
+// Not used, kept or written: the name, the prompt, the script, where the job delivers or came from, its
+// model, skills and settings, and last_error and every other word of error text.
 
 import { readdir, stat } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
-import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, JOBS_WHY, UNNAMED_JOB } from './jobs-schema.mjs'
+import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES, JOBS_WHY, hermesJobName } from './jobs-schema.mjs'
 import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
 import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
@@ -280,41 +280,12 @@ function scheduleOf(schedule, zone, profileZone) {
   return { cadence: cadenceFromCron(schedule.expr) }
 }
 
-// Hermes names a job that has no name after the first 50 characters of what it runs: its prompt,
-// else its first skill, else its script (cron/jobs.py, create_job and _normalize_job_record; Python
-// counts characters, not UTF-16 units, and strips the text before and after). Such a name IS the
-// prompt, and a prompt can say anything. So a name equal to any of those, from the text as it is or
-// stripped, is a copy, and is not published.
-const firstFifty = (text) => Array.from(text).slice(0, 50).join('').trim()
-
-function copiedFromWhatItRuns(name, row) {
-  const wanted = name.trim()
-  if (!wanted) return false
-  const skills = [row.skill, ...(Array.isArray(row.skills) ? row.skills : typeof row.skills === 'string' ? [row.skills] : [])]
-  for (const source of [row.prompt, row.script, ...skills]) {
-    if (source === undefined || source === null) continue
-    const text = String(source)
-    if (firstFifty(text) === wanted || firstFifty(text.trim()) === wanted) return true
-  }
-  return false
-}
-
-// What the job is called on the wall, or null when its name is one the board would refuse. A record
-// with no name, or a name Hermes copied from what the job runs, is shown as unnamed; the id, which the
-// board already has, says which job it is.
-function shownName(row, identity) {
-  const given = row.name
-  if (given === undefined || given === null || given === '') return UNNAMED_JOB
-  if (typeof given !== 'string') return null
-  if (copiedFromWhatItRuns(given, row)) return UNNAMED_JOB
-  return checkConnectionName(given, 'name', identity).length ? null : given
-}
-
-// One job of the file as an item, or null when its id or name is one the board would refuse.
+// One job of the file as an item, or null when its id, or the name made from it, is one the board would
+// refuse. The job's stored name is not looked at (see the header): it is called "Hermes job <id>".
 function hermesItem(profile, row, deps, zone, profileZone) {
   if (!isPlainObject(row) || typeof row.id !== 'string' || checkLabel(row.id, 'id', deps.identity).length) return null
-  const name = shownName(row, deps.identity)
-  if (name === null) return null
+  const name = hermesJobName(row.id)
+  if (checkConnectionName(name, 'name', deps.identity).length) return null
   const { cadence, oneShot } = scheduleOf(row.schedule, zone, profileZone)
   // Hermes reads a record with no `enabled` key as on, and anything else by whether it is truthy;
   // a job with a pause marker - state "paused", or a paused_at time - is not fired even when it says
@@ -329,7 +300,7 @@ function hermesItem(profile, row, deps, zone, profileZone) {
   return item
 }
 
-const byNameThenId = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 // deps: { home, env, platform, now, identity }. `zone` is the computer's timezone, or null.
 export async function collectHermesJobs(deps, zone) {
@@ -363,7 +334,7 @@ export async function collectHermesJobs(deps, zone) {
       seen.add(item.id)
       kept.push(item)
     }
-    items.push(...kept.sort(byNameThenId))
+    items.push(...kept.sort(byId))
   }
   // A profile past the cap is counted once; its jobs are not read.
   return { status: 'found', items: items.slice(0, JOBS_CAPS.hermes), hidden, more: skippedProfiles + Math.max(0, items.length - JOBS_CAPS.hermes) }

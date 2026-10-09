@@ -29,7 +29,7 @@
     "error",
     "unknown"
   ],
-  "unnamedJob": "Unnamed job",
+  "hermesJobName": "Hermes job {id}",
   "whyCodes": {
     "unreadable": "could not be read",
     "refused": "refused by the safety check"
@@ -75,13 +75,13 @@
   },
   "keysRead": {
     "plist": ["Label", "StartCalendarInterval", "StartInterval", "KeepAlive", "RunAtLoad", "Disabled", "StandardOutPath", "StandardErrorPath"],
-    "hermesJob": ["id", "name", "enabled", "state", "paused_at", "schedule", "last_run_at", "last_status", "prompt", "skills", "skill", "script"],
+    "hermesJob": ["id", "enabled", "state", "paused_at", "schedule", "last_run_at", "last_status"],
     "hermesSchedule": ["kind", "expr", "minutes", "timezone"],
-    "note": "Read means looked at in memory. Of these only a plist's log paths (to stat them), a Hermes job's prompt, skills and script (to notice a name copied from them) and its state and paused_at (only whether paused) are used for anything but a value that is written; none of those is written."
+    "note": "Read means used. A jobs file is one JSON file, so it is parsed whole in memory; only these keys are then used. A Hermes job's name, prompt, skills and script are not among them - not used, kept or written, in any form. Of these, a plist's log paths are only stat-ed, and state and paused_at only decide whether a job is paused; none of those is written."
   },
   "names": {
     "label": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$",
-    "labelRule": "A launchd label, and a Hermes job id, are held to this form and to the connection-name rule from tests/fixtures/connections-parity.json on top (no at sign, slash, backslash, key or token start, uuid, stretch of 24 or more characters without a separator, and not this computer's username, name or home folder). One that fails is not written; it is counted in hidden. A Hermes job name and profile are held to the connection-name rule and Hermes's profile rule as they are.",
+    "labelRule": "A launchd label, and a Hermes job id, are held to this form and to the connection-name rule from tests/fixtures/connections-parity.json on top (no at sign, slash, backslash, key or token start, uuid, stretch of 24 or more characters without a separator, and not this computer's username, name or home folder). One that fails is not written; it is counted in hidden. A Hermes profile is held to the connection-name rule and Hermes's profile rule as it is. A Hermes job has no name of its own in the file: see hermesJobName.",
     "labelAccept": [
       "local.donna.story-belt-daily",
       "local.donna.agent-status-collector",
@@ -247,13 +247,13 @@
     "dueAt and dueBeforeAt are the two most recent times the job was expected to run, at or before takenAt minus graceMinutes, worked out on the Mac in the job's own timezone looking back lookbackDays days; a daylight-saving gap skips the slot and an overlap takes the earlier instant",
     "for cadence every the phase is not known, so dueAt is takenAt minus graceMinutes minus N minutes and dueBeforeAt minus 2N minutes",
     "dueAt and dueBeforeAt are left out when the cadence is always or unknown and when the job is switched off (a disabled launchd job, a Hermes job with enabled false); dueBeforeAt is also left out when fewer than two expected runs fall in the look-back, and dueAt too when none does (a job that runs only on the 31st can go a whole look-back with no due time at all); dueBeforeAt is always earlier than dueAt",
-    "a Hermes job is read from cron/jobs.json in the Hermes home and in each profile; only its id, name, enabled, whether it is paused (state, paused_at), schedule (kind, expr, minutes, timezone), last_run_at and last_status are used - its destination, origin, model and every word of error text have no key",
-    "Hermes names a job nobody named after the first 50 characters of what it runs: its prompt, else its first skill, else its script. The collector looks at the prompt, skills and script in memory, only to notice such a copy; a name equal to one, and a job with no name at all, is written as unnamedJob. Nothing of the prompt, skills or script is written - not shortened, not hashed. The job's id (12 hex characters) says which job it is",
+    "a Hermes job is read from cron/jobs.json in the Hermes home and in each profile; only its id, enabled, whether it is paused (state, paused_at), schedule (kind, expr, minutes, timezone), last_run_at and last_status are used - its name, prompt, skills, script, destination, origin, model and every word of error text are not used, kept or written, and have no key",
+    "A Hermes job's stored name is never published. Hermes copies the first 50 characters of the prompt into the name of a job nobody named, and does not rename the job when its prompt is edited, so a stored name can carry an old prompt and nothing on the Mac can tell. Every Hermes job is published as hermesJobName with its id (12 hex characters) in place of {id}; the gate refuses any other name. The board shows that name until the owner gives the job one in jobs.yml (id hermes:<profile>/<id>), which the board applies - the name then lives in the team repo, where the owner wrote it on purpose. A Hermes job is listed by its profile and then its id",
     "a Hermes schedule is a cron expression, or an interval of N minutes; Hermes reads a cron expression in the timezone set by the profile's config.yaml (the top-level timezone line) or else the computer's, so a profile or job that names a timezone other than the computer's, or a kind other than cron and interval, has cadence unknown",
     "a Hermes job that runs once (schedule kind at or once) is written with enabled false and cadence unknown; a job is on unless its enabled says otherwise (Hermes reads a record with no enabled key as on) or it has a pause marker - its state is paused, or it has a paused_at time - which Hermes treats as not firing even when enabled is true",
     "a Hermes last_status is written as ok, error or unknown and nothing else: ok for ok; error for error, delivery_failed, blocked_config or interrupted, in any case; every other word, and no word, is unknown",
     "a Hermes job in a profile is listed by the profile's name, with the default profile (the Hermes home itself) first, then the other profiles A to Z",
-    "hidden counts every job the collector withheld: a plist or jobs file that could not be read, a label, id or name that fails the safety rule, a profile that fails it, and an id seen twice. The shared name rule refuses any text with sk- in it, because that is how a key starts, so task-runner, desk-helper and risk-monitor are withheld too. The rule is not loosened, and renaming in jobs.yml cannot help, because the board never sees the name; rename the job where it is made. Jobs past the cap are counted in more. The board re-checks every name, adds what it drops to hidden, and should say how many jobs were hidden by the safety rule",
+    "hidden counts every job the collector withheld: a plist or jobs file that could not be read, a label or id that fails the safety rule (a Hermes job's stored name is never involved), a profile that fails it, and an id seen twice. The shared name rule refuses any text with sk- in it, because that is how a key starts, so task-runner, desk-helper and risk-monitor are withheld too. The rule is not loosened, and renaming in jobs.yml cannot help, because the board never sees the name; rename the job where it is made. Jobs past the cap are counted in more. The board re-checks every name, adds what it drops to hidden, and should say how many jobs were hidden by the safety rule",
     "when the computer's timezone is not one this collector knows, timezone is UTC, every schedule is still written, and no due times are",
     "the file never says whether a job is on time or late; the board works that out from dueAt, dueBeforeAt and the last report or run",
     "a file older than staleAfterHours is shown as not checked since its time, never as a light",
@@ -346,7 +346,7 @@
         {
           "profile": "default",
           "id": "a1b2c3d4e5f6",
-          "name": "YouTube morning brief",
+          "name": "Hermes job a1b2c3d4e5f6",
           "enabled": true,
           "cadence": { "kind": "slots", "slots": [{ "minute": 30, "hour": 6 }] },
           "lastRunAt": "2026-10-09T10:30:04Z",
@@ -357,7 +357,7 @@
         {
           "profile": "donna",
           "id": "b2c3d4e5f6a1",
-          "name": "Memory tidy",
+          "name": "Hermes job b2c3d4e5f6a1",
           "enabled": true,
           "cadence": {
             "kind": "slots",
@@ -376,7 +376,7 @@
         {
           "profile": "donna",
           "id": "c3d4e5f6a1b2",
-          "name": "Substack draft",
+          "name": "Hermes job c3d4e5f6a1b2",
           "enabled": false,
           "cadence": { "kind": "unknown" },
           "lastResult": "unknown"

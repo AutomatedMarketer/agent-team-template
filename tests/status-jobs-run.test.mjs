@@ -454,11 +454,11 @@ test('a Mac and a Hermes full of secrets, through a whole committed run: the fil
 
     const doc = await readAt(repo.work, JOBS)
     assert.deepEqual(checkJobs(doc, fake.identity), [])
-    // What it did keep: the jobs the wall shows, the Hermes jobs with good names - and a count of what was withheld.
+    // What it did keep: the jobs the wall shows, each Hermes job under its id, never the name the file gives it.
     assert.deepEqual(doc.launchd.items.map((item) => item.label), ['local.donna.blog-watch', 'local.donna.security-changelog', 'local.donna.story-belt-daily'])
     assert.equal(doc.launchd.hidden, 2, 'the label with the username and the one with the email')
-    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Morning brief/ok', 'default/Unnamed job/ok', 'default/Weekly review/error', 'donna/Donna brief/error'])
-    assert.equal(doc.hermes.hidden, 2, 'the job named after an email, and the profile named after the person')
+    assert.deepEqual(doc.hermes.items.map((item) => `${item.profile}/${item.name}/${item.lastResult}`), ['default/Hermes job brief1/ok', 'default/Hermes job mail1/ok', 'default/Hermes job review1/error', 'default/Hermes job unnamed1/ok', 'donna/Hermes job donna1/error'])
+    assert.equal(doc.hermes.hidden, 1, 'only the profile named after the person: a job called after an email is no longer a reason to hide it')
 
     const [claim] = await readdir(join(stateDir, 'claims'))
     const outputs = [

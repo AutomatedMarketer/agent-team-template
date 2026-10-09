@@ -14,7 +14,7 @@ import {
   LOOKBACK_DAYS,
   LAUNCHD_STATES,
   HERMES_RESULTS,
-  UNNAMED_JOB,
+  hermesJobName,
   JOBS_WHY,
   EXIT_CODE,
   CADENCE,
@@ -66,11 +66,24 @@ test('jobs parity: caps, grace, look-back, states, results and the exit-code ran
   assert.deepEqual(EXIT_CODE, fixture.exitCode)
 })
 
-test('jobs parity: the name a nameless job is shown under matches', () => {
-  assert.equal(UNNAMED_JOB, fixture.unnamedJob)
-  assert.equal(UNNAMED_JOB, 'Unnamed job')
-  // It passes the name rule it stands in for.
-  assert.deepEqual(checkConnectionName(UNNAMED_JOB, 'name', identity), [])
+test('jobs parity: a Hermes job is published under one fixed name made from its id, and the gate accepts no other', () => {
+  assert.equal(fixture.hermesJobName, 'Hermes job {id}')
+  assert.equal(hermesJobName('a1b2c3d4e5f6'), 'Hermes job a1b2c3d4e5f6')
+  for (const id of fixture.names.labelAccept) {
+    assert.equal(hermesJobName(id), fixture.hermesJobName.replace('{id}', id))
+    assert.deepEqual(checkConnectionName(hermesJobName(id), 'name', identity), [], id)
+  }
+  // The sample is written that way, and nothing else is let through as a name - not a stored one, not an
+  // empty one, not another job's.
+  for (const item of fixture.sample.hermes.items) assert.equal(item.name, hermesJobName(item.id))
+  accepted(fixture.sample)
+  for (const name of ['YouTube morning brief', 'Hermes job', 'hermes job a1b2c3d4e5f6', 'Hermes job b2c3d4e5f6a1', ' Hermes job a1b2c3d4e5f6', 'Hermes job a1b2c3d4e5f6 ', '', 'Unnamed job', 'Email Dr Smith about my HIV test results and the']) {
+    refused((doc) => { doc.hermes.items[0].name = name }, /hermes\.items\[0\]\.name: is not the fixed name made from the job's id/)
+  }
+  // A problem about a name never repeats it.
+  const doc = clone(fixture.sample)
+  doc.hermes.items[0].name = 'Email Dr Smith about my HIV test results and the'
+  for (const problem of checkJobs(doc, identity)) assert.ok(!problem.includes('HIV'), problem)
 })
 
 test('jobs parity: the two reasons a block can give for being unavailable match, and fit a block', () => {
@@ -157,7 +170,7 @@ test('the gate accepts the sample, and every accept example as a launchd label a
   for (const name of fixture.names.labelAccept) {
     const doc = clone(fixture.sample)
     doc.launchd.items = [{ label: name, cadence: { kind: 'always' }, state: 'running' }]
-    doc.hermes.items = [{ profile: 'default', id: name, name: 'A job', enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }]
+    doc.hermes.items = [{ profile: 'default', id: name, name: hermesJobName(name), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }]
     accepted(doc)
   }
 })
@@ -317,7 +330,7 @@ test('each label once per computer, each Hermes job once per profile', () => {
 
 test('the caps are the gate\'s, not one more', () => {
   const launchd = (count) => Array.from({ length: count }, (_, index) => ({ label: `local.job-${index}`, cadence: { kind: 'always' }, state: 'running' }))
-  const hermes = (count) => Array.from({ length: count }, (_, index) => ({ profile: 'default', id: `job-${index}`, name: `Job ${index}`, enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }))
+  const hermes = (count) => Array.from({ length: count }, (_, index) => ({ profile: 'default', id: `job-${index}`, name: hermesJobName(`job-${index}`), enabled: true, cadence: { kind: 'always' }, lastResult: 'unknown' }))
   const ok = clone(fixture.sample)
   ok.launchd.items = launchd(fixture.caps.launchd)
   ok.hermes.items = hermes(fixture.caps.hermes)

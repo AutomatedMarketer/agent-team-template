@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 1173
+ℹ tests 1174
 ℹ fail 0
 ```
 
@@ -285,10 +285,10 @@ Hermes's own files, never by running Hermes.
 The same script also lists every scheduled job on your always-on computer - the Mac's LaunchAgents
 and Hermes's cron jobs - by name, schedule and how its last run went, so the dashboard's Readiness
 screen can show one light per job. It publishes names, schedules, times and exit codes only; it does
-not publish a job's arguments, settings, prompts, error text or logs. (One thing is looked at and
-thrown away: Hermes names a job you did not name after the first words of its prompt, so the script
-checks for that, in memory, and shows such a job as "Unnamed job" instead.) To rename a job on the
-wall or hide it, ask Claude to edit [`jobs.yml`](jobs.yml).
+not publish a job's arguments, settings, prompts, error text or logs. A Hermes job is shown as
+"Hermes job <id>": Hermes copies the start of a job's prompt into the name of a job you did not name,
+and keeps those words after the prompt is edited, so the script never uses or publishes a Hermes
+job's name or prompt. To name a job on the wall, or hide it, ask Claude to edit [`jobs.yml`](jobs.yml).
 
 - **How it works:** [The jobs file](.agent-team/status/README.md#the-jobs-file) - what it reads,
   what it keeps, and what is never kept.

@@ -5,10 +5,11 @@
 // byte for byte, in agent-cockpit too, and tests/status-jobs-contract.test.mjs fails if this file
 // drifts from it. The shape at the bottom is what safe.mjs enforces before anything is written.
 // Names, times, numbers and states only: a job's arguments, environment settings, folders, prompts,
-// error text and logs have no key here, so they cannot reach a file. One thing is looked at and not
-// kept: Hermes names a job nobody named after the first 50 characters of its prompt, so the collector
-// reads a Hermes job's prompt, skills and script in memory, only to notice a name copied from them,
-// and writes UNNAMED_JOB in its place. Nothing of the prompt, not even a hash, is written.
+// error text and logs have no key here, so they cannot reach a file. That includes a Hermes job's own
+// name: Hermes copies the first 50 characters of the prompt into the name of a job nobody named and does
+// not rename it when the prompt is edited, so a stored name can carry a prompt that exists nowhere else.
+// Every Hermes job is published as "Hermes job <id>" (hermesJobName), and the gate refuses any other
+// name. The board shows the owner's own name for it, from jobs.yml, when there is one.
 //
 // The file never says whether a job is on time. It carries when each job should have run
 // (dueAt, dueBeforeAt - worked out on the Mac in the job's own timezone, where the schedule is
@@ -36,8 +37,9 @@ export const LAUNCHD_STATES = ['running', 'loaded', 'not loaded']
 // The two fixed reasons a block can give for being unavailable (its `why`). Never a message, and never
 // anything the file held: `refused` is what the jobs part says when the safety check refused its file.
 export const JOBS_WHY = { unreadable: 'could not be read', refused: 'refused by the safety check' }
-// What a Hermes job is called when it has no name of its own, or Hermes copied its name from what it runs.
-export const UNNAMED_JOB = 'Unnamed job'
+// What a Hermes job is called in the file: its 12-character id after a fixed word, and nothing it holds.
+// Never its stored name (see the header). The same words are in tests/fixtures/jobs-parity.json.
+export const hermesJobName = (id) => `Hermes job ${id}`
 export const HERMES_RESULTS = ['ok', 'error', 'unknown']
 // launchctl's last exit status: a code, or minus the signal that stopped the job.
 export const EXIT_CODE = { min: -255, max: 255 }
@@ -154,7 +156,11 @@ const hermesItemShape = {
     dueBeforeAt: iso
   },
   required: ['profile', 'id', 'name', 'enabled', 'cadence', 'lastResult'],
-  rule: (item) => dueProblems(item, item.enabled === false)
+  rule: (item) => [
+    ...dueProblems(item, item.enabled === false),
+    // The only name a Hermes job may have is the fixed one, so no stored name - whatever it says - can pass.
+    ...(item.name !== undefined && typeof item.id === 'string' && item.name !== hermesJobName(item.id) ? [['name', "is not the fixed name made from the job's id"]] : [])
+  ]
 }
 
 const itemsOf = (itemShape, max, unique) => ({ type: 'array', of: itemShape, min: 0, max, unique })
