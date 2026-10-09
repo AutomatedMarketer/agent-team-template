@@ -25,9 +25,13 @@
 // lives is worked out the way hermes.mjs works it out, and every profile's folder is visited the same
 // way (the default profile first, then the others A to Z):
 //   <profile>/cron/jobs.json          up to 1 MB, parsed in memory. From each job, only: id, name,
-//                                     enabled, schedule.kind, schedule.expr, schedule.timezone,
-//                                     last_run_at, last_status. last_status becomes ok, error or
-//                                     unknown and nothing more.
+//                                     enabled, schedule.kind, schedule.expr, schedule.minutes,
+//                                     schedule.timezone, last_run_at, last_status. last_status
+//                                     becomes ok, error or unknown and nothing more.
+//   <profile>/config.yaml             the one top-level `timezone:` line, and no other line: it is
+//                                     the zone Hermes reads that profile's cron expressions in
+//                                     (hermes_time.py), so the times are only judged when it is the
+//                                     computer's own.
 // Never kept: the prompt, the script, where the job delivers or came from, its model, skills and
 // settings, and last_error and every other word of error text. Those are in the same file and are
 // dropped the moment the few values above are taken.
@@ -38,7 +42,7 @@ import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES } from './jobs-schema.mjs'
 import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
 import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
-import { hermesRoot, profileFolders, readSmallJson, hermesTime, folderState } from './hermes.mjs'
+import { hermesRoot, profileFolders, readSmall, readSmallJson, hermesTime, folderState, lineValue } from './hermes.mjs'
 import { isoSeconds, isPlainObject } from './util.mjs'
 
 const LAUNCHCTL = '/bin/launchctl'
@@ -213,13 +217,17 @@ export async function collectLaunchd(deps, zone) {
 
 // A jobs file bigger than this is not one Hermes wrote for this purpose, and is not read.
 export const HERMES_JOBS_FILE_BYTES = 1024 * 1024
-// Hermes's own words for how a run ended, as far as they are known. Anything else - including no
-// word, and words like "running" or "skipped" that say nothing about success - is unknown.
+// The words Hermes itself writes into last_status when a run ends (cron/jobs.py, _record_run_outcome,
+// and cron/scheduler.py): "ok" when the run succeeded and its output was delivered; "error" when it
+// failed; "delivery_failed" when it ran but its output could not be delivered; "blocked_config" when
+// it was stopped before it ran for a setting that is wrong; "interrupted" when a shutdown cut it off.
+// Only "ok" is a good run. Any other word - including no word - is unknown, never a guess.
 export const HERMES_RESULT_WORDS = {
-  ok: ['ok', 'success', 'succeeded', 'completed'],
-  error: ['error', 'failed', 'failure', 'timeout']
+  ok: ['ok'],
+  error: ['error', 'delivery_failed', 'blocked_config', 'interrupted']
 }
-// A job that runs once is not on a schedule the wall can keep checking.
+// A job that runs once is not on a schedule the wall can keep checking. Hermes writes "once"
+// (cron/jobs.py, parse_schedule); "at" is the name the plan used.
 const ONE_SHOT_KINDS = ['at', 'once']
 
 function resultOf(raw) {
@@ -229,29 +237,48 @@ function resultOf(raw) {
   return 'unknown'
 }
 
-// The cadence of one job's schedule: a cron expression in the computer's own zone, or nothing the
-// wall can use. A job that names another zone than the computer's is not read, and a job that names
-// none runs in the computer's.
-function scheduleOf(schedule, zone) {
+// The zone Hermes reads this profile's cron expressions in: the top-level `timezone:` line of its
+// config.yaml, when that names a real zone (hermes_time.py; an unreal one makes Hermes fall back to
+// the computer's own time, as no line at all does). Only that one line is looked at. A zone set in
+// Hermes's own environment (HERMES_TIMEZONE) is not visible from here.
+async function configuredZone(dir) {
+  const read = await readSmall(join(dir, 'config.yaml'), 1024 * 1024)
+  if (read.state !== 'ok') return null
+  for (const line of read.text.split(/\r?\n/)) {
+    const match = /^timezone\s*:(.*)$/.exec(line)
+    if (match) return canonicalZone(lineValue(match[1]))
+  }
+  return null
+}
+
+// The cadence of one job's schedule: a cron expression read in the computer's own zone, an interval
+// of N minutes, or nothing the wall can use. A cron expression is a time on a wall clock, so it is only
+// kept when every zone it could be read in - the job's own, if it names one, and the profile's
+// configured one - is the computer's; an interval has no wall clock and needs no zone.
+function scheduleOf(schedule, zone, profileZone) {
   const unknown = { cadence: { kind: 'unknown' } }
   if (!isPlainObject(schedule)) return unknown
   if (ONE_SHOT_KINDS.includes(schedule.kind)) return { ...unknown, oneShot: true }
-  if (schedule.kind !== 'cron') return unknown
-  const given = schedule.timezone
-  if (given !== undefined && given !== null && given !== '') {
-    const named = canonicalZone(given)
-    if (named === null || named !== zone) return unknown
+  if (schedule.kind === 'interval') {
+    return { cadence: cadenceFromInterval(typeof schedule.minutes === 'number' ? schedule.minutes * 60 : NaN) }
   }
+  if (schedule.kind !== 'cron') return unknown
+  const readIn = []
+  const given = schedule.timezone
+  if (given !== undefined && given !== null && given !== '') readIn.push(canonicalZone(given) ?? 'not a zone')
+  if (profileZone) readIn.push(profileZone)
+  if (readIn.some((named) => named !== zone)) return unknown
   return { cadence: cadenceFromCron(schedule.expr) }
 }
 
 // One job of the file as an item, or null when its id or name is one the board would refuse.
-function hermesItem(profile, row, deps, zone) {
+function hermesItem(profile, row, deps, zone, profileZone) {
   if (!isPlainObject(row) || typeof row.id !== 'string' || typeof row.name !== 'string') return null
   if (checkLabel(row.id, 'id', deps.identity).length || checkConnectionName(row.name, 'name', deps.identity).length) return null
-  const { cadence, oneShot } = scheduleOf(row.schedule, zone)
-  // A job is on only when it says so; a job that runs once is written as off.
-  const enabled = row.enabled === true && !oneShot
+  const { cadence, oneShot } = scheduleOf(row.schedule, zone, profileZone)
+  // Hermes reads a record with no `enabled` key as on, and anything else by whether it is truthy
+  // (cron/jobs.py, is_job_runnable); a job that runs once is written as off.
+  const enabled = (row.enabled === undefined ? true : Boolean(row.enabled)) && !oneShot
   const item = { profile, id: row.id, name: row.name, enabled, cadence }
   const lastRunAt = hermesTime(row.last_run_at, deps.now)
   if (lastRunAt) item.lastRunAt = lastRunAt
@@ -281,10 +308,11 @@ export async function collectHermesJobs(deps, zone) {
       hidden += 1
       continue
     }
+    const profileZone = await configuredZone(dir)
     const seen = new Set()
     const kept = []
     for (const row of rows) {
-      const item = hermesItem(profile, row, deps, zone)
+      const item = hermesItem(profile, row, deps, zone, profileZone)
       // Dropped and counted: a name or id the board would refuse, a row that is not a job, an id seen already.
       if (!item || seen.has(item.id)) {
         hidden += 1

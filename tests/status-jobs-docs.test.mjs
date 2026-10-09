@@ -72,6 +72,13 @@ test('the status README explains the four cadences, the due times, daylight savi
   assert.match(doc, /disabled/i)
   assert.match(doc, /self/)
   for (const words of Object.values(HERMES_RESULT_WORDS)) for (const word of words) assert.ok(doc.includes(word), `the jobs section leaves out the status word ${word}`)
+  // What Hermes itself does, read from its source: an interval kind, a timezone line, a missing enabled key, a default name.
+  assert.match(doc, /`interval`/)
+  assert.match(doc, /`timezone:` line|`timezone:` in the profile's `config\.yaml`/)
+  assert.match(doc, /HERMES_TIMEZONE/)
+  assert.match(doc, /no `enabled` key.*\bon\b/)
+  assert.match(doc, /first 50 characters of its prompt/)
+  assert.match(doc, /never green on a word nobody has checked/)
 })
 
 test('the never-written list covers what a plist and a Hermes job carry beside their schedule', async () => {
@@ -114,7 +121,9 @@ test('what is not verified yet is said, not assumed', async () => {
     'schedule.kind',
     'Hermes job ids',
     'last_run_at',
-    'KeepAlive'
+    'KeepAlive',
+    'cron/jobs.py',
+    'HERMES_TIMEZONE'
   ]) {
     assert.ok(unverified.includes(phrase), `the not-verified list leaves out ${phrase}`)
   }

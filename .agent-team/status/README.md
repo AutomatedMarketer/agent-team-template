@@ -462,28 +462,35 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
 | Loaded or not | `/bin/launchctl list` | `running` (it has a process), `loaded` (listed, no process), `not loaded` (not listed); and the last exit status (-255 to 255) of a job it lists |
 | When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
 | The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
-| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on, its schedule (a cron expression and its timezone), when it last ran (`last_run_at`) and how it ended (`last_status`) |
+| Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each, parsed in memory | the job's `id` and `name`, whether it is on, its schedule (a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
+| Hermes's timezone | each profile's `config.yaml`: the top-level `timezone:` line, and no other line | nothing is written: the zone is only compared with the computer's, to decide whether a cron time can be judged |
 
-A Hermes job's `last_status` is written as `ok`, `error` or `unknown` and nothing more: `ok` for
-`ok`, `success`, `succeeded` or `completed`; `error` for `error`, `failed`, `failure` or `timeout`, in
-any case; every other word, and no word, is `unknown`. Hermes keeps the reason; it is never kept here.
+A Hermes job's `last_status` is written as `ok`, `error` or `unknown` and nothing more. The words are
+the ones Hermes itself writes: `ok` (the run succeeded and its output was delivered); `error` (it
+failed), `delivery_failed` (it ran but its output could not be delivered), `blocked_config` (it was
+stopped before running because of a wrong setting) and `interrupted` (a shutdown cut it off) all
+become `error`, in any case; every other word, and no word, is `unknown` - never green on a word
+nobody has checked. Hermes keeps the reason; it is never kept here.
 
 **How a job is scheduled** - its `cadence`, one of four kinds:
 
 | Kind | When | Written as |
 |---|---|---|
 | `always` | a LaunchAgent with `KeepAlive` set to true, or with `RunAtLoad` true and no schedule | nothing more |
-| `every` | a `StartInterval` (seconds, rounded to whole minutes, at least one), or a cron minute step that divides the hour (`*/15 * * * *`) | the number of minutes |
+| `every` | a `StartInterval` (seconds, rounded to whole minutes, at least one), a cron minute step that divides the hour (`*/15 * * * *`), or a Hermes `interval` job (its `minutes`) | the number of minutes |
 | `slots` | `StartCalendarInterval` entries, or a cron expression with lists, ranges and steps for minute, hour and weekday and a single day of the month - at most 48 slots | each slot: a minute, and optionally an hour, a weekday (0 is Sunday) or a day of the month |
 | `unknown` | anything else | nothing more |
 
 A schedule is `unknown`, never guessed, when it has a month; a day of the month together with a
 weekday (cron says "or", launchd does not say); a calendar entry with no minute (that means every
 minute); both a calendar and an interval; a `KeepAlive` that is a condition (restart on failure,
-while the network is up); more than 48 slots; for a Hermes job, a kind other than `cron`, a cron
-expression that is not five plain fields (names and nicknames such as `MON` or `@daily` are not
-read), or a timezone other than the computer's. A job that names no timezone runs in the
-computer's.
+while the network is up); more than 48 slots; for a Hermes job, a kind other than `cron` or `interval`,
+a cron expression that is not five plain fields (names and nicknames such as `MON` or `@daily` are not
+read), or a time zone other than the computer's. Hermes reads a cron expression in the zone set by the
+`timezone:` line of the profile's `config.yaml` (or by `HERMES_TIMEZONE` in its own environment, which the
+collector cannot see), else in the computer's own time; a cron job whose profile names another zone,
+or that names one itself, is `unknown` rather than judged at the wrong hour. An interval has no wall
+clock, so it needs no zone.
 
 **When it should have run.** For a job with a schedule the Mac works out `dueAt` and `dueBeforeAt`:
 the two most recent times it was expected to run, at or before the check time minus 30 minutes (the
@@ -496,16 +503,18 @@ that is switched off, has no due times, and `dueBeforeAt` is also left out when 
 expected runs fall in the 32 days (a monthly job often has only one).
 
 **Switched off.** A LaunchAgent is `disabled: true` when its plist says `Disabled` and `launchctl`
-does not list it (a loaded job is on). A Hermes job is `enabled: false` when it is paused, when it
-does not say it is on, or when it runs once (`at` or `once`): a one-shot has no schedule to keep
-checking.
+does not list it (a loaded job is on). A Hermes job is `enabled: false` when its `enabled` is false -
+as Hermes reads it, a record with no `enabled` key is on - or when it runs once (`once`, or `at`): a
+one-shot has no schedule to keep checking.
 
 **Names.** A LaunchAgent's label, a Hermes job's id, and a job's name must pass the same name rule
 as the Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this
 computer's username or name), a label and an id also letters, numbers and `.` `-` `_` only, and a
 name also its characters (letters, numbers, spaces and `. , ' ’ ( ) + & : _ -`) and 60 characters at
 most. One that fails is **not written**: it is counted in `hidden`, so the wall can say "n jobs not
-shown". A jobs file or plist that cannot be read counts as one. At most 60 LaunchAgents and 40
+shown". Hermes names a job you did not name after the first 50 characters of its prompt, so an unnamed
+job writes those words as its name when they pass the rule - give it a name of your own, or hide it
+in `jobs.yml`. A jobs file or plist that cannot be read counts as one. At most 60 LaunchAgents and 40
 Hermes jobs are written (the first by label, or by profile and name) and at most 200 plists are
 read; the rest are counted in `more`. The file stays under 64 KB: if it ever would not, the biggest
 schedules are given up first (the job stays, its schedule `unknown`).
@@ -540,7 +549,8 @@ never the value. These are never written:
 - from Hermes: its memories, `SOUL.md`, `USER.md`, `.env`, `auth.json` and logs (never opened);
   session titles, working folders, users, chat ids or any chat content; the gateway's command line
   (`argv`) and process id, and which chat apps it serves; any `config.yaml` key but
-  `model.default` and `model.provider` - never `base_url`; a profile or model name that fails the
+  `model.default` and `model.provider` (and, for the jobs part, the one `timezone:` line) - never
+  `base_url`; a profile or model name that fails the
   name rule
 - from jobs: a LaunchAgent's program and its arguments (`ProgramArguments`), its environment
   (`EnvironmentVariables`), its folders (`WorkingDirectory`) and every other key of its plist; the
@@ -814,12 +824,16 @@ These are checked on the first live run on the Mac, not assumed:
   collector's LaunchAgent, lists the same agents you see in a Terminal, and that the long-running
   owners with `RunAtLoad` show a process; and that each calendar job writes its log file on every
   run, because the log file's modified time is its last report (a job with no log has none)
-- jobs in Hermes: that `schedule.kind` is `cron` for cron jobs and what the other kinds are called
-  (an interval kind is read as `unknown` here); the timezone field; the words `last_status` takes;
-  that Hermes job ids are letters and digits within 60 characters and not a uuid (a job whose id is
-  not is counted in `hidden`); whether `last_run_at` is the start or the
-  finish of the run; and whether a job name with a dash, a slash or more than 60 characters turns up
-  - those jobs are counted in `hidden`, not shown
+- jobs in Hermes: the schedule kinds (`cron`, `interval`, `once`; the plan said `at`, which is also
+  read), Hermes job ids (12 hex characters), the `enabled` default and the `last_status` words (`ok`,
+  `error`, `delivery_failed`, `blocked_config`, `interrupted`) were read from Hermes's own source on
+  the Windows PC (`cron/jobs.py`, `cron/scheduler.py`, `hermes_time.py`), not from a jobs file on the
+  Mac - the Mac's Hermes may be another version, so check its `schedule.kind` values and
+  `last_status` words with a read-only look; whether `HERMES_TIMEZONE` is set in the Mac's Hermes
+  environment (the collector cannot see it, and reads cron times in the computer's zone when the
+  profile's `timezone:` line is absent); that `last_run_at`, which Hermes stamps when a run
+  completes, is the finish and not the start; and whether any job name has a dash, a slash or more
+  than 60 characters - those jobs are counted in `hidden`, not shown
 - which of the Mac's LaunchAgents use a `KeepAlive` that is a condition rather than plain `true`:
   those are read as an unknown schedule
 - the Mac's Node version: session counts need `node:sqlite` (Node 22.13 or newer); older says

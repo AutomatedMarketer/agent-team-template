@@ -184,7 +184,9 @@ async function hostileHermes(fake, now) {
     'providers:',
     '  custom:',
     `    api_key: ${fakeRefreshToken()}`,
-    `    default: ${FAKE_EMAIL}`
+    `    default: ${FAKE_EMAIL}`,
+    // The one line the jobs part reads, so a run goes through that path too.
+    'timezone: America/New_York'
   ))
   await at('gateway_state.json', {
     pid: 4242,
@@ -196,7 +198,7 @@ async function hostileHermes(fake, now) {
   await at('cron/ticker_heartbeat', String((now - 20_000) / 1000))
   await at('skills/research/SKILL.md', lines(`skill-secret-words ${fakeClaudeToken()}`))
   // A profile the board may name, and one named after the person, which it may not.
-  await at('profiles/donna/config.yaml', lines('model:', '  default: gpt-5.1', '  provider: openai', `  base_url: https://mcp.example.com/donna?key=${fakeRefreshToken()}`))
+  await at('profiles/donna/config.yaml', lines('model:', '  default: gpt-5.1', '  provider: openai', `  base_url: https://mcp.example.com/donna?key=${fakeRefreshToken()}`, `timezone: ${fakeClaudeToken()}`))
   await at('profiles/donna/SOUL.md', lines('soul-secret-words for donna'))
   await at(`profiles/${FAKE_USERNAME}/config.yaml`, lines('model: x'))
   // Scheduled jobs: each carries its prompt, where it delivers, and the text of its last error, none of

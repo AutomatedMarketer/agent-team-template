@@ -117,7 +117,7 @@ export async function folderState(path) {
 
 // Reads a small file whole, or says why not. A file bigger than `maxBytes` is not one Hermes wrote
 // for this purpose, and is not read at all.
-async function readSmall(path, maxBytes) {
+export async function readSmall(path, maxBytes) {
   try {
     const info = await stat(path)
     if (!info.isFile() || info.size > maxBytes) return { state: 'broken' }
@@ -272,7 +272,7 @@ export async function profileFolders(root, identity) {
 
 // One YAML value on one line: a plain word, or a quoted one with no escapes. Anything fancier
 // (flow maps, block scalars, anchors, tags, escapes) is null - not a guess.
-function lineValue(rest) {
+export function lineValue(rest) {
   const text = rest.trim()
   if (!text || text.startsWith('#')) return null
   if (text[0] === '"') {

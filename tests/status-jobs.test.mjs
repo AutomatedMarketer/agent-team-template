@@ -604,13 +604,15 @@ test('each profile\'s own jobs, listed under its name: default first, then A to 
   }
 })
 
-test('switched off, and run once: enabled false, no due times; a one-shot has no schedule at all', async () => {
+test('switched off, and run once: enabled false, no due times; a one-shot has no schedule at all; no enabled key is on', async () => {
   const fake = await makeFakeHome()
   try {
     await writeHermes(fake, { now: NOW })
     await writeJobs(fake, { jobs: [
       hermesJob({ id: 'paused', name: 'Paused job', enabled: false }),
       hermesJob({ id: 'nokey', name: 'No enabled key', enabled: undefined }),
+      hermesJob({ id: 'zero', name: 'Zero', enabled: 0 }),
+      hermesJob({ id: 'nulled', name: 'Nulled', enabled: null }),
       hermesJob({ id: 'oneat', name: 'One shot at', schedule: { kind: 'at', at: '2026-10-20T10:00:00Z' } }),
       hermesJob({ id: 'oneonce', name: 'One shot once', schedule: { kind: 'once', run_at: '2026-10-20T10:00:00Z' } })
     ] })
@@ -619,7 +621,9 @@ test('switched off, and run once: enabled false, no due times; a one-shot has no
     assert.equal(byId.paused.enabled, false)
     assert.deepEqual(byId.paused.cadence, { kind: 'slots', slots: [{ minute: 30, hour: 6 }] }, 'a paused job keeps its schedule')
     assert.equal(byId.paused.dueAt, undefined)
-    assert.equal(byId.nokey.enabled, false, 'a job that does not say it is on is not on')
+    assert.equal(byId.nokey.enabled, true, 'Hermes itself reads a record with no enabled key as on')
+    assert.equal(byId.zero.enabled, false)
+    assert.equal(byId.nulled.enabled, false)
     for (const id of ['oneat', 'oneonce']) {
       assert.equal(byId[id].enabled, false, id)
       assert.deepEqual(byId[id].cadence, { kind: 'unknown' }, id)
@@ -665,7 +669,6 @@ test('schedules the plan does not read are unknown, never guessed: other kinds, 
   try {
     await writeHermes(fake, { now: NOW })
     const schedules = {
-      interval: { kind: 'interval', minutes: 30 },
       nokind: { expr: '30 6 * * *' },
       noexpr: { kind: 'cron' },
       numexpr: { kind: 'cron', expr: 630 },
@@ -688,15 +691,93 @@ test('schedules the plan does not read are unknown, never guessed: other kinds, 
   }
 })
 
+test('an interval job is every N minutes, whatever the zone; a bad interval has no schedule', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const at = (id, schedule) => hermesJob({ id, name: `Job ${id}`, schedule })
+    await writeJobs(fake, { jobs: [
+      at('half', { kind: 'interval', minutes: 30, display: 'every 30m' }),
+      at('daily', { kind: 'interval', minutes: 1440 }),
+      at('london', { kind: 'interval', minutes: 60, timezone: 'Europe/London' }),
+      at('zero', { kind: 'interval', minutes: 0 }),
+      at('negative', { kind: 'interval', minutes: -5 }),
+      at('text', { kind: 'interval', minutes: '30' }),
+      at('missing', { kind: 'interval' }),
+      at('huge', { kind: 'interval', minutes: 1e9 })
+    ] })
+    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item]))
+    assert.deepEqual(byId.half.cadence, { kind: 'every', minutes: 30 })
+    assert.equal(byId.half.dueAt, '2026-10-09T14:00:00Z', 'the check time minus the grace minus one interval')
+    assert.equal(byId.half.dueBeforeAt, '2026-10-09T13:30:00Z')
+    assert.deepEqual(byId.daily.cadence, { kind: 'every', minutes: 1440 })
+    assert.deepEqual(byId.london.cadence, { kind: 'every', minutes: 60 }, 'an interval has no wall clock, so no zone to confirm')
+    for (const id of ['zero', 'negative', 'text', 'missing', 'huge']) {
+      assert.deepEqual(byId[id].cadence, { kind: 'unknown' }, id)
+      assert.equal(byId[id].dueAt, undefined, id)
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('cron expressions are read in the zone Hermes is set to: the profile\'s own timezone line, else the computer\'s', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const profiles = {
+      same: { 'config.yaml': 'timezone: US/Eastern\nmodel: x\n' },
+      other: { 'config.yaml': 'model: x\ntimezone: Europe/London\n' },
+      quoted: { 'config.yaml': 'timezone: "America/Los_Angeles"  # west coast\n' },
+      indented: { 'config.yaml': 'display:\n  timezone: Europe/London\n' },
+      invalid: { 'config.yaml': 'timezone: Mars/Olympus\n' },
+      empty: { 'config.yaml': 'timezone: ""\n' },
+      none: { 'config.yaml': 'model: x\n' },
+      token: { 'config.yaml': `timezone: ${fakeClaudeToken()}\n` }
+    }
+    await writeHermes(fake, { now: NOW, profiles })
+    for (const name of Object.keys(profiles)) await writeJobs(fake, { jobs: [hermesJob({ id: `job-${name}`, name: `Job ${name}`, schedule: { kind: 'cron', expr: '30 6 * * *' } })] }, name)
+    // The home itself is the default profile: its own config.yaml says New York, the computer's zone.
+    await fake.write('.hermes/config.yaml', 'timezone: America/New_York\n')
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'job-default', name: 'Job default', schedule: { kind: 'cron', expr: '30 6 * * *' } })] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    const kind = Object.fromEntries(block.items.map((item) => [item.profile, item.cadence.kind]))
+    assert.deepEqual(kind, {
+      default: 'slots',
+      empty: 'slots',
+      indented: 'slots',
+      invalid: 'slots',
+      none: 'slots',
+      other: 'unknown',
+      quoted: 'unknown',
+      same: 'slots',
+      token: 'slots'
+    })
+    // A profile in another zone has no due times either; the others do.
+    const due = Object.fromEntries(block.items.map((item) => [item.profile, item.dueAt !== undefined]))
+    assert.equal(due.other, false)
+    assert.equal(due.quoted, false)
+    assert.equal(due.same, true)
+    // Nothing from the line it read is written, and a made-up value is never repeated.
+    assert.ok(!JSON.stringify(block).includes(fakeClaudeToken()))
+    assert.ok(!JSON.stringify(block).includes('Los_Angeles'))
+    // With no computer zone to confirm against, a profile that names one cannot be confirmed.
+    const unconfirmed = await collectHermesJobs(hermesDeps(fake), null)
+    assert.equal(unconfirmed.items.find((item) => item.profile === 'same').cadence.kind, 'unknown')
+    assert.equal(unconfirmed.items.find((item) => item.profile === 'none').cadence.kind, 'slots')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
 test('last_status words become ok, error or unknown, whatever case or spacing; any other word is unknown', async () => {
   const fake = await makeFakeHome()
   try {
     await writeHermes(fake, { now: NOW })
-    const words = ['ok', 'OK', ' Ok ', 'success', 'succeeded', 'completed', 'error', 'ERROR', 'failed', 'failure', 'timeout', 'running', 'skipped', 'delivered', '', null, 5, true, ['ok'], { status: 'ok' }]
+    const words = ['ok', 'OK', ' Ok ', 'error', 'ERROR', ' error ', 'delivery_failed', 'blocked_config', 'interrupted', 'success', 'completed', 'failed', 'running', 'skipped', 'delivered', '', null, 5, true, ['ok'], { status: 'ok' }]
     await writeJobs(fake, { jobs: words.map((word, index) => hermesJob({ id: `job-${index}`, name: `Job ${index}`, last_status: word })) })
     const items = (await collectHermesJobs(hermesDeps(fake), ZONE)).items
     const results = items.sort((a, b) => Number(a.id.slice(4)) - Number(b.id.slice(4))).map((item) => item.lastResult)
-    assert.deepEqual(results, ['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'error', 'error', 'error', 'error', 'error', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown'])
+    assert.deepEqual(results, [...Array(3).fill('ok'), ...Array(6).fill('error'), ...Array(12).fill('unknown')])
     assert.deepEqual(Object.keys(HERMES_RESULT_WORDS), ['ok', 'error'])
   } finally {
     await fake.cleanup()
@@ -994,5 +1075,5 @@ test('the contract\'s rule for last_status names exactly the words the code read
   for (const words of Object.values(HERMES_RESULT_WORDS)) {
     for (const word of words) assert.match(rule, new RegExp(`(?<![a-z])${word}(?![a-z])`), `the rule leaves out ${word}`)
   }
-  assert.equal(Object.values(HERMES_RESULT_WORDS).flat().length, 8)
+  assert.equal(Object.values(HERMES_RESULT_WORDS).flat().length, 5)
 })
