@@ -107,7 +107,7 @@ async function exists(path) {
 }
 
 // 'folder', 'missing', or 'other' (a file, or something that could not be looked at).
-async function folderState(path) {
+export async function folderState(path) {
   try {
     return (await stat(path)).isDirectory() ? 'folder' : 'other'
   } catch (error) {
@@ -127,7 +127,7 @@ async function readSmall(path, maxBytes) {
   }
 }
 
-async function readSmallJson(path, maxBytes) {
+export async function readSmallJson(path, maxBytes) {
   const read = await readSmall(path, maxBytes)
   if (read.state !== 'ok') return read
   try {
@@ -140,7 +140,7 @@ async function readSmallJson(path, maxBytes) {
 // Hermes writes times as ISO with an offset and microseconds, as a naive ISO it reads as UTC, or
 // (older files) as seconds since 1970. Any of those becomes ISO in UTC to the second; anything
 // else, or a time nobody could believe, is null.
-function hermesTime(raw, now) {
+export function hermesTime(raw, now) {
   let value = raw
   if (typeof value === 'string' && /T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value.trim())) value = `${value.trim()}Z`
   const time = toIsoTime(value)
@@ -235,7 +235,7 @@ async function hasIdentity(dir) {
 
 // The default profile (the home itself) first, then every named profile Hermes would list, A to Z.
 // A name the board would refuse is counted in hidden and never kept.
-async function profileFolders(root, identity) {
+export async function profileFolders(root, identity) {
   const profilesDir = join(root, 'profiles')
   let entries = []
   try {

@@ -20,13 +20,25 @@
 //
 // Both programs run through deps.exec: absolute path, from the empty folder the collector owns, with
 // a time limit and an output cap (programs.mjs). A failure of either is a state word, never a message.
+//
+// Hermes (any computer it is on). Hermes is NEVER run - this half starts no program at all. Where it
+// lives is worked out the way hermes.mjs works it out, and every profile's folder is visited the same
+// way (the default profile first, then the others A to Z):
+//   <profile>/cron/jobs.json          up to 1 MB, parsed in memory. From each job, only: id, name,
+//                                     enabled, schedule.kind, schedule.expr, schedule.timezone,
+//                                     last_run_at, last_status. last_status becomes ok, error or
+//                                     unknown and nothing more.
+// Never kept: the prompt, the script, where the job delivers or came from, its model, skills and
+// settings, and last_error and every other word of error text. Those are in the same file and are
+// dropped the moment the few values above are taken.
 
 import { readdir, stat } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
-import { JOBS_CAPS } from './jobs-schema.mjs'
-import { cadenceFromCalendar, cadenceFromInterval, dueTimes } from './cadence.mjs'
-import { checkLabel } from './safe.mjs'
+import { JOBS_SCHEMA, JOBS_CAPS, JOBS_MAX_FILE_BYTES } from './jobs-schema.mjs'
+import { cadenceFromCalendar, cadenceFromInterval, cadenceFromCron, dueTimes, canonicalZone } from './cadence.mjs'
+import { checkLabel, checkConnectionName, isKnownTimezone } from './safe.mjs'
 import { emptyFolder, VERSION_TIMEOUT_MS } from './programs.mjs'
+import { hermesRoot, profileFolders, readSmallJson, hermesTime, folderState } from './hermes.mjs'
 import { isoSeconds, isPlainObject } from './util.mjs'
 
 const LAUNCHCTL = '/bin/launchctl'
@@ -195,4 +207,138 @@ export async function collectLaunchd(deps, zone) {
     hidden,
     more: unread + Math.max(0, items.length - JOBS_CAPS.launchd)
   }
+}
+
+// --- Hermes ---------------------------------------------------------------------------------------------------------
+
+// A jobs file bigger than this is not one Hermes wrote for this purpose, and is not read.
+export const HERMES_JOBS_FILE_BYTES = 1024 * 1024
+// Hermes's own words for how a run ended, as far as they are known. Anything else - including no
+// word, and words like "running" or "skipped" that say nothing about success - is unknown.
+export const HERMES_RESULT_WORDS = {
+  ok: ['ok', 'success', 'succeeded', 'completed'],
+  error: ['error', 'failed', 'failure', 'timeout']
+}
+// A job that runs once is not on a schedule the wall can keep checking.
+const ONE_SHOT_KINDS = ['at', 'once']
+
+function resultOf(raw) {
+  if (typeof raw !== 'string') return 'unknown'
+  const word = raw.trim().toLowerCase()
+  for (const [result, words] of Object.entries(HERMES_RESULT_WORDS)) if (words.includes(word)) return result
+  return 'unknown'
+}
+
+// The cadence of one job's schedule: a cron expression in the computer's own zone, or nothing the
+// wall can use. A job that names another zone than the computer's is not read, and a job that names
+// none runs in the computer's.
+function scheduleOf(schedule, zone) {
+  const unknown = { cadence: { kind: 'unknown' } }
+  if (!isPlainObject(schedule)) return unknown
+  if (ONE_SHOT_KINDS.includes(schedule.kind)) return { ...unknown, oneShot: true }
+  if (schedule.kind !== 'cron') return unknown
+  const given = schedule.timezone
+  if (given !== undefined && given !== null && given !== '') {
+    const named = canonicalZone(given)
+    if (named === null || named !== zone) return unknown
+  }
+  return { cadence: cadenceFromCron(schedule.expr) }
+}
+
+// One job of the file as an item, or null when its id or name is one the board would refuse.
+function hermesItem(profile, row, deps, zone) {
+  if (!isPlainObject(row) || typeof row.id !== 'string' || typeof row.name !== 'string') return null
+  if (checkLabel(row.id, 'id', deps.identity).length || checkConnectionName(row.name, 'name', deps.identity).length) return null
+  const { cadence, oneShot } = scheduleOf(row.schedule, zone)
+  // A job is on only when it says so; a job that runs once is written as off.
+  const enabled = row.enabled === true && !oneShot
+  const item = { profile, id: row.id, name: row.name, enabled, cadence }
+  const lastRunAt = hermesTime(row.last_run_at, deps.now)
+  if (lastRunAt) item.lastRunAt = lastRunAt
+  item.lastResult = resultOf(row.last_status)
+  if (enabled && zone) Object.assign(item, dueTimes(cadence, zone, deps.now))
+  return item
+}
+
+const byNameThenId = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+
+// deps: { home, env, platform, now, identity }. `zone` is the computer's timezone, or null.
+export async function collectHermesJobs(deps, zone) {
+  const root = hermesRoot(deps)
+  const state = await folderState(root)
+  if (state === 'missing') return { ...NOT_FOUND }
+  if (state !== 'folder') return { ...UNREADABLE }
+  const { folders, hidden: refusedProfiles, more: skippedProfiles } = await profileFolders(root, deps.identity)
+  let hidden = refusedProfiles
+  const items = []
+  for (const { name: profile, dir } of folders) {
+    const read = await readSmallJson(join(dir, 'cron', 'jobs.json'), HERMES_JOBS_FILE_BYTES)
+    if (read.state === 'missing') continue
+    // Hermes writes { jobs: [...] }; a bare list is read too. A file that cannot be read, or has no
+    // list of jobs in it, counts as one thing not shown.
+    const rows = read.state !== 'ok' ? null : Array.isArray(read.value) ? read.value : isPlainObject(read.value) && Array.isArray(read.value.jobs) ? read.value.jobs : null
+    if (!rows) {
+      hidden += 1
+      continue
+    }
+    const seen = new Set()
+    const kept = []
+    for (const row of rows) {
+      const item = hermesItem(profile, row, deps, zone)
+      // Dropped and counted: a name or id the board would refuse, a row that is not a job, an id seen already.
+      if (!item || seen.has(item.id)) {
+        hidden += 1
+        continue
+      }
+      seen.add(item.id)
+      kept.push(item)
+    }
+    items.push(...kept.sort(byNameThenId))
+  }
+  // A profile past the cap is counted once; its jobs are not read.
+  return { status: 'found', items: items.slice(0, JOBS_CAPS.hermes), hidden, more: skippedProfiles + Math.max(0, items.length - JOBS_CAPS.hermes) }
+}
+
+// --- the whole part ---------------------------------------------------------------------------------------------------
+
+// The computer's timezone as the gate will accept it, or null when this runtime does not know it. An
+// alias is written the way the runtime spells it (Asia/Kolkata as Asia/Calcutta).
+export function machineZone(deps) {
+  const named = canonicalZone(deps?.timezone)
+  return named && isKnownTimezone(named) ? named : null
+}
+
+async function safely(read) {
+  try {
+    return await read()
+  } catch {
+    return { ...UNREADABLE }
+  }
+}
+
+// The file must stay under what the board reads. Past that, the schedules with the most slots are
+// given up first - the job stays on the wall, its schedule unknown and no due times - until it fits.
+export function fitToFile(doc) {
+  const size = () => Buffer.byteLength(`${JSON.stringify(doc, null, 2)}\n`)
+  const rows = ['launchd', 'hermes'].flatMap((block) => (doc[block]?.status === 'found' ? doc[block].items : []))
+  while (size() > JOBS_MAX_FILE_BYTES) {
+    let biggest = null
+    for (const row of rows) {
+      if (row.cadence.kind === 'slots' && (!biggest || row.cadence.slots.length > biggest.cadence.slots.length)) biggest = row
+    }
+    if (!biggest) break
+    biggest.cadence = { kind: 'unknown' }
+    delete biggest.dueAt
+    delete biggest.dueBeforeAt
+  }
+  return doc
+}
+
+// The jobs file for one computer. Not a Mac: launchd is not found. No Hermes: hermes is not found.
+// Without a timezone this runtime knows, the file says UTC, still lists every schedule, and has no due times.
+export async function collectJobs(deps, computer) {
+  const zone = machineZone(deps)
+  const launchd = await safely(() => collectLaunchd(deps, zone))
+  const hermes = await safely(() => collectHermesJobs(deps, zone))
+  return fitToFile({ schema: JOBS_SCHEMA, takenAt: isoSeconds(deps.now), computer, timezone: zone ?? 'UTC', launchd, hermes })
 }

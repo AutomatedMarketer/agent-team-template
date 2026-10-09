@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import * as realFs from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
-import { collectLaunchd, parseLaunchctlList, MAX_PLISTS_READ } from '../scripts/lib/status/jobs.mjs'
+import { collectLaunchd, collectHermesJobs, collectJobs, machineZone, fitToFile, parseLaunchctlList, MAX_PLISTS_READ, HERMES_RESULT_WORDS } from '../scripts/lib/status/jobs.mjs'
 import { checkJobs } from '../scripts/lib/status/safe.mjs'
 import { JOBS_SCHEMA } from '../scripts/lib/status/jobs-schema.mjs'
 import {
@@ -17,6 +17,7 @@ import {
   FAKE_HOSTNAME,
   FAKE_UUID
 } from './helpers/fake-home.mjs'
+import { writeHermes, fingerprint } from './helpers/hermes-home.mjs'
 
 /* The launchd half of the jobs part: which LaunchAgents a Mac has, how each is scheduled, whether
    launchd has it loaded and how its last run ended - and nothing else. A plist holds a great deal
@@ -527,4 +528,493 @@ test('a plist full of secrets: arguments, environment settings, folders, logs an
   } finally {
     await fake.cleanup()
   }
+})
+
+// ============================================================================================================
+// The Hermes half: the jobs Hermes schedules, from its own cron/jobs.json - by name, schedule and how the
+// last run ended. Hermes is never run. Each job in that file also carries its prompt, where it delivers,
+// where it came from, and the text of its last error; none of that has a key in the answer.
+// ============================================================================================================
+
+const noProgram = Object.assign(async () => { throw new Error('no program may run') }, { calls: [] })
+const hermesDeps = (fake, extra = {}) => ({ home: fake.home, env: {}, platform: 'darwin', now: NOW, identity: fake.identity, stateDir: stateDirOf(fake), exec: noProgram, ...extra })
+const hermesJob = (extra = {}) => ({
+  id: 'a1b2c3d4e5f6',
+  name: 'YouTube morning brief',
+  enabled: true,
+  schedule: { kind: 'cron', expr: '30 6 * * *', timezone: ZONE },
+  last_run_at: '2026-10-09T10:30:04+00:00',
+  last_status: 'ok',
+  ...extra
+})
+const writeJobs = (fake, jobs, profile = null) => fake.write(`${profile ? `.hermes/profiles/${profile}` : '.hermes'}/cron/jobs.json`, jobs)
+const withProfile = (name) => ({ [name]: { 'config.yaml': 'model: gpt-5.1\n' } })
+const wholeDoc = (hermes) => ({ schema: JOBS_SCHEMA, takenAt: iso(NOW), computer: 'Mac Mini', timezone: ZONE, launchd: { status: 'not found' }, hermes })
+
+test('no Hermes at all: hermes is not found; Hermes with no cron files: found, with no jobs', async () => {
+  const fake = await makeFakeHome()
+  try {
+    assert.deepEqual(await collectHermesJobs(hermesDeps(fake), ZONE), { status: 'not found' })
+    await writeHermes(fake, { now: NOW })
+    assert.deepEqual(await collectHermesJobs(hermesDeps(fake), ZONE), { status: 'found', items: [], hidden: 0, more: 0 })
+    // Hermes's home is a file, not a folder.
+    const other = await makeFakeHome({ '.hermes': 'a file' })
+    try {
+      assert.deepEqual(await collectHermesJobs(hermesDeps(other), ZONE), { status: 'unavailable', why: 'could not be read' })
+    } finally {
+      await other.cleanup()
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('one cron job: its schedule, when it last ran, how it ended, and when it should have', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [hermesJob()] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.deepEqual(block, {
+      status: 'found',
+      items: [{
+        profile: 'default',
+        id: 'a1b2c3d4e5f6',
+        name: 'YouTube morning brief',
+        enabled: true,
+        cadence: { kind: 'slots', slots: [{ minute: 30, hour: 6 }] },
+        lastRunAt: '2026-10-09T10:30:04Z',
+        lastResult: 'ok',
+        dueAt: '2026-10-09T10:30:00Z',
+        dueBeforeAt: '2026-10-08T10:30:00Z'
+      }],
+      hidden: 0,
+      more: 0
+    })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('the jobs file may be a bare list, and a job that never ran has no last run and an unknown result', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, [hermesJob({ last_run_at: null, last_status: null })])
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.equal(block.items.length, 1)
+    assert.equal(block.items[0].lastRunAt, undefined)
+    assert.equal(block.items[0].lastResult, 'unknown')
+    assert.ok(block.items[0].dueAt, 'it is still judged against its schedule')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('each profile\'s own jobs, listed under its name: default first, then A to Z', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW, profiles: { ...withProfile('donna'), ...withProfile('coder') } })
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'job2', name: 'B job' }), hermesJob({ id: 'job1', name: 'A job' })] })
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'job3', name: 'Donna job' })] }, 'donna')
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'job4', name: 'Coder job' })] }, 'coder')
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.deepEqual(block.items.map((item) => `${item.profile}/${item.name}`), ['default/A job', 'default/B job', 'coder/Coder job', 'donna/Donna job'])
+    assert.deepEqual([block.hidden, block.more], [0, 0])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('switched off, and run once: enabled false, no due times; a one-shot has no schedule at all', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'paused', name: 'Paused job', enabled: false }),
+      hermesJob({ id: 'nokey', name: 'No enabled key', enabled: undefined }),
+      hermesJob({ id: 'oneat', name: 'One shot at', schedule: { kind: 'at', at: '2026-10-20T10:00:00Z' } }),
+      hermesJob({ id: 'oneonce', name: 'One shot once', schedule: { kind: 'once', run_at: '2026-10-20T10:00:00Z' } })
+    ] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
+    assert.equal(byId.paused.enabled, false)
+    assert.deepEqual(byId.paused.cadence, { kind: 'slots', slots: [{ minute: 30, hour: 6 }] }, 'a paused job keeps its schedule')
+    assert.equal(byId.paused.dueAt, undefined)
+    assert.equal(byId.nokey.enabled, false, 'a job that does not say it is on is not on')
+    for (const id of ['oneat', 'oneonce']) {
+      assert.equal(byId[id].enabled, false, id)
+      assert.deepEqual(byId[id].cadence, { kind: 'unknown' }, id)
+      assert.equal(byId[id].dueAt, undefined, id)
+    }
+    assert.deepEqual(checkJobs(wholeDoc(block), fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a job in another timezone than the computer\'s, or one that is not a zone, has no schedule; none given means the computer\'s', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const at = (id, schedule) => hermesJob({ id, name: `Job ${id}`, schedule })
+    await writeJobs(fake, { jobs: [
+      at('same', { kind: 'cron', expr: '30 6 * * *', timezone: 'US/Eastern' }),
+      at('none', { kind: 'cron', expr: '30 6 * * *' }),
+      at('null', { kind: 'cron', expr: '30 6 * * *', timezone: null }),
+      at('empty', { kind: 'cron', expr: '30 6 * * *', timezone: '' }),
+      at('london', { kind: 'cron', expr: '30 6 * * *', timezone: 'Europe/London' }),
+      at('mars', { kind: 'cron', expr: '30 6 * * *', timezone: 'Mars/Olympus' }),
+      at('number', { kind: 'cron', expr: '30 6 * * *', timezone: 5 })
+    ] })
+    const byId = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item]))
+    for (const id of ['same', 'none', 'null', 'empty']) assert.equal(byId[id].cadence.kind, 'slots', id)
+    for (const id of ['london', 'mars', 'number']) {
+      assert.deepEqual(byId[id].cadence, { kind: 'unknown' }, id)
+      assert.equal(byId[id].dueAt, undefined, id)
+    }
+    // The computer's zone is whatever machineZone() made of it; a job in New York on a Kolkata computer is in another zone.
+    const elsewhere = await collectHermesJobs(hermesDeps(fake), 'Asia/Calcutta')
+    assert.equal(elsewhere.items.find((item) => item.id === 'same').cadence.kind, 'unknown')
+    assert.equal(elsewhere.items.find((item) => item.id === 'none').cadence.kind, 'slots')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('schedules the plan does not read are unknown, never guessed: other kinds, missing or odd expressions', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const schedules = {
+      interval: { kind: 'interval', minutes: 30 },
+      nokind: { expr: '30 6 * * *' },
+      noexpr: { kind: 'cron' },
+      numexpr: { kind: 'cron', expr: 630 },
+      nickname: { kind: 'cron', expr: '@daily' },
+      names: { kind: 'cron', expr: '0 6 * * MON' },
+      text: 'every day at 6',
+      nothing: null,
+      listed: [1, 2]
+    }
+    await writeJobs(fake, { jobs: Object.entries(schedules).map(([id, schedule]) => hermesJob({ id, name: `Job ${id}`, schedule })) })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.equal(block.items.length, Object.keys(schedules).length)
+    for (const item of block.items) {
+      assert.deepEqual(item.cadence, { kind: 'unknown' }, item.id)
+      assert.equal(item.dueAt, undefined, item.id)
+      assert.equal(item.enabled, true, `${item.id}: an enabled job with a schedule nobody can read is still enabled`)
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('last_status words become ok, error or unknown, whatever case or spacing; any other word is unknown', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const words = ['ok', 'OK', ' Ok ', 'success', 'succeeded', 'completed', 'error', 'ERROR', 'failed', 'failure', 'timeout', 'running', 'skipped', 'delivered', '', null, 5, true, ['ok'], { status: 'ok' }]
+    await writeJobs(fake, { jobs: words.map((word, index) => hermesJob({ id: `job-${index}`, name: `Job ${index}`, last_status: word })) })
+    const items = (await collectHermesJobs(hermesDeps(fake), ZONE)).items
+    const results = items.sort((a, b) => Number(a.id.slice(4)) - Number(b.id.slice(4))).map((item) => item.lastResult)
+    assert.deepEqual(results, ['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'error', 'error', 'error', 'error', 'error', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown'])
+    assert.deepEqual(Object.keys(HERMES_RESULT_WORDS), ['ok', 'error'])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('last_run_at is read as Hermes writes it, and a time nobody could believe is left out', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const stamps = {
+      offset: '2026-10-09T10:30:04.123456+00:00',
+      zulu: '2026-10-09T10:30:04Z',
+      naive: '2026-10-09T10:30:04',
+      epoch: Math.floor(Date.parse('2026-10-09T10:30:04Z') / 1000),
+      future: '2026-10-20T10:00:00Z',
+      ancient: '1999-01-01T00:00:00Z',
+      text: 'yesterday',
+      zero: 0
+    }
+    await writeJobs(fake, { jobs: Object.entries(stamps).map(([id, stamp]) => hermesJob({ id, name: `Job ${id}`, last_run_at: stamp })) })
+    const at = Object.fromEntries((await collectHermesJobs(hermesDeps(fake), ZONE)).items.map((item) => [item.id, item.lastRunAt]))
+    for (const id of ['offset', 'zulu', 'naive', 'epoch']) assert.equal(at[id], '2026-10-09T10:30:04Z', id)
+    for (const id of ['future', 'ancient', 'text', 'zero']) assert.equal(at[id], undefined, id)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a job whose name, id or shape the board would refuse is dropped and counted; the same job twice is one', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'fine', name: 'Fine job' }),
+      hermesJob({ id: 'mail', name: FAKE_EMAIL }),
+      hermesJob({ id: 'user', name: `${FAKE_USERNAME} notes` }),
+      hermesJob({ id: 'path', name: 'Run /Users/someone/brief.sh' }),
+      hermesJob({ id: 'key', name: `Brief ${fakeClaudeToken()}` }),
+      hermesJob({ id: 'dash', name: 'Brief — morning' }),
+      hermesJob({ id: 'long', name: 'A very long job name that goes on and on past sixty characters in all' }),
+      hermesJob({ id: 'noname', name: undefined }),
+      hermesJob({ id: 'numname', name: 7 }),
+      hermesJob({ id: undefined, name: 'No id' }),
+      hermesJob({ id: 'bad/id', name: 'Slash id' }),
+      hermesJob({ id: FAKE_UUID, name: 'Uuid id' }),
+      hermesJob({ id: 'fine', name: 'Fine job again' }),
+      'not an object',
+      null,
+      ['a list']
+    ] })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.deepEqual(block.items.map((item) => item.id), ['fine'])
+    assert.equal(block.items[0].name, 'Fine job', 'the first of two with one id is the one kept')
+    assert.equal(block.hidden, 15)
+    const text = JSON.stringify(block)
+    for (const word of [FAKE_EMAIL, FAKE_USERNAME, fakeClaudeToken(), FAKE_UUID, '/Users/', '—']) assert.ok(!text.includes(word), `the answer holds ${word}`)
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a profile the board would refuse is counted and its jobs are not read; a broken jobs file counts as one', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW, profiles: { ...withProfile('donna'), ...withProfile('Capital'), ...withProfile('broken'), ...withProfile('empty'), ...withProfile(FAKE_USERNAME) } })
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'ok1', name: 'Root job' })] })
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'ok2', name: 'Donna job' })] }, 'donna')
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'x1', name: 'Capital job' })] }, 'Capital')
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'x2', name: 'Private job' })] }, FAKE_USERNAME)
+    await fake.write('.hermes/profiles/broken/cron/jobs.json', '{ this is not json')
+    await fake.write('.hermes/profiles/empty/cron/jobs.json', JSON.stringify({ not: 'jobs' }))
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.deepEqual(block.items.map((item) => item.id), ['ok1', 'ok2'])
+    assert.equal(block.hidden, 4, 'two refused profiles, a broken file, a file with no jobs list')
+    assert.ok(!JSON.stringify(block).includes('Capital') && !JSON.stringify(block).includes(FAKE_USERNAME))
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a jobs file over a megabyte is not one Hermes wrote: it is not read, and counts as one', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await fake.write('.hermes/cron/jobs.json', JSON.stringify({ jobs: [hermesJob()], padding: 'x'.repeat(1024 * 1024) }))
+    assert.deepEqual(await collectHermesJobs(hermesDeps(fake), ZONE), { status: 'found', items: [], hidden: 1, more: 0 })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('40 jobs at most, in name order within a profile; the rest are counted in more', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    const jobs = Array.from({ length: 43 }, (_, index) => hermesJob({ id: `job-${String(index).padStart(2, '0')}`, name: `Job ${String(index).padStart(2, '0')}` }))
+    await writeJobs(fake, { jobs: [...jobs].reverse() })
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    assert.equal(block.items.length, fixture.caps.hermes)
+    assert.equal(block.more, 3)
+    assert.deepEqual(block.items.map((item) => item.id), jobs.slice(0, 40).map((job) => job.id))
+    assert.deepEqual(checkJobs(wholeDoc(block), fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('with no zone, a Hermes job that names none is listed with its schedule and no due times; one that names a zone cannot be confirmed', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'plain', name: 'Plain', schedule: { kind: 'cron', expr: '30 6 * * *' } }),
+      hermesJob({ id: 'zoned', name: 'Zoned' })
+    ] })
+    const block = await collectHermesJobs(hermesDeps(fake), null)
+    const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
+    assert.equal(byId.plain.cadence.kind, 'slots')
+    assert.equal(byId.zoned.cadence.kind, 'unknown')
+    assert.ok(block.items.every((item) => item.dueAt === undefined))
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('Hermes is never run and its files are only read: no program starts, nothing in its home changes', async () => {
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW, profiles: withProfile('donna') })
+    await writeJobs(fake, { jobs: [hermesJob()] })
+    await fake.write('.hermes/bin/hermes', '#!/bin/sh\necho ran\n')
+    const before = await fingerprint(join(fake.home, '.hermes'))
+    const calls = []
+    const exec = async (...args) => {
+      calls.push(args)
+      throw new Error('no program may run')
+    }
+    await collectHermesJobs(hermesDeps(fake, { exec }), ZONE)
+    assert.equal(calls.length, 0, 'the Hermes part started a program')
+    assert.deepEqual(await fingerprint(join(fake.home, '.hermes')), before, 'something in the Hermes home changed')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a Hermes jobs file full of prompts, destinations, error text and keys: none of it reaches the answer', async () => {
+  const token = fakeClaudeToken()
+  const refresh = fakeRefreshToken()
+  const home = `/Users/${FAKE_USERNAME}`
+  const fake = await makeFakeHome()
+  try {
+    await writeHermes(fake, { now: NOW, profiles: withProfile('donna') })
+    const baggage = (tag) => ({
+      prompt: `prompt-secret-words ${tag}: write to ${FAKE_EMAIL} using ${token} and read ${home}/secret-client/notes.md`,
+      script: `${home}/secret-client/run.sh --token ${refresh}`,
+      deliver: `telegram:chat-77-${tag}`,
+      origin: { platform: 'telegram', chat_id: 'telegram-chat-77', user: FAKE_EMAIL },
+      last_error: `error-secret-words Bearer ${token} at ${home}/secret-client/brief.py line 9: ${FAKE_EMAIL}`,
+      last_delivery_error: `delivery-secret-words ${refresh}`,
+      next_run_at: '2026-10-10T10:30:00+00:00',
+      created_at: '2026-09-01T00:00:00+00:00',
+      model: 'secret-model-name',
+      provider: 'secret-provider',
+      skills: ['secret-skill'],
+      repeat: { times: null, completed: 41 },
+      env: { OPENROUTER_API_KEY: token },
+      workdir: `${home}/secret-client`
+    })
+    await writeJobs(fake, { jobs: [
+      hermesJob({ id: 'ok1', name: 'Morning brief', ...baggage('one') }),
+      hermesJob({ id: 'bad1', name: 'Memory tidy', last_status: 'error', ...baggage('two') }),
+      hermesJob({ id: 'bad2', name: 'Weekly review', schedule: { kind: 'cron', expr: '0 9 * * 1', timezone: ZONE, display: `secret-display ${token}`, note: FAKE_EMAIL }, ...baggage('three') })
+    ] })
+    await writeJobs(fake, { jobs: [hermesJob({ id: 'd1', name: 'Donna brief', ...baggage('four') })] }, 'donna')
+    const block = await collectHermesJobs(hermesDeps(fake), ZONE)
+    const doc = wholeDoc(block)
+    assert.deepEqual(checkJobs(doc, fake.identity), [], 'the gate refused the answer')
+    assert.equal(block.items.length, 4)
+    assert.equal(block.items.find((item) => item.id === 'bad1').lastResult, 'error', 'it still says the job failed - only that it did')
+    const written = JSON.stringify(doc, null, 2)
+    const planted = [
+      token, refresh, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME,
+      '/Users/', 'secret-client', 'prompt-secret-words', 'error-secret-words', 'delivery-secret-words', 'secret-display', 'secret-model-name', 'secret-provider', 'secret-skill',
+      'telegram', 'chat-77', 'OPENROUTER_API_KEY', 'Bearer', 'sk-', 'eyJ', '--token', 'brief.py', 'notes.md', 'run.sh', 'workdir', 'next_run_at', 'last_error'
+    ]
+    for (const word of planted) assert.ok(!written.includes(word), `the answer holds ${JSON.stringify(word)}`)
+    for (const item of block.items) {
+      assert.deepEqual(Object.keys(item).filter((key) => !['profile', 'id', 'name', 'enabled', 'cadence', 'lastRunAt', 'lastResult', 'dueAt', 'dueBeforeAt'].includes(key)), [], item.id)
+    }
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+// --- the whole part ----------------------------------------------------------------------------------------------------------
+
+test('the whole part: launchd and Hermes in one file that passes the gate, with the computer\'s zone', async () => {
+  const fake = await macHome(Object.keys(ORDINARY))
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [hermesJob()] })
+    const exec = fakePrograms({ plists: ORDINARY, launchctl: ORDINARY_TABLE })
+    const doc = await collectJobs(depsFor(fake, exec), 'Mac Mini')
+    assert.deepEqual(Object.keys(doc), ['schema', 'takenAt', 'computer', 'timezone', 'launchd', 'hermes'])
+    assert.equal(doc.schema, 'agent-status/jobs/v1')
+    assert.equal(doc.takenAt, iso(NOW))
+    assert.equal(doc.computer, 'Mac Mini')
+    assert.equal(doc.timezone, ZONE)
+    assert.equal(doc.launchd.status, 'found')
+    assert.equal(doc.hermes.items.length, 1)
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+    // Hermes was read from files; the only programs that ran are the two for launchd.
+    assert.deepEqual([...new Set(exec.calls.map((call) => call.file))].sort(), ['/bin/launchctl', '/usr/bin/plutil'])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('the whole part on a computer that is not a Mac and has no Hermes: both blocks not found, and the file still passes the gate', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const doc = await collectJobs(depsFor(fake, noProgram, { platform: 'win32' }), 'Test PC')
+    assert.deepEqual(doc.launchd, { status: 'not found' })
+    assert.deepEqual(doc.hermes, { status: 'not found' })
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a block that throws is unavailable and the other still stands', async () => {
+  const fake = await macHome(['local.donna.a.plist'])
+  try {
+    await writeHermes(fake, { now: NOW })
+    await writeJobs(fake, { jobs: [hermesJob()] })
+    const broken = { readdir: async () => { throw new TypeError('boom') }, stat: realFs.stat }
+    const doc = await collectJobs(depsFor(fake, fakePrograms({ launchctl: launchctlTable([]) }), { fs: broken }), 'Mac Mini')
+    assert.deepEqual(doc.launchd, { status: 'unavailable', why: 'could not be read' })
+    assert.equal(doc.hermes.status, 'found')
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('the computer\'s zone: its own name when this runtime lists it, an alias spelled the way the runtime lists it, UTC when it does not know it', async () => {
+  assert.equal(machineZone({ timezone: 'America/New_York' }), 'America/New_York')
+  assert.equal(machineZone({ timezone: 'US/Eastern' }), 'America/New_York')
+  assert.equal(machineZone({ timezone: 'Asia/Kolkata' }), 'Asia/Calcutta')
+  assert.equal(machineZone({ timezone: 'UTC' }), 'UTC')
+  // '+05:30' is a zone this runtime understands and the gate would refuse, so it is no zone here.
+  for (const timezone of ['Mars/Olympus', '', undefined, null, 5, 'Users/fakeperson', '+05:30']) assert.equal(machineZone({ timezone }), null, String(timezone))
+  const fake = await macHome(['local.donna.story-belt-daily.plist'])
+  try {
+    const plists = { 'local.donna.story-belt-daily.plist': ORDINARY['local.donna.story-belt-daily.plist'] }
+    const doc = await collectJobs(depsFor(fake, fakePrograms({ plists, launchctl: launchctlTable([['-', 0, 'local.donna.story-belt-daily']]) }), { timezone: 'Mars/Olympus' }), 'Mac Mini')
+    assert.equal(doc.timezone, 'UTC')
+    assert.deepEqual(doc.launchd.items, [{ label: 'local.donna.story-belt-daily', cadence: { kind: 'slots', slots: [{ minute: 15, hour: 6 }] }, state: 'loaded', lastExit: 0 }])
+    assert.deepEqual(checkJobs(doc, fake.identity), [])
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('the file never outgrows what the board reads: the biggest schedules give way first', () => {
+  const slots = (count) => ({ kind: 'slots', slots: Array.from({ length: count }, (_, index) => ({ minute: index % 60, hour: Math.floor(index / 60) })) })
+  const item = (index, count) => ({ label: `local.donna.job-${String(index).padStart(2, '0')}`, cadence: slots(count), state: 'loaded', dueAt: '2026-10-09T10:15:00Z', dueBeforeAt: '2026-10-08T10:15:00Z' })
+  const size = (doc) => Buffer.byteLength(`${JSON.stringify(doc, null, 2)}\n`)
+  const doc = {
+    schema: JOBS_SCHEMA,
+    takenAt: iso(NOW),
+    computer: 'Mac Mini',
+    timezone: ZONE,
+    launchd: { status: 'found', items: Array.from({ length: 60 }, (_, index) => item(index, index === 7 ? 48 : 40)), hidden: 0, more: 0 },
+    hermes: { status: 'not found' }
+  }
+  assert.ok(size(doc) > fixture.maxFileBytes, 'the test needs a file that is too big')
+  const fitted = fitToFile(structuredClone(doc))
+  assert.ok(size(fitted) <= fixture.maxFileBytes)
+  assert.deepEqual(checkJobs(fitted, { username: 'fakeperson', home: '/Users/fakeperson', hostname: 'fake-host-77' }), [])
+  // The 48-slot schedule went first, then the 40-slot ones, until it fitted - and only what had to.
+  const unknown = fitted.launchd.items.filter((entry) => entry.cadence.kind === 'unknown')
+  assert.ok(unknown.some((entry) => entry.label === 'local.donna.job-07'), 'the biggest schedule gave way')
+  assert.ok(unknown.length >= 1 && unknown.length < 60)
+  for (const entry of unknown) assert.equal(entry.dueAt, undefined)
+  assert.equal(fitted.launchd.items.length, 60)
+  // A file that already fits is returned as it is.
+  assert.deepEqual(fitToFile(structuredClone(fixture.sample)), fixture.sample)
+})
+
+test('the contract\'s rule for last_status names exactly the words the code reads', () => {
+  const rule = fixture.rules.find((text) => text.includes('last_status is written as'))
+  assert.ok(rule, 'the contract has no rule for last_status')
+  for (const words of Object.values(HERMES_RESULT_WORDS)) {
+    for (const word of words) assert.match(rule, new RegExp(`(?<![a-z])${word}(?![a-z])`), `the rule leaves out ${word}`)
+  }
+  assert.equal(Object.values(HERMES_RESULT_WORDS).flat().length, 8)
 })
