@@ -136,9 +136,10 @@ export function cadenceFromCron(expression) {
     if (!/^\d{1,2}$/.test(dayText)) return unknown()
     day = Number(dayText)
     if (!withinBounds(day, CADENCE.slot.day)) return unknown()
-    // Cron runs a job when the day of the month OR the weekday matches; launchd and this file do
-    // not say "or", so both given is unknown.
-    if (!everyWeekday) return unknown()
+    // Cron runs a job when the day of the month OR the weekday matches, whenever both are written
+    // (neither is a bare `*`) - even a weekday range that covers every day, so croniter, which Hermes
+    // uses, runs `0 9 1 * 0-6` daily. This file does not say "or", so both written is unknown.
+    if (weekdayText !== '*') return unknown()
   }
   const everyHour = hours.size === 24
   if (everyHour && day === undefined && everyWeekday) {

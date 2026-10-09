@@ -25,7 +25,8 @@
 // lives is worked out the way hermes.mjs works it out, and every profile's folder is visited the same
 // way (the default profile first, then the others A to Z):
 //   <profile>/cron/jobs.json          up to 1 MB, parsed in memory. From each job, only: id, name,
-//                                     enabled, schedule.kind, schedule.expr, schedule.minutes,
+//                                     enabled, state and paused_at (only whether it is paused),
+//                                     schedule.kind, schedule.expr, schedule.minutes,
 //                                     schedule.timezone, last_run_at, last_status. last_status
 //                                     becomes ok, error or unknown and nothing more.
 //                                     Also looked at, and not kept: the prompt, the skills and the
@@ -315,9 +316,11 @@ function hermesItem(profile, row, deps, zone, profileZone) {
   const name = shownName(row, deps.identity)
   if (name === null) return null
   const { cadence, oneShot } = scheduleOf(row.schedule, zone, profileZone)
-  // Hermes reads a record with no `enabled` key as on, and anything else by whether it is truthy
-  // (cron/jobs.py, is_job_runnable); a job that runs once is written as off.
-  const enabled = (row.enabled === undefined ? true : Boolean(row.enabled)) && !oneShot
+  // Hermes reads a record with no `enabled` key as on, and anything else by whether it is truthy;
+  // a job with a pause marker - state "paused", or a paused_at time - is not fired even when it says
+  // enabled (cron/jobs.py, is_job_runnable and _has_pause_marker). A job that runs once is written as off.
+  const paused = String(row.state ?? '').trim() === 'paused' || Boolean(row.paused_at)
+  const enabled = (row.enabled === undefined ? true : Boolean(row.enabled)) && !paused && !oneShot
   const item = { profile, id: row.id, name, enabled, cadence }
   const lastRunAt = hermesTime(row.last_run_at, deps.now)
   if (lastRunAt) item.lastRunAt = lastRunAt

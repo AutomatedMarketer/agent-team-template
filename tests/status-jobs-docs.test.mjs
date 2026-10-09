@@ -205,3 +205,16 @@ test('the docs say always on needs a process, so a run-once agent that finished 
   assert.match(rule, /RunAtLoad true while it has a process/)
   assert.doesNotMatch(rule, /RunAtLoad true and no schedule/)
 })
+
+test('the docs say a paused Hermes job is off even when enabled, and that a day of the month with a weekday is unknown even for a full range', async () => {
+  const doc = await read('.agent-team/status/README.md')
+  const jobs = flat(section(doc, '## The jobs file'))
+  assert.match(jobs, /whose `state` is `paused`, or that has a `paused_at` time/)
+  assert.match(jobs, /neither is a bare `\*`/)
+  assert.match(jobs, /`0 9 1 \* 0-6`/)
+  const unverified = flat(doc.slice(doc.lastIndexOf('### Not verified yet')))
+  assert.match(unverified, /enabled but paused/)
+  const contract = JSON.parse(await read('tests/fixtures/jobs-parity.json'))
+  assert.ok(contract.rules.some((rule) => /pause marker/.test(rule) && /paused_at/.test(rule)))
+  assert.ok(contract.rules.some((rule) => /neither is a bare/.test(rule)))
+})

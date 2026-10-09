@@ -45,8 +45,13 @@ test('cron: Sunday is 0 and 7, once; day-of-month and weekday together is unknow
   assert.deepEqual(cadenceFromCron('0 9 * * 0'), cadenceFromCron('0 9 * * 7'))
   // Every weekday is no weekday at all.
   assert.deepEqual(cadenceFromCron('0 9 * * 0-7'), { kind: 'slots', slots: [{ minute: 0, hour: 9 }] })
-  assert.deepEqual(cadenceFromCron('0 9 1 * 0-7'), { kind: 'slots', slots: [{ minute: 0, hour: 9, day: 1 }] })
-  assert.deepEqual(cadenceFromCron('0 9 1 * 1'), UNKNOWN)
+  // Both the day of the month and the weekday written (neither is `*`) is cron's "or", even when the weekday
+  // range covers every day: croniter, which Hermes uses, runs `0 9 1 * 0-6` every day, not on the 1st.
+  for (const expression of ['0 9 1 * 0-7', '0 9 1 * 0-6', '0 9 1 * 1', '0 9 15 * */2', '0 9 1 * 1-5']) {
+    assert.deepEqual(cadenceFromCron(expression), UNKNOWN, expression)
+  }
+  assert.deepEqual(cadenceFromCron('0 9 1 * *'), { kind: 'slots', slots: [{ minute: 0, hour: 9, day: 1 }] })
+  assert.deepEqual(cadenceFromCron('0 9 * * 1'), { kind: 'slots', slots: [{ minute: 0, hour: 9, weekday: 1 }] })
 })
 
 test('slots: at most 48; exactly 48 is kept, one more is unknown', () => {

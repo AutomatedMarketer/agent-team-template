@@ -483,7 +483,9 @@ nobody has checked. Hermes keeps the reason; it is never kept here.
 | `unknown` | anything else | nothing more |
 
 A schedule is `unknown`, never guessed, when it has a month; a day of the month together with a
-weekday (cron says "or", launchd does not say); a calendar entry with no minute (that means every
+weekday (cron says "or", launchd does not say; for cron it counts whenever both are written - neither
+is a bare `*` - even a weekday range that covers every day, because `0 9 1 * 0-6` runs daily, not on
+the 1st); a calendar entry with no minute (that means every
 minute); both a calendar and an interval; a `KeepAlive` that is a condition (restart on failure,
 while the network is up); more than 48 slots; for a Hermes job, a kind other than `cron` or `interval`,
 a cron expression that is not five plain fields (names and nicknames such as `MON` or `@daily` are not
@@ -505,8 +507,9 @@ expected runs fall in the 32 days (a monthly job often has only one).
 
 **Switched off.** A LaunchAgent is `disabled: true` when its plist says `Disabled` and `launchctl`
 does not list it (a loaded job is on). A Hermes job is `enabled: false` when its `enabled` is false -
-as Hermes reads it, a record with no `enabled` key is on - or when it runs once (`once`, or `at`): a
-one-shot has no schedule to keep checking.
+as Hermes reads it, a record with no `enabled` key is on - or when it has a pause marker, because
+Hermes does not fire a job whose `state` is `paused`, or that has a `paused_at` time, even if it says
+`enabled` - or when it runs once (`once`, or `at`): a one-shot has no schedule to keep checking.
 
 **Names.** A LaunchAgent's label, a Hermes job's id, and a job's name must pass the same name rule
 as the Connections wall (no at sign, slash, key, token start, id, long unbroken run, and not this
@@ -836,6 +839,7 @@ These are checked on the first live run on the Mac, not assumed:
   profile's `timezone:` line is absent); that `last_run_at`, which Hermes stamps when a run
   completes, is the finish and not the start; and whether any job name has a dash, a slash or more
   than 60 characters - those jobs are counted in `hidden`, not shown
+- how many of the Mac's Hermes jobs are enabled but paused (written off, as Hermes does not fire them)
 - which of the Mac's LaunchAgents use a `KeepAlive` that is a condition rather than plain `true`:
   those are read as an unknown schedule; and how many agents with `RunAtLoad` or `WatchPaths` are
   loaded but not running - they are read as an unknown schedule, so a crash shows through the

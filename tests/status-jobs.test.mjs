@@ -663,7 +663,13 @@ test('switched off, and run once: enabled false, no due times; a one-shot has no
       hermesJob({ id: 'zero', name: 'Zero', enabled: 0 }),
       hermesJob({ id: 'nulled', name: 'Nulled', enabled: null }),
       hermesJob({ id: 'oneat', name: 'One shot at', schedule: { kind: 'at', at: '2026-10-20T10:00:00Z' } }),
-      hermesJob({ id: 'oneonce', name: 'One shot once', schedule: { kind: 'once', run_at: '2026-10-20T10:00:00Z' } })
+      hermesJob({ id: 'oneonce', name: 'One shot once', schedule: { kind: 'once', run_at: '2026-10-20T10:00:00Z' } }),
+      // Hermes never fires a job with a pause marker, even when it says enabled (cron/jobs.py, is_job_runnable).
+      hermesJob({ id: 'pausedstate', name: 'Paused by state', enabled: true, state: 'paused' }),
+      hermesJob({ id: 'pausedpad', name: 'Paused by padded state', enabled: true, state: ' paused ' }),
+      hermesJob({ id: 'pausedat', name: 'Paused by time', enabled: true, state: 'scheduled', paused_at: '2026-10-01T10:00:00+00:00' }),
+      hermesJob({ id: 'notpaused', name: 'Not paused', enabled: true, state: 'scheduled', paused_at: null }),
+      hermesJob({ id: 'completed', name: 'Completed state', enabled: true, state: 'completed' })
     ] })
     const block = await collectHermesJobs(hermesDeps(fake), ZONE)
     const byId = Object.fromEntries(block.items.map((item) => [item.id, item]))
@@ -671,6 +677,13 @@ test('switched off, and run once: enabled false, no due times; a one-shot has no
     assert.deepEqual(byId.paused.cadence, { kind: 'slots', slots: [{ minute: 30, hour: 6 }] }, 'a paused job keeps its schedule')
     assert.equal(byId.paused.dueAt, undefined)
     assert.equal(byId.nokey.enabled, true, 'Hermes itself reads a record with no enabled key as on')
+    for (const id of ['pausedstate', 'pausedpad', 'pausedat']) {
+      assert.equal(byId[id].enabled, false, `${id}: Hermes does not fire a job with a pause marker`)
+      assert.equal(byId[id].dueAt, undefined, id)
+    }
+    assert.equal(byId.notpaused.enabled, true)
+    assert.ok(byId.notpaused.dueAt)
+    assert.equal(byId.completed.enabled, true, 'a state other than paused does not switch a job off')
     assert.equal(byId.zero.enabled, false)
     assert.equal(byId.nulled.enabled, false)
     for (const id of ['oneat', 'oneonce']) {
