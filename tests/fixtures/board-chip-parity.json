@@ -1,0 +1,9 @@
+{
+  "about": "The words the board shows on the chip beside the Claude status line reading. The usage guides and the status README quote them, so a student can match what they read to what they see. This file is the contract between agent-team-template and agent-cockpit, the same bytes in both: the template holds its guides to these words, and the board's own tests hold its page to them. Neither repo reads the other's working copy. If the board changes the chip or drops it, change this file in both repos and the guides in the template.",
+  "chips": {
+    "claude-code-statusline": "From Claude Code"
+  },
+  "oldWording": [
+    "from Claude Code’s status line"
+  ]
+}

@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { posix } from 'node:path'
-import { read, exists } from './helpers/repo.mjs'
+import { posix, join } from 'node:path'
+import { readFileSync, existsSync } from 'node:fs'
+import { read, exists, repoRoot } from './helpers/repo.mjs'
 import { parseSimpleYaml } from '../scripts/lib/yaml-lite.mjs'
 
 /* The collector's paperwork: the subscriptions list the board totals, the promise that the
@@ -168,30 +169,38 @@ test('the status README states exactly the label rule the collector enforces', a
 const guide = () => read('docs/guides/usage-meters.md')
 const explainer = () => read('docs/guides/usage-meters-how-it-works.md')
 
-// The words the board's chip shows on the status line reading (agent-cockpit public/index.html,
-// sourceChipHtml). The guides quote it, so a student can match what they read to what they see.
-const BOARD_CHIP = 'From Claude Code'
+// The words the board's chip shows on the status line reading. The guides quote them, so a student can match
+// what they read to what they see. They are a shared contract, tests/fixtures/board-chip-parity.json, and
+// not the board's source: this suite never reads agent-cockpit's page, so another repo's half-done edit
+// cannot fail it. The board's own tests hold its page to the same fixture.
+const chipPath = join(repoRoot, 'tests', 'fixtures', 'board-chip-parity.json')
+const chipContract = JSON.parse(readFileSync(chipPath, 'utf8'))
+const BOARD_CHIP = chipContract.chips['claude-code-statusline']
+
+test('the chip contract is one plain phrase for the status line reading, and the words the guides once got wrong', () => {
+  assert.deepEqual(Object.keys(chipContract).sort(), ['about', 'chips', 'oldWording'])
+  assert.deepEqual(Object.keys(chipContract.chips), ['claude-code-statusline'])
+  assert.match(BOARD_CHIP, /^[A-Z][A-Za-z ]{3,38}$/, 'a chip is a short phrase, with no markup')
+  assert.ok(Array.isArray(chipContract.oldWording) && chipContract.oldWording.length > 0)
+  for (const old of chipContract.oldWording) assert.notEqual(old, BOARD_CHIP)
+})
 
 // Found in review: the guides quoted the chip as "from Claude Code’s status line"; the board says
-// "From Claude Code". When agent-cockpit is checked out beside this repo, the board's own source is
-// the check. Otherwise this says loudly that it did not check.
-test('the board chip the guides quote is the one agent-cockpit actually shows', async (t) => {
-  const { readFile: readOutside } = await import('node:fs/promises')
-  const { repoRoot } = await import('./helpers/repo.mjs')
-  let board
-  try {
-    board = await readOutside(posix.join(repoRoot.replaceAll('\\', '/'), '..', 'agent-cockpit', 'public', 'index.html'), 'utf8')
-  } catch {
-    t.skip('NOT CHECKED: agent-cockpit is not checked out beside this repo, so the chip text the guides quote could not be compared with the board')
-    return
-  }
-  const chip = /source === 'claude-code-statusline'\) return '<span class="chip[^"]*">([^<]+)<\/span>'/.exec(board)?.[1]
-  assert.ok(chip, 'agent-cockpit no longer has a chip for claude-code-statusline where this test looks')
-  assert.equal(chip, BOARD_CHIP, `the board says "${chip}"; the guides quote "${BOARD_CHIP}"`)
+// "From Claude Code".
+test('the guides, the explainer and the status README quote the chip the shared contract names, and not the old wording', async () => {
   for (const [name, doc] of [['the guide', await guide()], ['the explainer', await explainer()], ['the status README', await statusReadme()]]) {
     assert.ok(doc.includes(BOARD_CHIP), `${name} does not quote "${BOARD_CHIP}"`)
-    assert.ok(!doc.includes('from Claude Code’s status line'), `${name} still quotes the old chip wording`)
+    for (const old of chipContract.oldWording) assert.ok(!doc.includes(old), `${name} still quotes the old chip wording`)
   }
+})
+
+test('the two repos hold the same chip contract, byte for byte', (t) => {
+  const sibling = join(repoRoot, '..', 'agent-cockpit', 'tests', 'fixtures', 'board-chip-parity.json')
+  if (!existsSync(sibling)) {
+    t.skip('SKIPPED, not passed: agent-cockpit has no tests/fixtures/board-chip-parity.json beside this repo, so the two copies could not be compared. The tests above still hold the guides to this copy.')
+    return
+  }
+  assert.equal(readFileSync(sibling, 'utf8'), readFileSync(chipPath, 'utf8'), 'the shared chip contract has been edited on one side only')
 })
 
 // GitHub's heading anchors: lower case, punctuation dropped, spaces to hyphens.
