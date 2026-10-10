@@ -59,7 +59,7 @@ npm run collect:status -- --only vaults --dry-run         # the memory graph's v
 | `--dry-run` | Prints the files it would write. Writes nothing, commits nothing |
 | `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
-| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, and the private copies of Hermes's sessions are made here too. Refused (exit 2) when it is inside the `--clone` folder |
+| `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, and the private copies of Hermes's sessions are made here too. Refused (exit 2) when it is inside the `--clone` folder, or, without `--clone`, inside the working copy the run writes into |
 | `--only usage,connections,hermes,jobs,vaults` | Only these parts, in any order: one, two, three, four or all five |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
@@ -682,8 +682,9 @@ write. It is the same principle as the pinned code checkout (see [The Mac schedu
 what runs on the Mac, and what it reads, is decided on the Mac.
 
 - **`allowed-vaults.yml`** is in the collector's state folder - `~/.local/state/agent-status-collector/`
-  unless you give another `--state-dir`. That folder is outside both the code checkout and the data clone,
-  and the collector refuses to run with a state folder inside the clone, so a push to the team repo cannot
+  unless you give another `--state-dir`. That folder is outside both the code checkout and the data clone.
+  The collector refuses to run with a state folder inside the clone - or, when it works in your own copy of
+  the team repo instead of a clone, inside that copy, given or by default - so neither a push nor a pull can
   write or replace the file. It names each vault that may be read and the **most** it may show: `shape`
   (the default) or `titles`.
 - **[`vaults.yml`](../../vaults.yml)** in the team repo says which of those to draw, and may ask for less. It can
@@ -691,8 +692,9 @@ what runs on the Mac, and what it reads, is decided on the Mac.
   allowlist does not name, or raise a level: a name that is not in the allowlist is ignored, `titles` asked
   for where only dots are allowed is dots, and the log says how many of each (a count, never a name).
 - **No `allowed-vaults.yml`: nothing is read** - not Obsidian's list, not a vault, not even `vaults.yml` - and
-  no vaults file is written. A file that is a link, a folder, too big or not YAML is not read as
-  "everything": the part is `unavailable` and nothing is read.
+  no vaults file is written. A file that is a link, a folder, too big, empty or not an allowlist (no
+  `vaults:` list, a misspelled key, no usable name) is read neither as "nothing is allowed" nor as
+  "everything": the part says `unavailable` and nothing is read. Only `vaults: []` says that nothing is allowed.
 - Taking a vault out of the allowlist stops it at the next run, and the new vaults file replaces the old one.
   What was already pushed stays in the team repo's git history, as any pushed file does.
 

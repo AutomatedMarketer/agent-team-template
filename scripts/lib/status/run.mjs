@@ -516,6 +516,17 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain('Give a --state-dir outside it. The default, ~/.local/state/agent-status-collector, is fine.')
     return 2
   }
+
+  // Without --clone the run works in a copy of the team repo, and a pull or a checkout there brings in whatever
+  // was pushed. The state folder holds allowed-vaults.yml, the list of vaults this computer allows, which only the
+  // person at this computer may write: so it may not be inside that copy, given or by default. (With --clone the
+  // working copy is the pinned code checkout, which nothing pulls into; the data clone is the folder checked above.)
+  if (values.clone === undefined && (await isInsideFolder(stateDir, repoRoot))) {
+    complain('Refused: the state folder is inside this working copy, the folder the snapshot files are written to.')
+    complain('A pull or a checkout there could bring in a file the team repo chose, and the list of vaults this computer allows (allowed-vaults.yml) is read from the state folder.')
+    complain('Give a --state-dir outside it. The default, ~/.local/state/agent-status-collector, is fine.')
+    return 2
+  }
   // vaults.yml is read from the folder the snapshot files go to: the dedicated clone when there is one (as the team
   // repo has it, never the code checkout, which is only code), otherwise this folder.
   deps = { ...deps, stateDir, clone: values.clone, dataDir: values.clone ?? repoRoot }

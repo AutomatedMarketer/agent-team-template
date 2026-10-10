@@ -125,7 +125,8 @@ test('no allowlist on the computer: nothing is read, whatever the team repo says
 test('an allowlist that allows nothing reads nothing either, and says so', async () => {
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Second Brain\n' })
   try {
-    for (const text of ['vaults: []\n', '# nothing yet\nvaults: []\n', 'vaults: Second Brain\n', '']) {
+    // An allowlist that says, in so many words, that nothing is allowed. (A file that says nothing is something else.)
+    for (const text of ['vaults: []\n', '# nothing yet\nvaults: []\n']) {
       const home = await obsidianHome('darwin', { 'Second Brain': {} }, { allow: text })
       const fs = recordingFs()
       try {
@@ -343,6 +344,129 @@ test('collectVaults: the lines are plural when they should be, and a broken allo
     await writeFile(join(home.stateDir, ALLOWED_FILE), 'x'.repeat(ALLOWED_VAULTS.maxBytes + 1))
     const doc = await collectVaults(home.depsFor({ now: Date.UTC(2026, 9, 10, 12), dataDir: dir.dir }), 'Mac Mini', [])
     assert.deepEqual(doc.vaults, { status: 'unavailable', why: 'could not be read' })
+  } finally {
+    await Promise.all([home.cleanup(), dir.cleanup()])
+  }
+})
+
+/* ---------- an allowlist that cannot be read says so ---------------------------------------------------------------- */
+
+// The YAML reader is forgiving: most of these parse to "nothing", which must not be taken for "nothing is allowed".
+const NOT_AN_ALLOWLIST = {
+  'not YAML': '{ not yaml',
+  'a bare word': 'vaults',
+  'a stray line of colons': ':::',
+  'control characters': String.fromCharCode(0, 1, 2),
+  'an empty file': '',
+  'only a comment': '# nothing yet\n',
+  'a list with no key': '- Second Brain\n- Ideas\n',
+  'the key spelled wrong': 'vault:\n  - name: Second Brain\n',
+  'vaults with nothing under it': 'vaults:\n',
+  'vaults as one word': 'vaults: Second Brain\n',
+  'vaults as a mapping': 'vaults:\n  name: Second Brain\n',
+  'a list that is cut off': 'vaults: [Second Brain',
+  'a list of entries with no name in any': 'vaults:\n  - Just a word\n  - 7\n  - level: titles\n',
+  'a list whose only name the board would refuse': 'vaults:\n  - name: notes@home\n'
+}
+
+test('an allowlist that cannot be read as one is "broken", not "allows nothing": the part says unavailable', async () => {
+  for (const [what, text] of Object.entries(NOT_AN_ALLOWLIST)) {
+    const state = await team({ [ALLOWED_FILE]: text })
+    try {
+      assert.deepEqual(await readAllowedVaults(state.dir), { state: 'broken', allowed: new Map() }, what)
+    } finally {
+      await state.cleanup()
+    }
+  }
+  // And the ones that are readable are not swept in with them.
+  for (const text of ['vaults: []\n', 'vaults:\n  - name: Ideas\n', 'vaults:\n  - name: Ideas\n  - Just a word\n']) {
+    const state = await team({ [ALLOWED_FILE]: text })
+    try {
+      assert.equal((await readAllowedVaults(state.dir)).state, 'ok', text)
+    } finally {
+      await state.cleanup()
+    }
+  }
+})
+
+test('a broken allowlist is unavailable all the way up: the finder, the file, the log - never "not found", and nothing else is read', async () => {
+  const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Second Brain\n    level: titles\n' })
+  try {
+    for (const [what, text] of Object.entries(NOT_AN_ALLOWLIST)) {
+      const home = await obsidianHome('darwin', { 'Second Brain': { files: { 'a.md': '' } } }, { allow: text })
+      const fs = recordingFs()
+      try {
+        const found = await findNamedVaults({ ...home.depsFor(), fs }, dir.dir)
+        assert.deepEqual(found, { status: 'unavailable', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'broken' }, what)
+        assert.ok(fs.touched.every((path) => path.endsWith(ALLOWED_FILE)), `${what}: something else was read`)
+        const trail = []
+        const doc = await collectVaults(home.depsFor({ now: Date.UTC(2026, 9, 10, 12), dataDir: dir.dir }), 'Mac Mini', trail)
+        assert.deepEqual(doc.vaults, { status: 'unavailable', why: 'could not be read' }, what)
+        assert.deepEqual(trail, ['The allowlist on this computer (allowed-vaults.yml in the state folder) could not be read, so nothing is read.'], what)
+      } finally {
+        await home.cleanup()
+      }
+    }
+  } finally {
+    await dir.cleanup()
+  }
+})
+
+/* ---------- the same name twice ----------------------------------------------------------------------------------------- */
+
+test('an allowlist that names a vault twice allows it only as much as the lower of the two, whichever comes first', async () => {
+  const cases = [
+    ['titles then dots', 'vaults:\n  - name: Ideas\n    level: titles\n  - name: ideas\n'],
+    ['dots then titles', 'vaults:\n  - name: Ideas\n  - name: IDEAS\n    level: titles\n'],
+    ['dots then dots', 'vaults:\n  - name: Ideas\n  - name: ideas\n']
+  ]
+  const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Ideas\n    level: titles\n' })
+  try {
+    for (const [what, text] of cases) {
+      const home = await obsidianHome('darwin', { Ideas: {} }, { allow: text })
+      try {
+        const found = await findNamedVaults(home.depsFor(), dir.dir)
+        assert.deepEqual(names(found), [['Ideas', 'shape']], what)
+        assert.equal(found.lowered, 1, what)
+      } finally {
+        await home.cleanup()
+      }
+    }
+    const both = await obsidianHome('darwin', { Ideas: {} }, { allow: 'vaults:\n  - name: Ideas\n    level: titles\n  - name: ideas\n    level: titles\n' })
+    try {
+      assert.deepEqual(names(await findNamedVaults(both.depsFor(), dir.dir)), [['Ideas', 'titles']], 'titles twice stays titles')
+    } finally {
+      await both.cleanup()
+    }
+  } finally {
+    await dir.cleanup()
+  }
+})
+
+test('asking for dots where only dots are allowed is not a refusal: nothing is counted as lowered', async () => {
+  const home = await obsidianHome('darwin', { 'Second Brain': {}, Ideas: {} }, { allow: 'vaults:\n  - name: Second Brain\n  - name: Ideas\n    level: titles\n' })
+  const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Second Brain\n  - name: Ideas\n    level: shape\n' })
+  try {
+    const found = await findNamedVaults(home.depsFor(), dir.dir)
+    assert.deepEqual(names(found), [['Second Brain', 'shape'], ['Ideas', 'shape']])
+    assert.equal(found.lowered, 0)
+    assert.equal(found.ignored, 0)
+  } finally {
+    await Promise.all([home.cleanup(), dir.cleanup()])
+  }
+})
+
+test('a folder Obsidian lists with a space at the end is matched to its name, then withheld and counted - not silently missing', async () => {
+  const home = await obsidianHome('darwin', {}, { allow: allowText(['Notes']) })
+  const place = join(home.root, 'Vaults', 'Notes ')
+  await mkdir(place, { recursive: true })
+  await writeFile(home.listPath, JSON.stringify({ vaults: { a: { path: place } } }))
+  const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Notes\n' })
+  try {
+    const found = await findNamedVaults(home.depsFor(), dir.dir)
+    assert.equal(found.status, 'found')
+    assert.deepEqual(found.vaults, [])
+    assert.equal(found.hidden, 1, 'the vault went missing without a word')
   } finally {
     await Promise.all([home.cleanup(), dir.cleanup()])
   }

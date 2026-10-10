@@ -162,3 +162,104 @@ test('a rename failing after an earlier file landed says some files may be writt
     await rm(target, { recursive: true, force: true })
   }
 })
+
+// --- 2b. a state folder inside the working copy ------------------------------------------------------------
+
+// Without --clone the run works in a copy of the team repo, and a pull or checkout there brings in whatever was
+// pushed. The state folder holds the list of vaults this computer allows (allowed-vaults.yml), which only the
+// person at this computer may write - so it may not be inside that copy, whether it was given or is the default.
+test('without --clone, a --state-dir inside the working copy is refused before anything is read', async (t) => {
+  const fake = await makeFakeHome()
+  const repo = await mkdtemp(join(tmpdir(), 'agent-status-repo-'))
+  try {
+    const cases = [repo, join(repo, 'state'), join(repo, '.local', 'state', 'agent-status-collector'), join(repo, 'deep', 'er')]
+    if (process.platform === 'win32' || process.platform === 'darwin') cases.push(join(repo, 'state').toUpperCase())
+    const link = join(fake.home, 'state-link')
+    try {
+      await symlink(repo, link, 'junction')
+      cases.push(join(link, 'state'))
+    } catch {
+      t.diagnostic('this computer does not let a test make a folder link - the link case is NOT CHECKED here')
+    }
+    for (const stateDir of cases) {
+      const deps = depsFor(fake)
+      const stdout = []
+      const stderr = []
+      const exit = await runCollector({
+        argv: ['--computer', 'Test PC', '--commit', '--state-dir', stateDir],
+        deps,
+        repoRoot: repo,
+        out: (line) => stdout.push(line),
+        err: (line) => stderr.push(line)
+      })
+      assert.equal(exit, 2, stateDir)
+      assert.match(stderr.join('\n'), /state folder is inside this working copy/)
+      assert.match(stderr.join('\n'), /allows|allowed-vaults\.yml/)
+      assert.equal(deps.fetch.calls.length, 0, 'something was read before the refusal')
+    }
+    assert.deepEqual(await filesUnder(repo), [], 'a lock, claim or copy was made in the working copy')
+  } finally {
+    await fake.cleanup()
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('without --clone, the default state folder inside the working copy is refused too - in a plain run, a dry run and a commit run', async () => {
+  const fake = await makeFakeHome()
+  try {
+    // The working copy is the home folder itself, so ~/.local/state/agent-status-collector is inside it.
+    for (const args of [['--only', 'vaults'], ['--only', 'vaults', '--dry-run'], ['--commit', '--only', 'vaults']]) {
+      const result = await run(fake, args, { target: fake.home })
+      assert.equal(result.code, 2, args.join(' '))
+      assert.match(result.stderr, /state folder is inside this working copy/)
+    }
+    assert.equal(existsSync(join(fake.home, '.agent-team')), false, 'a snapshot was written into the working copy')
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a --state-dir beside the working copy, sharing the start of its name, is not inside it', async () => {
+  const fake = await makeFakeHome()
+  const root = await mkdtemp(join(tmpdir(), 'agent-status-pair-'))
+  try {
+    const repo = join(root, 'repo')
+    await mkdir(repo)
+    const result = await runCollector({
+      argv: ['--computer', 'Test PC', '--commit', '--only', 'vaults', '--state-dir', join(root, 'repo-state')],
+      deps: depsFor(fake, { git: async () => { throw new Error('not a repo') } }),
+      repoRoot: repo,
+      out: () => {},
+      err: () => {}
+    })
+    assert.notEqual(result, 2, 'a folder beside the working copy was taken for one inside it')
+    assert.ok(existsSync(join(root, 'repo-state', 'claims')), 'the run never got past the state-folder check')
+  } finally {
+    await fake.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('with --clone the working-copy rule does not apply: the code checkout is pinned, and the data clone is the one that is checked', async () => {
+  const fake = await makeFakeHome()
+  const root = await mkdtemp(join(tmpdir(), 'agent-status-pair-'))
+  try {
+    const code = join(root, 'code')
+    const clone = join(root, 'data')
+    await mkdir(code)
+    await mkdir(clone)
+    const result = await runCollector({
+      argv: ['--computer', 'Test PC', '--commit', '--only', 'vaults', '--clone', clone, '--state-dir', join(code, 'state')],
+      deps: depsFor(fake, { git: async () => { throw new Error('not a repo') } }),
+      repoRoot: code,
+      out: () => {},
+      err: () => {}
+    })
+    // Refused later, because the clone is not a git clone - not for where the state folder is.
+    assert.equal(result, 2)
+    assert.ok(existsSync(join(code, 'state', 'claims')), 'the state folder inside the pinned code checkout was refused')
+  } finally {
+    await fake.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -900,3 +900,24 @@ test('the file stays under the size the board will read, even for three big vaul
     await fake.cleanup()
   }
 })
+
+test('an allowlist that cannot be read makes the vaults file say "unavailable" - not "not found" - and replaces an earlier one', async () => {
+  const { fake } = await aHome()
+  try {
+    const first = await run(fake, ['--only', 'vaults'], { yml: YML_TITLES })
+    const { target } = first
+    assert.equal((await readAt(target, VAULTS)).vaults.status, 'found')
+    // Somebody saves the allowlist with a typo in the key: the YAML reader finds nothing in it.
+    await setAllowed(defaultState(fake), 'vault:\n  - name: ' + ORCHARD + '\n')
+    const second = await run(fake, ['--only', 'vaults'], { target, extra: { now: NOW + HOUR } })
+    assert.equal(second.code, 0, second.stderr)
+    const doc = await readAt(target, VAULTS)
+    assert.deepEqual(doc.vaults, { status: 'unavailable', why: VAULTS_WHY.unreadable })
+    assert.match(second.stdout, /- Vaults unavailable \(could not be read\)/)
+    assert.match(second.stdout, /The allowlist on this computer \(allowed-vaults\.yml in the state folder\) could not be read, so nothing is read/)
+    assert.ok(!(second.stdout + second.stderr).includes('Pear'))
+    await rm(target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})

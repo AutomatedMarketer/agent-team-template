@@ -79,28 +79,38 @@ const nameOf = (item) => (item !== null && typeof item === 'object' && !Array.is
 
 // The allowlist: `vaults:` and, for each, a `name:` and the most it may show (`level:`, `shape` unless it says
 // exactly `titles`). { state, allowed } - `allowed` maps a name (without regard to case) to its most. 'missing'
-// is no file, or no folder: nothing is allowed. 'broken' is a file that is a link, a folder, too big, or no
-// YAML: also nothing is allowed - never "everything". A name the board would refuse allows nothing; a name
-// listed twice gets the lower of its levels.
+// is no file, or no folder: nothing is allowed. 'ok' with nothing in `allowed` is `vaults: []`: the person said
+// so, in so many words. 'broken' is anything else that is not an allowlist - a link, a folder, a file that is
+// too big, empty, a comment, a typo for the key, `vaults` that is not a list, a list with no usable name: also
+// nothing is allowed - never "everything" - and the part says unavailable. The YAML reader forgives almost any
+// text and gives back nothing for it, which must not be taken for "nothing is allowed". A name the board would
+// refuse allows nothing; a name listed twice gets the lower of its levels.
 export async function readAllowedVaults(stateDir, identity = {}, fs = realFs) {
   const none = { allowed: new Map() }
   if (typeof stateDir !== 'string') return { state: 'missing', ...none }
   const file = await readSmall(fs, join(stateDir, ALLOWED_VAULTS.file), ALLOWED_VAULTS.maxBytes)
   if (file.state !== 'ok') return { state: file.state, ...none }
   let doc
+  // WHY this catch stays although nothing can reach it today: parseSimpleYaml hands back {} for any text it cannot
+  // use and does not throw (40,000 random files tried), so a file that is not an allowlist is caught by the check
+  // below, not here. The catch is for the day the reader is swapped for a strict one: a file it refuses must be
+  // "broken" - unavailable, nothing read - and not an error that stops the run. Nothing tests it, because
+  // nothing can make it run.
   try {
     doc = parseSimpleYaml(file.text)
   } catch {
     return { state: 'broken', ...none }
   }
+  if (!Array.isArray(doc?.vaults)) return { state: 'broken', ...none }
   const allowed = new Map()
-  for (const item of Array.isArray(doc?.vaults) ? doc.vaults : []) {
+  for (const item of doc.vaults) {
     const name = nameOf(item)
     if (name === null || checkConnectionName(name, 'name', identity).length) continue
     const key = normal(name)
     const level = levelOf(item.level)
     allowed.set(key, allowed.get(key) === 'shape' || level === 'shape' ? 'shape' : 'titles')
   }
+  if (doc.vaults.length && !allowed.size) return { state: 'broken', ...none }
   return { state: 'ok', allowed }
 }
 
@@ -116,6 +126,7 @@ export async function readVaultsYml(dataDir, identity = {}, fs = realFs, allowed
   const file = await readSmall(fs, join(dataDir, VAULTS_YML.file), VAULTS_YML.maxBytes)
   if (file.state !== 'ok') return { state: file.state, ...none }
   let doc
+  // WHY this catch stays although nothing can reach it today: see readAllowedVaults - the reader does not throw.
   try {
     doc = parseSimpleYaml(file.text)
   } catch {
@@ -205,7 +216,7 @@ export async function findNamedVaults(deps, dataDir) {
   const identity = deps.identity ?? {}
   const outcome = (status, fields = {}) => ({ status, vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok', ...fields })
   const permitted = await readAllowedVaults(deps.stateDir, identity, fs)
-  if (permitted.state === 'broken') return outcome('unavailable')
+  if (permitted.state === 'broken') return outcome('unavailable', { allowlist: 'broken' })
   if (permitted.state === 'missing') return outcome('none', { allowlist: 'missing' })
   if (!permitted.allowed.size) return outcome('none', { allowlist: 'empty' })
   const config = await readVaultsYml(dataDir, identity, fs, permitted.allowed)
@@ -731,6 +742,7 @@ function allowlistLines(named) {
   const lines = []
   if (named.allowlist === 'missing') lines.push(`No allowlist on this computer (${ALLOWED_VAULTS.file} in the state folder), so no vault is read, whatever vaults.yml says.`)
   if (named.allowlist === 'empty') lines.push(`The allowlist on this computer (${ALLOWED_VAULTS.file} in the state folder) names no vault, so none is read.`)
+  if (named.allowlist === 'broken') lines.push(`The allowlist on this computer (${ALLOWED_VAULTS.file} in the state folder) could not be read, so nothing is read.`)
   const vaults = (count) => `${count} vault${count === 1 ? '' : 's'}`
   if (named.ignored) {
     lines.push(`${vaults(named.ignored)} named in vaults.yml ${named.ignored === 1 ? 'is' : 'are'} not in this computer's allowlist, so ${named.ignored === 1 ? 'it was' : 'they were'} ignored.`)

@@ -131,13 +131,16 @@ test('the docs say plainly why the list of vaults lives on the computer, and wha
     '`~/.local/state/agent-status-collector/`',
     'outside both the code checkout and the data clone',
     'refuses to run with a state folder inside the clone',
-    'a push to the team repo cannot write or replace the file',
+    'inside that copy, given or by default',
+    'so neither a push nor a pull can write or replace the file',
     'can **never** add a vault the allowlist does not name, or raise a level',
     'is ignored',
     'a count, never a name',
     '**No `allowed-vaults.yml`: nothing is read**',
     'not even `vaults.yml`',
-    'is not read as "everything"',
+    'is read neither as "nothing is allowed" nor as "everything"',
+    'the part says `unavailable` and nothing is read',
+    'Only `vaults: []` says that nothing is allowed',
     'stays in the team repo\'s git history'
   ]) {
     assert.ok(doc.includes(phrase), `the section does not say ${phrase}`)
