@@ -1,0 +1,412 @@
+{
+  "about": "Shared contract for the vaults snapshot (the memory graph: each Obsidian vault the owner names in vaults.yml, as dots and lines). The same bytes live in agent-team-template and agent-cockpit; a test in each repo checks they match. The collector writes `sample`-shaped files; the board reads them. A vault is published at one of two levels. `shape` is the default: the vault name, counts, and anonymous dots (numbers) joined by lines (number pairs) - no title, folder, tag, date, content or path. `titles` is the owner's opt-in, per vault: it adds each note's title, its top folder, its day, and a hub dot for each day or tag that two or more notes share - every one of them held to the title rule below. A note's contents are read in memory to find its links and are never kept at either level. The vault's location on the computer is never kept.",
+  "schema": "agent-status/vaults/v1",
+  "folder": ".agent-team/status/vaults",
+  "computerSlug": "^[a-z0-9-]{1,32}$",
+  "staleAfterDays": 7,
+  "maxFilesRead": 5,
+  "maxFileBytes": 262144,
+  "maxComputersShown": 3,
+  "statuses": [
+    "found",
+    "not found",
+    "unavailable"
+  ],
+  "caps": {
+    "vaults": 3,
+    "notes": 600,
+    "lines": 2000,
+    "hubs": 200
+  },
+  "noteMaxBytes": 262144,
+  "vaultBytesBudget": 81920,
+  "rewriteAfterHours": 24,
+  "levels": [
+    "shape",
+    "titles"
+  ],
+  "edgeKinds": [
+    "link",
+    "mention",
+    "day",
+    "tag"
+  ],
+  "hubKinds": [
+    "day",
+    "tag"
+  ],
+  "minHubNotes": 2,
+  "maxTagsPerNote": 8,
+  "whyCodes": {
+    "unreadable": "could not be read",
+    "refused": "refused by the safety check"
+  },
+  "titleRule": {
+    "maxLength": 80,
+    "never": [
+      "@",
+      "/",
+      "\\",
+      "eyj",
+      "sk-",
+      "bearer"
+    ],
+    "neverIgnoresCase": true,
+    "uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}",
+    "maxSegmentLength": 23,
+    "separatorCharacters": ":._-,;()[]{}'’\"!?#+&*=%|~",
+    "separatorsAlsoWhitespace": true,
+    "controlCharacters": "[\\u0000-\\u001f\\u007f-\\u009f]",
+    "invisibleCharacters": "[\\u061c\\u200b-\\u200f\\u2028-\\u202e\\u2060\\u2066-\\u2069\\ufeff]",
+    "note": "A title is whatever a note is called, so it is held to what the board will show: not empty, no space at either end, 80 characters at most, none of the never fragments (compared without regard to case: an at sign, either slash, the start of a signed token or a key, an authorization header), no control or invisible character, no stretch of 24 or more characters between separators, no id, and - on the collector only, because only it knows them - not the owner's username, computer name or home folder. A title that fails is not published; its note is an anonymous dot and is counted. The same rule holds a top folder name, a tag value and a hub label.",
+    "accept": [
+      "Weekly plan",
+      "Pasta ideas",
+      "Q&A: what next?",
+      "100% done",
+      "Notes #3",
+      "C++ tips",
+      "日本語のノート",
+      "AI - 2026 plan",
+      "Meeting (draft)",
+      "[draft] ideas",
+      "O'Brien's notes",
+      "Résumé v2"
+    ],
+    "refuse": [
+      {
+        "title": "",
+        "why": "empty"
+      },
+      {
+        "title": " padded",
+        "why": "a space at the start"
+      },
+      {
+        "title": "padded ",
+        "why": "a space at the end"
+      },
+      {
+        "title": "tab\there",
+        "why": "a control character"
+      },
+      {
+        "title": "line\nbreak",
+        "why": "a control character"
+      },
+      {
+        "title": "zero\u200bwidth",
+        "why": "an invisible character"
+      },
+      {
+        "title": "right\u202eleft",
+        "why": "a direction control"
+      },
+      {
+        "title": "write to me@example.com",
+        "why": "an at sign"
+      },
+      {
+        "title": "a/b",
+        "why": "a slash"
+      },
+      {
+        "title": "a\\b",
+        "why": "a backslash"
+      },
+      {
+        "title": "eyJhbGciOiJIUzI1NiJ9",
+        "why": "the start of a signed token"
+      },
+      {
+        "title": "my EYJ notes",
+        "why": "the start of a signed token, in any case"
+      },
+      {
+        "title": "sk-live key",
+        "why": "the start of a key"
+      },
+      {
+        "title": "Desk-helper",
+        "why": "sk- inside a word: refused all the same"
+      },
+      {
+        "title": "Bearer notes",
+        "why": "an authorization header word"
+      },
+      {
+        "title": "BEARER",
+        "why": "an authorization header word, in any case"
+      },
+      {
+        "title": "0f0e0d0c-1111-2222-3333-444455556666",
+        "why": "an id"
+      },
+      {
+        "title": "abcdefghijklmnopqrstuvwx",
+        "why": "24 characters without a separator"
+      },
+      {
+        "title": "abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefghx",
+        "why": "longer than 80 characters"
+      }
+    ],
+    "acceptEdge": [
+      {
+        "title": "abcdefghijklmnopqrstuvw",
+        "why": "23 characters without a separator"
+      },
+      {
+        "title": "abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+        "why": "exactly 80 characters"
+      }
+    ]
+  },
+  "names": {
+    "note": "A vault is called by its folder name, held to the connection-name rule in connections-parity.json (a name the board would refuse is not published; the vault is counted as hidden).",
+    "vaultAccept": [
+      "Field Notes",
+      "Second Brain",
+      "Ideas",
+      "Work (2026)",
+      "Nuno's Notes",
+      "Vault_1"
+    ],
+    "vaultRefuse": [
+      {
+        "name": "",
+        "why": "empty"
+      },
+      {
+        "name": "notes@home",
+        "why": "an at sign"
+      },
+      {
+        "name": "my/notes",
+        "why": "a slash"
+      },
+      {
+        "name": "Desk-helper",
+        "why": "sk- inside a word"
+      },
+      {
+        "name": "abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg",
+        "why": "longer than 60 characters"
+      },
+      {
+        "name": "abcdefghijklmnopqrstuvwx",
+        "why": "24 characters without a separator"
+      },
+      {
+        "name": "0f0e0d0c-1111-2222-3333-444455556666",
+        "why": "an id"
+      }
+    ]
+  },
+  "allowedKeys": {
+    "file": [
+      "schema",
+      "takenAt",
+      "computer",
+      "vaults"
+    ],
+    "blockFound": [
+      "status",
+      "items",
+      "hidden",
+      "more"
+    ],
+    "blockNotFound": [
+      "status",
+      "why"
+    ],
+    "vault": [
+      "name",
+      "level",
+      "notes",
+      "lines",
+      "lonely",
+      "hidden",
+      "more",
+      "moreLines",
+      "untitled",
+      "edges",
+      "nodes",
+      "hubs"
+    ],
+    "node": [
+      "title",
+      "folder",
+      "day"
+    ],
+    "hub": [
+      "kind",
+      "label"
+    ]
+  },
+  "requiredKeys": {
+    "file": [
+      "schema",
+      "takenAt",
+      "computer",
+      "vaults"
+    ],
+    "vault": [
+      "name",
+      "level",
+      "notes",
+      "lines",
+      "lonely",
+      "hidden",
+      "more",
+      "moreLines",
+      "edges"
+    ],
+    "vaultAtTitles": [
+      "untitled",
+      "nodes"
+    ],
+    "hub": [
+      "kind",
+      "label"
+    ]
+  },
+  "rules": [
+    "a block (vaults) with any status other than found carries only status and an optional why; why is one of whyCodes - never a message and never a word of what was refused. `not found` is the ordinary answer: no vault is named in vaults.yml, or none of those named is on this computer",
+    "only vaults named in vaults.yml are ever opened, up to caps.vaults; a vault the owner did not name is never read, and its name is not kept. A vault is found by its folder name in Obsidian's own list of vaults; where it lives on the computer is read in memory to open it and is never kept",
+    "level is `shape` unless vaults.yml says exactly `titles` for that vault. At `shape` a vault has no nodes, no hubs and no untitled: only counts, and edges between numbered dots",
+    "a dot is a note, numbered from 0 in the order of the notes' paths in the vault (sorted without regard to case, then by the path itself); notes is how many dots, at most caps.notes. Notes past the cap are counted in more, and notes withheld - bigger than noteMaxBytes, a link, or unreadable - in hidden",
+    "an edge is [from, to, kind] with kind an index into edgeKinds: 0 link, 1 mention, 2 day, 3 tag. A line has no direction: from is below to. link is a wikilink or an embed of a note ([[Note]], [[folder/Note#heading|alias]], ![[Note]]) resolved the way Obsidian does: a path-qualified link matches that path from the vault root, or ends with it; otherwise the note's name matches without regard to case; when more than one note matches, the one with the shortest path wins, then the first path in order. mention is a markdown link to a note ([text](folder/note.md)), relative to the note it is written in. A link that resolves to no note, to the note itself, to a file that is not a note, or outside the vault, is not a line. Links inside code are not links. One line per pair and kind",
+    "at the titles level only, a hub dot stands for a day or a tag that at least minHubNotes notes share. Hubs are numbered from notes, after the dots, in the order of their kind (days first) and label. A note joins a day hub by [note, hub, 2] and a tag hub by [note, hub, 3]; a hub never joins two hubs or two notes, so thirty notes on one day are thirty lines, not four hundred and thirty-five. A note's day is a date at the start of its file name (2026-10-09 Plan.md) or, failing that, its frontmatter date or created. Its tags are its frontmatter tags, tag, project and people values, up to maxTagsPerNote",
+    "lines is how many edges. lonely is how many notes have no link or mention line: a note nothing links to and that links to nothing. Over caps.lines, the hub lines go first (tags, then days), then the mentions, then the links; every line left out is counted in moreLines, and a hub left with fewer than minHubNotes lines is left out with them",
+    "a vault's part of the file is at most vaultBytesBudget bytes, so three vaults fit the file limit with room to spare. A vault over it loses its hubs and their lines first, then its last notes, ten per hundred at a time, and every note and line it loses is counted in more and moreLines",
+    "at the titles level, nodes has one entry per dot, in order: title, folder and day are each there only when the note has one and it passes the title rule (a day is a real calendar day). A note whose title fails the rule is an anonymous dot with no title, and untitled counts them. The folder is the note's top folder; a note at the root has none",
+    "a note's contents are read in memory to find its links, its day and its tags, and are never kept: nothing a note says, no heading, no excerpt, no path. A vault, a note, a folder or a title the collector could not read or refuse is counted, never described",
+    "the file is written when what it says has changed, or at least rewriteAfterHours after the last write, so a vault that does not change adds one small file a day to the team repo, not one every three hours; a computer with no vault named and no earlier file writes nothing",
+    "a file older than staleAfterDays is shown as not updated since its time, never as the current graph",
+    "the board shows at most maxComputersShown computers, newest takenAt first"
+  ],
+  "sample": {
+    "schema": "agent-status/vaults/v1",
+    "takenAt": "2026-10-10T15:00:00Z",
+    "computer": "Mac Mini",
+    "vaults": {
+      "status": "found",
+      "items": [
+        {
+          "name": "Field Notes",
+          "level": "shape",
+          "notes": 6,
+          "lines": 5,
+          "lonely": 1,
+          "hidden": 1,
+          "more": 0,
+          "moreLines": 0,
+          "edges": [
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              0,
+              2,
+              0
+            ],
+            [
+              1,
+              3,
+              0
+            ],
+            [
+              3,
+              4,
+              0
+            ],
+            [
+              2,
+              3,
+              1
+            ]
+          ]
+        },
+        {
+          "name": "Ideas",
+          "level": "titles",
+          "notes": 5,
+          "lines": 6,
+          "lonely": 2,
+          "hidden": 0,
+          "more": 0,
+          "moreLines": 0,
+          "untitled": 1,
+          "edges": [
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              2,
+              1
+            ],
+            [
+              0,
+              5,
+              2
+            ],
+            [
+              1,
+              5,
+              2
+            ],
+            [
+              2,
+              6,
+              3
+            ],
+            [
+              3,
+              6,
+              3
+            ]
+          ],
+          "nodes": [
+            {
+              "title": "Weekly plan",
+              "folder": "Plans",
+              "day": "2026-10-09"
+            },
+            {
+              "title": "Shopping list",
+              "folder": "Plans",
+              "day": "2026-10-09"
+            },
+            {
+              "title": "Pasta ideas",
+              "folder": "Recipes"
+            },
+            {
+              "title": "Soup",
+              "folder": "Recipes"
+            },
+            {}
+          ],
+          "hubs": [
+            {
+              "kind": "day",
+              "label": "2026-10-09"
+            },
+            {
+              "kind": "tag",
+              "label": "recipes"
+            }
+          ]
+        }
+      ],
+      "hidden": 0,
+      "more": 0
+    }
+  }
+}

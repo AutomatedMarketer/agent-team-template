@@ -11,6 +11,7 @@ import { USAGE_SHAPE, STATUSES, MAX_STRING_LENGTH, MAX_PERCENT, computerSlug } f
 import { CONNECTIONS_SHAPE, CONNECTION_NAME, VERSION_PATTERN, MAX_VERSION_LENGTH } from './connections-schema.mjs'
 import { HERMES_SHAPE, PROFILE_NAME } from './hermes-schema.mjs'
 import { JOBS_SHAPE, LABEL } from './jobs-schema.mjs'
+import { VAULTS_SHAPE, TITLE_RULE } from './vaults-schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -170,6 +171,17 @@ function walk(value, shape, path, identity, problems) {
     case 'label':
       problems.push(...checkLabel(value, path, identity))
       return
+    case 'noteTitle':
+      problems.push(...checkNoteTitle(value, path, identity))
+      return
+    case 'tuple':
+      // A fixed number of entries, each with its own rule: an edge is [from, to, kind] and nothing else.
+      if (!Array.isArray(value) || value.length !== shape.of.length) {
+        problems.push(`${path}: is not a list of ${shape.of.length} entries`)
+        return
+      }
+      shape.of.forEach((part, index) => walk(value[index], part, `${path}[${index}]`, identity, problems))
+      return
     case 'int':
       // A bound is part of the type: an exit status or a minute that is a whole number but out of
       // range is as wrong as text.
@@ -292,6 +304,12 @@ export function checkJobs(doc, identity) {
   return problems
 }
 
+export function checkVaults(doc, identity) {
+  const problems = []
+  walk(doc, VAULTS_SHAPE, '', identity, problems)
+  return problems
+}
+
 export function checkAgainst(doc, shape, identity) {
   const problems = []
   walk(doc, shape, '', identity, problems)
@@ -409,6 +427,52 @@ export function checkLabel(value, path, identity) {
   if (typeof value === 'string' && value && !LABEL.pattern.test(value)) problems.push(`${path}: is not a label (letters, numbers and . - _ only)`)
   return problems
 }
+
+// A note's title, a top folder's name, a tag or a hub label (vaults-schema.mjs, TITLE_RULE; the board
+// holds the same rule from tests/fixtures/vaults-parity.json). A title is whatever somebody called a
+// note, so it is held to what the board will show: not empty, no space at either end, 80 characters at
+// most, none of the fragments that start a key, token or header (without regard to case), no slash,
+// no control or invisible character, no id, no stretch of 24 characters between separators, and not
+// the owner's username, computer name or home folder - the one part only this side can check. Like
+// every gate problem, it names the field and never the value.
+const SEGMENT_SEPARATORS = new Set(TITLE_RULE.separatorCharacters)
+const NEVER_SAYS = {
+  '@': 'contains an at sign',
+  '/': 'contains a slash',
+  '\\': 'contains a backslash',
+  eyj: 'looks like a signed token',
+  'sk-': 'looks like a key',
+  bearer: 'looks like an authorization header'
+}
+const isSegmentBreak = (character) => SEGMENT_SEPARATORS.has(character) || /\s/u.test(character)
+
+export function checkNoteTitle(value, path, identity) {
+  if (typeof value !== 'string') return [`${path}: is not text`]
+  if (!value) return [`${path}: is empty`]
+  const problems = []
+  if (value !== value.trim()) problems.push(`${path}: starts or ends with a space`)
+  if (value.length > TITLE_RULE.maxLength) problems.push(`${path}: is longer than ${TITLE_RULE.maxLength} characters`)
+  const lower = value.toLowerCase()
+  for (const fragment of TITLE_RULE.never) {
+    if (lower.includes(fragment)) problems.push(`${path}: ${NEVER_SAYS[fragment]}`)
+  }
+  if (TITLE_RULE.controlCharacters.test(value)) problems.push(`${path}: contains a control character`)
+  if (TITLE_RULE.invisibleCharacters.test(value)) problems.push(`${path}: contains an invisible character`)
+  if (TITLE_RULE.uuid.test(lower)) problems.push(`${path}: looks like an id`)
+  let run = 0
+  let longest = 0
+  for (const character of value) {
+    run = isSegmentBreak(character) ? 0 : run + 1
+    longest = Math.max(longest, run)
+  }
+  if (longest > TITLE_RULE.maxSegmentLength) problems.push(`${path}: has ${TITLE_RULE.maxSegmentLength + 1} or more characters without a separator`)
+  for (const { needle, says } of needlesOf(identity)) {
+    if (lower.includes(needle)) problems.push(`${path}: ${says}`)
+  }
+  return problems
+}
+
+export const isNoteTitle = (value, identity) => checkNoteTitle(value, 'title', identity).length === 0
 
 // A Hermes model is often written "provider/model", or deeper. Only the last segment after the last
 // slash is ever shown, and only when it passes the connection-name rule; anything else is null, and
