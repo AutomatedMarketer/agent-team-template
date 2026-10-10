@@ -1,7 +1,17 @@
 # The Obsidian vaults the memory graph draws - one dot for each note, one line for each link.
 #
-# Only a vault named here is ever opened. A vault you do not name is not listed, not counted and not
-# mentioned anywhere: the status collector (scripts/collect-status.mjs) never looks inside it.
+# This file chooses which vaults to draw. It does not decide which may be read: that is decided on each
+# computer, by a file only the person at that computer can write (allowed-vaults.yml in the collector's
+# state folder, ~/.local/state/agent-status-collector/ on a Mac; .agent-team/status/README.md, "How to choose
+# which vaults", has the exact commands). This repo can be pushed to by other people and by cloud routines, so
+# what it says can never add a vault or raise a level. It can only narrow:
+#
+#   - a vault named here that the computer does not allow is ignored, and the log says how many;
+#   - titles asked for here where the computer allows only dots is dots;
+#   - a vault the computer allows but this file leaves out is not drawn.
+#
+# With no allowed-vaults.yml on a computer, nothing is read there, whatever this file says. A vault nobody
+# named is never opened: not listed, not counted and not mentioned.
 #
 # Name a vault by its folder name, the way Obsidian lists it (a vault kept in Documents/Second Brain is
 # "Second Brain"). A vault that is not on the computer the collector runs on is simply skipped there.

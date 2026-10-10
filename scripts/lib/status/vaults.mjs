@@ -1,10 +1,19 @@
 // The vaults part: the memory graph - each Obsidian vault the owner names, as dots and lines.
 //
-// Which vaults. Only those named in vaults.yml, in the team repo (the collector reads it from its own
-// data clone). The owner names a vault by its folder name and says, for each, how much of it may leave
-// this computer: `shape` (the default - counts and anonymous dots and lines) or `titles` (also each
-// note's title, its top folder and its day). A vault nobody named is never opened: not listed, not
-// counted, not mentioned. The board never writes vaults.yml; the owner asks Claude, as with jobs.yml.
+// Which vaults - the computer decides, the team repo can only narrow. The team repo is pushed to by other
+// people and by cloud routines, so what it says cannot be what lets a vault leave this computer: a pusher
+// could name any vault on the Mac and ask for its titles. The same principle as the pinned code checkout.
+// So there are two files:
+//   allowed-vaults.yml  in the collector's state folder - outside both the code checkout and the data
+//                       clone, and the collector refuses a state folder inside the clone. Written by the
+//                       person at this computer. It names each vault that may be read and the most that may
+//                       leave: `shape` (the default - counts and anonymous dots and lines) or `titles` (also
+//                       each note's title, its top folder, its day and its tags). No file: nothing is read.
+//   vaults.yml          in the team repo (the collector reads the data clone's copy). It names the vaults to
+//                       draw. It can drop a vault, or ask for less than the allowlist allows; it cannot add
+//                       a vault the allowlist does not name, and it cannot raise a level. A vault nobody
+//                       named is never opened: not listed, not counted, not mentioned. The board never
+//                       writes vaults.yml; the owner asks Claude, as with jobs.yml.
 //
 // Where the vaults are. Obsidian keeps its own list of them:
 //   macOS    ~/Library/Application Support/obsidian/obsidian.json
@@ -37,6 +46,7 @@ import { checkConnectionName, isNoteTitle, isRealDay } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 
 export const VAULTS_YML = { file: 'vaults.yml', maxBytes: 64 * 1024 }
+export const ALLOWED_VAULTS = { file: 'allowed-vaults.yml', maxBytes: 64 * 1024 }
 // Obsidian's list of vaults is a few lines per vault; anything this big is not one.
 const OBSIDIAN_LIST_MAX_BYTES = 1024 * 1024
 
@@ -62,12 +72,47 @@ async function readSmall(fs, path, maxBytes) {
   }
 }
 
-// vaults.yml: `vaults:` and, for each, a `name:` and optionally a `level:`. The level is `shape` unless it
-// is exactly the word `titles` - a typo, a capital or a list keeps the vault at the level that shares
-// less. An entry that cannot be used (no name, a name the board would refuse, a bare word) is counted in
-// `hidden` and never guessed at; the same vault twice is one; three are read and the rest counted in `more`.
-export async function readVaultsYml(dataDir, identity = {}, fs = realFs) {
-  const none = { entries: [], hidden: 0, more: 0 }
+// The level a file asks for: `shape` unless it is exactly the word `titles` - a typo, a capital or a list keeps
+// the vault at the level that shares less.
+const levelOf = (value) => (value === 'titles' ? 'titles' : 'shape')
+const nameOf = (item) => (item !== null && typeof item === 'object' && !Array.isArray(item) && typeof item.name === 'string' ? item.name : null)
+
+// The allowlist: `vaults:` and, for each, a `name:` and the most it may show (`level:`, `shape` unless it says
+// exactly `titles`). { state, allowed } - `allowed` maps a name (without regard to case) to its most. 'missing'
+// is no file, or no folder: nothing is allowed. 'broken' is a file that is a link, a folder, too big, or no
+// YAML: also nothing is allowed - never "everything". A name the board would refuse allows nothing; a name
+// listed twice gets the lower of its levels.
+export async function readAllowedVaults(stateDir, identity = {}, fs = realFs) {
+  const none = { allowed: new Map() }
+  if (typeof stateDir !== 'string') return { state: 'missing', ...none }
+  const file = await readSmall(fs, join(stateDir, ALLOWED_VAULTS.file), ALLOWED_VAULTS.maxBytes)
+  if (file.state !== 'ok') return { state: file.state, ...none }
+  let doc
+  try {
+    doc = parseSimpleYaml(file.text)
+  } catch {
+    return { state: 'broken', ...none }
+  }
+  const allowed = new Map()
+  for (const item of Array.isArray(doc?.vaults) ? doc.vaults : []) {
+    const name = nameOf(item)
+    if (name === null || checkConnectionName(name, 'name', identity).length) continue
+    const key = normal(name)
+    const level = levelOf(item.level)
+    allowed.set(key, allowed.get(key) === 'shape' || level === 'shape' ? 'shape' : 'titles')
+  }
+  return { state: 'ok', allowed }
+}
+
+// vaults.yml: `vaults:` and, for each, a `name:` and optionally a `level:` (see levelOf). An entry that cannot
+// be used (no name, a name the board would refuse, a bare word) is counted in `hidden` and never guessed at; the
+// same vault twice is one; three are read and the rest counted in `more`.
+//
+// With `allowed` (readAllowedVaults) it can only narrow: a vault the allowlist does not name is dropped and
+// counted in `ignored` (before the three are counted, so junk in front does not push a real vault out), and a
+// level above the allowlist's most is brought down to it and counted in `lowered`. Without it, it filters nothing.
+export async function readVaultsYml(dataDir, identity = {}, fs = realFs, allowed = null) {
+  const none = { entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 }
   const file = await readSmall(fs, join(dataDir, VAULTS_YML.file), VAULTS_YML.maxBytes)
   if (file.state !== 'ok') return { state: file.state, ...none }
   let doc
@@ -81,8 +126,10 @@ export async function readVaultsYml(dataDir, identity = {}, fs = realFs) {
   const seen = new Set()
   let hidden = 0
   let more = 0
+  let ignored = 0
+  let lowered = 0
   for (const item of listed) {
-    const name = item !== null && typeof item === 'object' && !Array.isArray(item) && typeof item.name === 'string' ? item.name : null
+    const name = nameOf(item)
     if (name === null || checkConnectionName(name, 'name', identity).length) {
       hidden += 1
       continue
@@ -90,13 +137,27 @@ export async function readVaultsYml(dataDir, identity = {}, fs = realFs) {
     const key = normal(name)
     if (seen.has(key)) continue
     seen.add(key)
+    let level = levelOf(item.level)
+    let wasLowered = false
+    if (allowed) {
+      const most = allowed.get(key)
+      if (most === undefined) {
+        ignored += 1
+        continue
+      }
+      if (level === 'titles' && most === 'shape') {
+        level = 'shape'
+        wasLowered = true
+      }
+    }
     if (entries.length >= VAULTS_CAPS.vaults) {
       more += 1
       continue
     }
-    entries.push({ name, level: item.level === 'titles' ? 'titles' : 'shape' })
+    entries.push({ name, level })
+    if (wasLowered) lowered += 1
   }
-  return { state: 'ok', entries, hidden, more }
+  return { state: 'ok', entries, hidden, more, ignored, lowered }
 }
 
 // The last folder of a place, whichever way the platform separates them, and not empty.
@@ -127,22 +188,32 @@ export async function listObsidianVaults(deps) {
   return { state: 'ok', vaults }
 }
 
-// The vaults that were named and are here, ready to open: { name, level, path }. `status` is
-//   none         nothing is named, or nothing named is on this computer (Obsidian is not here, or the vault is
-//                on another computer) - the ordinary answer, and Obsidian's list is not opened at all if
-//                nothing is named
-//   unavailable  vaults.yml or Obsidian's list could not be read
+// The vaults that may be read, were named and are here, ready to open: { name, level, path }. `deps.stateDir`
+// is the folder the allowlist is in. `status` is
+//   none         nothing is allowed (no allowlist, or one that names nothing - `allowlist` says which), nothing
+//                allowed is named, or nothing named is on this computer (Obsidian is not here, or the vault is
+//                on another computer) - the ordinary answer. Nothing is allowed: not so much as vaults.yml is
+//                read. Nothing is named: Obsidian's list is not opened at all
+//   unavailable  the allowlist, vaults.yml or Obsidian's list could not be read
 //   found        one or more, with `hidden` counting what was named and is here but cannot be opened (two
 //                vaults with one folder name, a place that is gone, a file, a link, a name the board would
 //                refuse) and `more` what was named past the cap
+// `ignored` counts what vaults.yml named that the allowlist does not, and `lowered` what it asked to show with
+// titles where the allowlist allows only dots (see readVaultsYml).
 export async function findNamedVaults(deps, dataDir) {
   const fs = fsOf(deps)
   const identity = deps.identity ?? {}
-  const config = await readVaultsYml(dataDir, identity, fs)
-  if (config.state === 'broken') return { status: 'unavailable', vaults: [], hidden: 0, more: 0 }
-  if (!config.entries.length) return { status: 'none', vaults: [], hidden: config.hidden, more: config.more }
+  const outcome = (status, fields = {}) => ({ status, vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok', ...fields })
+  const permitted = await readAllowedVaults(deps.stateDir, identity, fs)
+  if (permitted.state === 'broken') return outcome('unavailable')
+  if (permitted.state === 'missing') return outcome('none', { allowlist: 'missing' })
+  if (!permitted.allowed.size) return outcome('none', { allowlist: 'empty' })
+  const config = await readVaultsYml(dataDir, identity, fs, permitted.allowed)
+  if (config.state === 'broken') return outcome('unavailable')
+  const counted = { more: config.more, ignored: config.ignored, lowered: config.lowered }
+  if (!config.entries.length) return outcome('none', { ...counted, hidden: config.hidden })
   const listed = await listObsidianVaults(deps)
-  if (listed.state === 'broken') return { status: 'unavailable', vaults: [], hidden: 0, more: 0 }
+  if (listed.state === 'broken') return outcome('unavailable')
 
   const found = []
   let hidden = config.hidden
@@ -169,8 +240,8 @@ export async function findNamedVaults(deps, dataDir) {
     }
     found.push({ name: vault.name, level: entry.level, path: vault.path })
   }
-  if (!found.length && !hidden) return { status: 'none', vaults: [], hidden: 0, more: config.more }
-  return { status: 'found', vaults: found, hidden, more: config.more }
+  if (!found.length && !hidden) return outcome('none', counted)
+  return outcome('found', { ...counted, vaults: found, hidden })
 }
 
 // ---- finding the links in a note's text -------------------------------------------------------------------
@@ -654,12 +725,30 @@ export async function readVault(vault, deps) {
   )
 }
 
-// The whole vaults file: the vaults the owner named and that are on this computer, read, or a word for why not.
-// `deps.dataDir` is the folder holding vaults.yml (the team repo, or the collector's clone of it).
-export async function collectVaults(deps, computer) {
+// What the allowlist did, for the log only: counts and fixed words, never a vault's name. `trail` is the list the
+// run keeps apart from the snapshot, so nothing in it can reach a file.
+function allowlistLines(named) {
+  const lines = []
+  if (named.allowlist === 'missing') lines.push(`No allowlist on this computer (${ALLOWED_VAULTS.file} in the state folder), so no vault is read, whatever vaults.yml says.`)
+  if (named.allowlist === 'empty') lines.push(`The allowlist on this computer (${ALLOWED_VAULTS.file} in the state folder) names no vault, so none is read.`)
+  const vaults = (count) => `${count} vault${count === 1 ? '' : 's'}`
+  if (named.ignored) {
+    lines.push(`${vaults(named.ignored)} named in vaults.yml ${named.ignored === 1 ? 'is' : 'are'} not in this computer's allowlist, so ${named.ignored === 1 ? 'it was' : 'they were'} ignored.`)
+  }
+  if (named.lowered) {
+    lines.push(`${vaults(named.lowered)} asked for titles in vaults.yml but this computer's allowlist allows only dots, so ${named.lowered === 1 ? 'it is' : 'they are'} shown as dots.`)
+  }
+  return lines
+}
+
+// The whole vaults file: the vaults this computer allows, the team repo named and that are on this computer,
+// read, or a word for why not. `deps.dataDir` is the folder holding vaults.yml (the team repo, or the
+// collector's clone of it); `deps.stateDir` the one holding the allowlist.
+export async function collectVaults(deps, computer, trail = []) {
   const envelope = (vaults) => ({ schema: VAULTS_SCHEMA, takenAt: isoSeconds(deps.now), computer, vaults })
   if (typeof deps.dataDir !== 'string') return envelope({ status: 'unavailable', why: VAULTS_WHY.unreadable })
   const named = await findNamedVaults(deps, deps.dataDir)
+  trail.push(...allowlistLines(named))
   if (named.status === 'unavailable') return envelope({ status: 'unavailable', why: VAULTS_WHY.unreadable })
   if (named.status === 'none') return envelope({ status: 'not found' })
   const items = []

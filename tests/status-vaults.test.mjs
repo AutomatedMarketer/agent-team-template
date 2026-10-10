@@ -13,7 +13,7 @@ import {
 } from '../scripts/lib/status/vaults.mjs'
 import { VAULTS_CAPS } from '../scripts/lib/status/vaults-schema.mjs'
 import { makeFakeHome, fakeClaudeToken, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME } from './helpers/fake-home.mjs'
-import { team, obsidianHome, recordingFs } from './helpers/obsidian-home.mjs'
+import { team, obsidianHome, recordingFs, allowText } from './helpers/obsidian-home.mjs'
 
 /* Which vaults get opened. Only those the owner names in vaults.yml, found through Obsidian's own
    list of vaults; an unnamed vault is never read, and neither its name nor its place is kept. */
@@ -99,8 +99,8 @@ test('vaults.yml: the starter file names nothing, and a file that is not there n
   const empty = await team({ 'vaults.yml': 'vaults: []\n' })
   const absent = await team({})
   try {
-    assert.deepEqual(await readVaultsYml(empty.dir), { state: 'ok', entries: [], hidden: 0, more: 0 })
-    assert.deepEqual(await readVaultsYml(absent.dir), { state: 'missing', entries: [], hidden: 0, more: 0 })
+    assert.deepEqual(await readVaultsYml(empty.dir), { state: 'ok', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
+    assert.deepEqual(await readVaultsYml(absent.dir), { state: 'missing', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
   } finally {
     await empty.cleanup()
     await absent.cleanup()
@@ -189,11 +189,11 @@ test('vaults.yml: a file that is a link, too big, unreadable or no list is "brok
     } catch {
       linked = false
     }
-    if (linked) assert.deepEqual(await readVaultsYml(link.dir), { state: 'broken', entries: [], hidden: 0, more: 0 })
-    assert.deepEqual(await readVaultsYml(big.dir), { state: 'broken', entries: [], hidden: 0, more: 0 })
+    if (linked) assert.deepEqual(await readVaultsYml(link.dir), { state: 'broken', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
+    assert.deepEqual(await readVaultsYml(big.dir), { state: 'broken', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
     await mkdir(join(folder.dir, 'vaults.yml'))
-    assert.deepEqual(await readVaultsYml(folder.dir), { state: 'broken', entries: [], hidden: 0, more: 0 })
-    assert.deepEqual(await readVaultsYml(notAList.dir), { state: 'ok', entries: [], hidden: 0, more: 0 })
+    assert.deepEqual(await readVaultsYml(folder.dir), { state: 'broken', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
+    assert.deepEqual(await readVaultsYml(notAList.dir), { state: 'ok', entries: [], hidden: 0, more: 0, ignored: 0, lowered: 0 })
   } finally {
     await Promise.all([link, big, folder, notAList].map((one) => one.cleanup()))
   }
@@ -227,7 +227,7 @@ test('nothing is named: Obsidian\'s list is not even opened', async () => {
   try {
     for (const dir of [none, absent]) {
       const fs = recordingFs()
-      assert.deepEqual(await findNamedVaults({ ...home.depsFor(), fs }, dir.dir), { status: 'none', vaults: [], hidden: 0, more: 0 })
+      assert.deepEqual(await findNamedVaults({ ...home.depsFor(), fs }, dir.dir), { status: 'none', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok' })
       assert.ok(!fs.touched.some((path) => path.endsWith('obsidian.json')), 'the list of vaults was read with nothing named')
     }
   } finally {
@@ -236,7 +236,7 @@ test('nothing is named: Obsidian\'s list is not even opened', async () => {
 })
 
 test('a vault named here that is not on this computer is not a problem, and not counted: it is simply elsewhere', async () => {
-  const home = await obsidianHome('darwin', { Ideas: {} })
+  const home = await obsidianHome('darwin', { Ideas: {} }, { allow: allowText(['Second Brain', 'Ideas']) })
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Second Brain\n  - name: Ideas\n' })
   try {
     const found = await findNamedVaults(home.depsFor(), dir.dir)
@@ -245,7 +245,7 @@ test('a vault named here that is not on this computer is not a problem, and not 
     assert.equal(found.hidden, 0)
     const elsewhere = await team({ 'vaults.yml': 'vaults:\n  - name: Second Brain\n' })
     try {
-      assert.deepEqual(await findNamedVaults(home.depsFor(), elsewhere.dir), { status: 'none', vaults: [], hidden: 0, more: 0 })
+      assert.deepEqual(await findNamedVaults(home.depsFor(), elsewhere.dir), { status: 'none', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok' })
     } finally {
       await elsewhere.cleanup()
     }
@@ -273,6 +273,7 @@ test('two vaults with the same folder name cannot be told apart, so neither is o
   await mkdir(two, { recursive: true })
   await writeFile(home.listPath, JSON.stringify({ vaults: { x: { path: one }, y: { path: two }, z: { path: join(home.root, 'C', 'Ideas') } } }))
   await mkdir(join(home.root, 'C', 'Ideas'), { recursive: true })
+  await home.setAllowed(allowText(['Notes', 'Ideas']))
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Notes\n  - name: Ideas\n' })
   const fs = recordingFs()
   try {
@@ -296,6 +297,7 @@ test('a named vault whose folder is gone, is a file, or whose name the board wou
   await mkdir(bad, { recursive: true })
   await mkdir(own, { recursive: true })
   await writeFile(home.listPath, JSON.stringify({ vaults: { a: { path: join(home.root, 'Vaults', 'Present') }, b: { path: gone }, c: { path: file }, e: { path: bad }, f: { path: own } } }))
+  await home.setAllowed(allowText(['Present', 'Gone', 'AFile', 'notes@home', `Notes of ${FAKE_USERNAME}`]))
   const dir = await team({ 'vaults.yml': `vaults:\n  - name: Present\n  - name: Gone\n  - name: AFile\n  - name: notes@home\n  - name: Notes of ${FAKE_USERNAME}\n` })
   const fs = recordingFs()
   try {
@@ -321,6 +323,7 @@ test('a named vault whose folder is a link is not opened, and is counted', async
     return
   }
   await writeFile(home.listPath, JSON.stringify({ vaults: { a: { path: join(home.root, 'Vaults', 'Present') }, d: { path: linked } } }))
+  await home.setAllowed(allowText(['Present', 'Linked']))
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Present\n  - name: Linked\n' })
   try {
     const found = await findNamedVaults(home.depsFor(), dir.dir)
@@ -333,11 +336,11 @@ test('a named vault whose folder is a link is not opened, and is counted', async
 
 test('a list of vaults that is broken makes the part unavailable; a missing one means Obsidian is not here', async () => {
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Ideas\n' })
-  const broken = await obsidianHome('darwin', {}, { raw: '{ not json' })
+  const broken = await obsidianHome('darwin', {}, { raw: '{ not json', allow: allowText(['Ideas']) })
   const absent = await makeFakeHome()
   try {
-    assert.deepEqual(await findNamedVaults(broken.depsFor(), dir.dir), { status: 'unavailable', vaults: [], hidden: 0, more: 0 })
-    assert.deepEqual(await findNamedVaults({ home: absent.home, platform: 'darwin', env: {}, identity: absent.identity }, dir.dir), { status: 'none', vaults: [], hidden: 0, more: 0 })
+    assert.deepEqual(await findNamedVaults(broken.depsFor(), dir.dir), { status: 'unavailable', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok' })
+    assert.deepEqual(await findNamedVaults({ home: absent.home, platform: 'darwin', env: {}, identity: absent.identity, stateDir: broken.stateDir }, dir.dir), { status: 'none', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok' })
   } finally {
     await Promise.all([broken.cleanup(), absent.cleanup(), dir.cleanup()])
   }
@@ -348,7 +351,7 @@ test('a vaults.yml that is broken makes the part unavailable, whatever Obsidian 
   const dir = await team({})
   await mkdir(join(dir.dir, 'vaults.yml'))
   try {
-    assert.deepEqual(await findNamedVaults(home.depsFor(), dir.dir), { status: 'unavailable', vaults: [], hidden: 0, more: 0 })
+    assert.deepEqual(await findNamedVaults(home.depsFor(), dir.dir), { status: 'unavailable', vaults: [], hidden: 0, more: 0, ignored: 0, lowered: 0, allowlist: 'ok' })
   } finally {
     await Promise.all([home.cleanup(), dir.cleanup()])
   }

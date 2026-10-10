@@ -587,11 +587,12 @@ clocks change, and a full sample.
 ## The vaults file
 
 What the Memory screen's graph shows for the Obsidian vaults you choose: each note a dot, each link
-between notes a line. **Only a vault you name in [`vaults.yml`](../../vaults.yml) is ever opened.** A vault
-you did not name is not listed, not counted and not mentioned: the collector never looks inside it.
-By default a vault is published as **numbers only** - how many notes, how many lines, and anonymous
-dots joined by lines - and you choose, one vault at a time, to add its titles. **What a note says is
-never kept, at either level.**
+between notes a line. **The computer decides which vaults may be read; the team repo can only narrow
+that** - see [Why the list of vaults lives on the computer](#why-the-list-of-vaults-lives-on-the-computer).
+A vault that this computer's `allowed-vaults.yml` does not name is never opened, whatever the team repo says:
+it is not listed, not counted and not mentioned. By default a vault is published as **numbers only** - how
+many notes, how many lines, and anonymous dots joined by lines - and you choose, one vault at a time, to add
+its titles. **What a note says is never kept, at either level.**
 
 ```json
 {
@@ -634,7 +635,7 @@ what a dot is.
 
 | What | Read from | Kept |
 |---|---|---|
-| Which vaults | `vaults.yml` in the team repo - on the Mac, the data clone's copy, never the code checkout - up to 64 KB: each `name:` and an optional `level:` | the name and the level. Three vaults at most; a name that fails the name rule, or is listed twice, is counted in `hidden` |
+| Which vaults | first the computer's `allowed-vaults.yml` in the state folder (up to 64 KB: each `name:` and the most it may show, `level:`), then `vaults.yml` in the team repo - on the Mac, the data clone's copy, never the code checkout - up to 64 KB, which can only narrow it | the name and the level. Three vaults at most; a name that fails the name rule, or is listed twice, is counted in `hidden` |
 | Where they are | Obsidian's own list, read **only when a vault is named**: `~/Library/Application Support/obsidian/obsidian.json` on a Mac, `%APPDATA%\obsidian\obsidian.json` on Windows, `~/.config/obsidian/obsidian.json` on Linux | the folder's last name, which is the vault's name. The place is used to open the vault and is never kept: it holds the username. The vault's id, its time and its "open" flag are not used. Two vaults with one folder name cannot be told apart, so neither is opened and it is counted in `hidden` |
 | Notes | the `.md` files in the named vault, in memory, up to 20 folders deep and 20,000 entries. Not `.obsidian`, `.trash`, any other dot folder, or `node_modules`; and **never a link** - a link is how a loop, or the rest of the disk, gets in | counted. A note over 256 KB, a link, or a note that cannot be read is not read: it is counted in `hidden`. At most 600 notes are read; the rest are counted in `more` |
 | Links | `[[Note]]`, `[[Note\|alias]]`, `[[Note#Heading]]`, `![[Note]]`, and markdown links to `.md` files, found the way Obsidian finds them (a name finds the closest note: fewest folders, then shortest path), code left out | which note each link reaches, as numbers - one line for a pair and a kind, however often it is written |
@@ -662,25 +663,75 @@ that one is 24 hours old; then it is rewritten with a new time, so the dashboard
 stale after 7 days - does not call a quiet vault stale. A changed vault is rewritten at the next run. A
 256 KB file rewritten at every three-hourly run would add about 2 MB a day of new blobs to the team repo
 before git compresses them; this keeps it to one write a day per vault that did not change. If nothing is
-named, **no file is written at all**; if you name nothing after having named some, the file is replaced once
+both allowed and named, **no file is written at all**; if you name nothing after having named some, the file is replaced once
 by one that says `not found`. The log says when a file was left as it is.
 
-**Its statuses.** `found` has the vaults; `not found` means nothing is named, or none of what is named is on
-this computer (a vault on your other computer is not a problem); `unavailable` has one of two fixed reasons -
-`could not be read` (`vaults.yml` or Obsidian's list is broken) or `refused by the safety check`. Like the
+**Its statuses.** `found` has the vaults; `not found` means nothing is both allowed on this computer and named in
+`vaults.yml`, or none of it is on this computer (a vault on your other computer is not a problem); `unavailable` has one of two fixed reasons -
+`could not be read` (the allowlist, `vaults.yml` or Obsidian's list is broken) or `refused by the safety check`. Like the
 jobs file, a vaults file the safety check refuses is written as unavailable and the other files are still
 written.
 
-### How to name a vault
+### Why the list of vaults lives on the computer
 
-1. Ask Claude, in the team repo: "add my Second Brain vault to the memory graph". The name is the vault's
-   folder name, the way Obsidian lists it.
-2. Claude adds `- name: Second Brain` to [`vaults.yml`](../../vaults.yml) and commits it. To show titles for
-   that vault, ask for it by name: "show titles for my Ideas vault" adds `level: titles`.
+The team repo is not a safe place to decide which vaults are read. Other people can push to it, and so
+can cloud routines that act for you. If the vaults it names were read and published, whoever can push could
+name any vault on the Mac - a journal, a therapist's notes - and ask for its titles to be written into the
+repo. So the authority is a short file on the computer itself, which only the person at that computer can
+write. It is the same principle as the pinned code checkout (see [The Mac schedule](#the-mac-schedule-phase-4-task-t14)):
+what runs on the Mac, and what it reads, is decided on the Mac.
+
+- **`allowed-vaults.yml`** is in the collector's state folder - `~/.local/state/agent-status-collector/`
+  unless you give another `--state-dir`. That folder is outside both the code checkout and the data clone,
+  and the collector refuses to run with a state folder inside the clone, so a push to the team repo cannot
+  write or replace the file. It names each vault that may be read and the **most** it may show: `shape`
+  (the default) or `titles`.
+- **[`vaults.yml`](../../vaults.yml)** in the team repo says which of those to draw, and may ask for less. It can
+  leave a vault out, or ask for dots where the computer allows titles. It can **never** add a vault the
+  allowlist does not name, or raise a level: a name that is not in the allowlist is ignored, `titles` asked
+  for where only dots are allowed is dots, and the log says how many of each (a count, never a name).
+- **No `allowed-vaults.yml`: nothing is read** - not Obsidian's list, not a vault, not even `vaults.yml` - and
+  no vaults file is written. A file that is a link, a folder, too big or not YAML is not read as
+  "everything": the part is `unavailable` and nothing is read.
+- Taking a vault out of the allowlist stops it at the next run, and the new vaults file replaces the old one.
+  What was already pushed stays in the team repo's git history, as any pushed file does.
+
+### How to choose which vaults
+
+1. **On the computer, allow the vault** (once for each vault). On the Mac Mini, in Terminal:
+
+   ```bash
+   mkdir -p ~/.local/state/agent-status-collector
+   cat > ~/.local/state/agent-status-collector/allowed-vaults.yml <<'EOF'
+   vaults:
+     - name: Second Brain
+       level: titles
+     - name: Ideas
+   EOF
+   ```
+
+   The name is the vault's folder name, the way Obsidian lists it. `level: titles` is the **most** that may
+   leave this computer for that vault - leave the line out (as for `Ideas`) for numbers only. On Windows,
+   in PowerShell (the same folder under your user folder):
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$HOME\.local\state\agent-status-collector" | Out-Null
+   Set-Content -Path "$HOME\.local\state\agent-status-collector\allowed-vaults.yml" -Value @(
+     'vaults:', '  - name: Second Brain', '    level: titles', '  - name: Ideas'
+   )
+   ```
+
+   If you run the collector with `--state-dir`, put the file in that folder instead.
+2. **In the team repo, ask Claude**: "add my Second Brain vault to the memory graph". Claude adds
+   `- name: Second Brain` to [`vaults.yml`](../../vaults.yml) and commits it. To show titles for a vault, ask for
+   it by name: "show titles for my Ideas vault" adds `level: titles` - and it takes effect only if the
+   allowlist on the computer also says `titles`. To stop drawing a vault, ask Claude to take it out of
+   `vaults.yml`.
 3. The next scheduled run on the computer that has the vault draws it. On Windows nothing is scheduled (the
    team's policy): run `npm run collect:status -- --only vaults` by hand.
 
-The Memory screen only reads these files. It never writes `vaults.yml`.
+The Memory screen only reads these files. It never writes `vaults.yml`, and nothing in the team repo can write the
+allowlist.
 
 The contract the dashboard reads this by is `scripts/lib/status/vaults-schema.mjs` and
 `tests/fixtures/vaults-parity.json`: the caps, the title rule with accept and refuse examples, the
@@ -715,8 +766,8 @@ never the value. These are never written:
   label or id that fails the name rule
 - from vaults: what a note says, in any form - its text, its headings, its frontmatter beyond the keys
   `date`, `created`, `tags`, `tag`, `project` and `people`, its links as written, its path; the contents of
-  `.obsidian`, `.trash` and every other dot folder, which are never opened; a vault you did not name, which is
-  not listed, counted or mentioned; the vault's place on the computer, and Obsidian's ids, times and
+  `.obsidian`, `.trash` and every other dot folder, which are never opened; a vault this computer does not
+  allow, or the team repo does not name, which is not listed, counted or mentioned; the vault's place on the computer, and Obsidian's ids, times and
   "open" flags; at the `shape` level, any title, folder, tag, day or word at all; at the `titles` level, anything
   that fails the title rule
 
@@ -950,19 +1001,25 @@ run, with nothing changed in the plist:
 
 | Part | What starts happening every 3 hours |
 |---|---|
-| **vaults** | It reads `vaults.yml` from the data clone (one file, up to 64 KB). **If nothing is named there, that is all it does** - it opens neither Obsidian's list nor any vault, and writes no file. For each vault you name (three at most) it also reads Obsidian's list of vaults (`obsidian.json`, once), lists the vault's folders and reads up to 600 `.md` notes in memory, a few at a time. It runs no program, and keeps no note text. It checks the earlier vaults file in the data clone (one small read) to decide whether to write a new one. |
+| **vaults** | It looks for `allowed-vaults.yml` in the state folder. **If there is none, that is all it does** - it reads nothing else (not `vaults.yml`, not Obsidian's list, not a vault), writes no file, and the log says so. If there is one, it reads it (one small file) and `vaults.yml` from the data clone (one file, up to 64 KB). If nothing is both allowed and named, that is all. For each vault that is, it also reads Obsidian's list of vaults (`obsidian.json`, once), lists the vault's folders and reads up to 600 `.md` notes in memory, a few at a time. It runs no program, and keeps no note text. It checks the earlier vaults file in the data clone (one small read) to decide whether to write a new one. |
+
+**The Mac reads no vault until you allow one on the Mac itself** - the first run after moving the pin does
+nothing for vaults, whatever the team repo holds. To allow one, follow
+[How to choose which vaults](#how-to-choose-which-vaults) in a Terminal on the Mac Mini.
 
 What that costs a run, measured on the build PC with warm caches and notes of about 3 KB (the Mac has not
-run it yet): with nothing named, under a millisecond and 1 file read (`vaults.yml`), plus a look for an earlier vaults file; one vault of 600 notes, about 30 to 40
-milliseconds and 602 files read (`vaults.yml`, Obsidian's list and the 600 notes); three vaults of 600 notes,
-about 110 milliseconds and 1,802 files read, writing a file of about 210 KB. These are the vaults part's
-own numbers; the other parts are as they were. The vaults file is committed only when the graph changed or is
-a day old, so most runs add nothing to the repo for it.
+run it yet): with no allowlist, no file read at all, under a millisecond; an allowlist and nothing named,
+2 files read and about a millisecond; one vault of 600 notes, about 30 milliseconds and 603 files read (the
+allowlist, `vaults.yml`, Obsidian's list and the 600 notes); three vaults of 600 notes, about 100 milliseconds
+and 1,803 files read, writing a file of about 210 KB. These are the vaults part's own numbers; the other parts
+are as they were. The vaults file is committed only when the graph changed or is a day old, so most runs add
+nothing to the repo for it.
 
 **To keep the vaults part out**, name the other parts with `--only` in the plist, as above:
-`usage,connections,hermes,jobs` leaves out only the vaults part. Or leave `vaults.yml` as `vaults: []`,
-which is the same thing for the Mac: it is then a single small file read and no file. A part left out keeps
-its last file on the dashboard until that file goes stale (the vaults file: 7 days).
+`usage,connections,hermes,jobs` leaves out only the vaults part. Or simply never create
+`allowed-vaults.yml`, which is the same thing for the Mac: it is then one failed look for a file and no
+vaults file. A part left out keeps its last file on the dashboard until that file goes stale (the vaults file:
+7 days).
 
 ### Rollback
 

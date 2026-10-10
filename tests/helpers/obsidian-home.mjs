@@ -41,11 +41,33 @@ export async function placeVaults(fake, platform, vaults, { env = {}, raw } = {}
   return { listPath, places }
 }
 
-// A new pretend home with its vaults placed (see placeVaults).
-export async function obsidianHome(platform, vaults, options) {
+// The allowlist file a computer keeps (see ALLOWED_VAULTS in vaults.mjs): every name given, each allowed up to
+// `level`. The test helper spells it so a test says only what it means.
+export const ALLOWED_FILE = 'allowed-vaults.yml'
+export const allowText = (names, level = 'titles') => ['vaults:', ...names.flatMap((name) => [`  - name: ${name}`, `    level: ${level}`]), ''].join('\n')
+
+// Writes (or, with null, removes) the allowlist in a state folder.
+export async function setAllowed(stateDir, text) {
+  await mkdir(stateDir, { recursive: true })
+  if (text === null) await rm(join(stateDir, ALLOWED_FILE), { force: true })
+  else await writeFile(join(stateDir, ALLOWED_FILE), text)
+}
+
+// A new pretend home with its vaults placed (see placeVaults) and, by default, an allowlist in its state folder
+// that allows every vault placed up to titles - so a test about something else is not about the allowlist.
+// `allow` is the text of the allowlist instead, or null for none.
+export async function obsidianHome(platform, vaults, { allow, ...options } = {}) {
   const fake = await makeFakeHome()
   const placed = await placeVaults(fake, platform, vaults, options)
-  return { ...fake, ...placed, depsFor: (extra = {}) => ({ home: fake.home, platform, env: {}, identity: fake.identity, ...extra }) }
+  const stateDir = join(fake.root, 'state')
+  await setAllowed(stateDir, allow === undefined ? allowText(Object.keys(vaults)) : allow)
+  return {
+    ...fake,
+    ...placed,
+    stateDir,
+    setAllowed: (text) => setAllowed(stateDir, text),
+    depsFor: (extra = {}) => ({ home: fake.home, platform, env: {}, identity: fake.identity, stateDir, ...extra })
+  }
 }
 
 // A file system that remembers every path it was asked about (`touched`), and what it was asked to do

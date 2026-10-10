@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 1322
+ℹ tests 1353
 ℹ fail 0
 ```
 
@@ -296,9 +296,11 @@ job's name or prompt. To name a job on the wall, or hide it, ask Claude to edit 
 ## The memory graph
 
 The same script can also draw the Obsidian vaults you choose as a graph on the Memory screen: each note a
-dot, each link a line. It reads **only the vaults you name** in [`vaults.yml`](vaults.yml) - ask Claude to
-add one - and by default publishes numbers and anonymous dots only. You choose, vault by vault, to also
-publish its titles. It never publishes what a note says, a path, or where a vault is on your computer.
+dot, each link a line. Which vaults it may read is decided **on your computer**, in a file only you can
+write (`allowed-vaults.yml`), not in this repo, which other people and cloud routines can push to; [`vaults.yml`](vaults.yml)
+here only chooses among them, and can only ask for less. With no such file it reads nothing. By default it
+publishes numbers and anonymous dots only, and you choose, vault by vault, to also publish its titles. It
+never publishes what a note says, a path, or where a vault is on your computer.
 
 - **How it works:** [The vaults file](.agent-team/status/README.md#the-vaults-file) - what it reads,
   what it keeps at each level, and what is never kept.

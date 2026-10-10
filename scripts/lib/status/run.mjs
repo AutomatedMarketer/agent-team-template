@@ -220,16 +220,19 @@ function jobsRefused(doc, deps, computer) {
 }
 
 // Counts only - never a vault's name or a title, which are the person's own words.
-export function summarizeVaults(doc) {
+export function summarizeVaults(doc, trail = []) {
   const { vaults } = doc
-  if (vaults.status === 'not found') return ['- Vaults not found: none named in vaults.yml, or none of them on this computer']
-  if (vaults.status !== 'found') return [`- Vaults ${blockDetail(vaults)}`]
+  // What the computer's allowlist did, in counts and fixed words (collectVaults, allowlistLines).
+  const said = trail.filter((line) => typeof line === 'string').map((line) => `- ${line}`)
+  if (vaults.status === 'not found') return ['- Vaults not found: none is both allowed on this computer and named in vaults.yml, or none of them is here', ...said]
+  if (vaults.status !== 'found') return [`- Vaults ${blockDetail(vaults)}`, ...said]
   const sum = (key) => vaults.items.reduce((total, item) => total + item[key], 0)
   const titles = vaults.items.filter((item) => item.level === 'titles').length
   return [
     `- Vaults found: ${vaults.items.length} listed (${titles} at titles, ${vaults.items.length - titles} at shape), ${vaults.hidden} hidden, ${vaults.more} more`,
     `- Notes: ${sum('notes')} drawn, ${sum('hidden')} withheld, ${sum('more')} past the caps`,
-    `- Lines: ${sum('lines')} drawn, ${sum('moreLines')} cut by the caps, ${sum('lonely')} notes with no link`
+    `- Lines: ${sum('lines')} drawn, ${sum('moreLines')} cut by the caps, ${sum('lonely')} notes with no link`,
+    ...said
   ]
 }
 
@@ -289,13 +292,13 @@ const PART_TABLE = {
   vaults: {
     title: 'Vaults',
     path: vaultsPath,
-    collect: (deps, computer) => (deps.sources?.vaults ?? collectVaults)(deps, computer),
+    collect: (deps, computer, trail) => (deps.sources?.vaults ?? collectVaults)(deps, computer, trail),
     check: checkVaults,
     // Refused like the jobs file: it is written as unavailable, and the others keep their snapshot.
     whenRefused: vaultsRefused,
     stringify: stringifyVaults,
     leaveAlone: (doc, deps, relativePath) => whyLeaveVaultsAlone(deps, relativePath, doc),
-    summarize: (doc) => summarizeVaults(doc),
+    summarize: (doc, trail) => summarizeVaults(doc, trail),
     statuses: vaultsStatuses
   }
 }
@@ -401,9 +404,9 @@ const USAGE_TEXT = [
   '          files. It never runs hermes. When Hermes is alive it also writes runs/heartbeat/hermes.json.',
   '  jobs: scheduled jobs - Mac LaunchAgents and Hermes cron jobs - names, times and states only.',
   '        On a Mac it runs /usr/bin/plutil and /bin/launchctl list; it never runs hermes.',
-  '  vaults: the memory graph - each Obsidian vault named in vaults.yml, as dots and lines. It reads the notes of a',
-  '          named vault in memory, keeps no note text, and opens no vault that is not named. A vault shows titles',
-  '          only if vaults.yml says level: titles. Written when it changed, or when the file is a day old.',
+  '  vaults: the memory graph - Obsidian vaults as dots and lines. Only a vault this computer allows (allowed-vaults.yml',
+  '          in the --state-dir folder) and vaults.yml names is read, in memory; no note text is kept. A vault shows',
+  '          titles only if both say so. No allowlist: nothing is read. Written when it changed, or when a day old.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 

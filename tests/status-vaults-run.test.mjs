@@ -12,7 +12,7 @@ import { VAULTS_SCHEMA, VAULTS_WHY, REWRITE_AFTER_HOURS } from '../scripts/lib/s
 import { stringifyVaults } from '../scripts/lib/status/vaults.mjs'
 import { makeFakeHome, FAKE_EMAIL, FAKE_USERNAME, fakeClaudeToken } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
-import { placeVaults, recordingFs } from './helpers/obsidian-home.mjs'
+import { placeVaults, recordingFs, setAllowed, allowText, ALLOWED_FILE } from './helpers/obsidian-home.mjs'
 import { git } from './helpers/git.mjs'
 
 /* The vaults part inside a run: --only vaults, the file written beside the other parts behind the same gate
@@ -42,10 +42,17 @@ const ORCHARD = 'Orchard Notes'
 const YML_SHAPE = `vaults:\n  - name: ${ORCHARD}\n`
 const YML_TITLES = `vaults:\n  - name: ${ORCHARD}\n    level: titles\n`
 
-// A pretend home (Linux, so no Mac programs are needed) with the vaults placed and Obsidian's list written.
-async function aHome(vaults = { [ORCHARD]: { files: NOTES } }, { raw } = {}) {
+// Where the collector looks for the computer's allowlist when it is not told another state folder.
+const defaultState = (fake) => join(fake.home, '.local', 'state', 'agent-status-collector')
+
+// A pretend home (Linux, so no Mac programs are needed) with the vaults placed, Obsidian's list written and, by
+// default, an allowlist that allows every vault placed up to titles - so a test about something else is not
+// about the allowlist. `allow` is the allowlist's text instead, or null for none.
+async function aHome(vaults = { [ORCHARD]: { files: NOTES } }, { raw, allow } = {}) {
   const fake = await makeFakeHome()
   const placed = await placeVaults(fake, 'linux', vaults, { raw })
+  fake.allowedText = allow === undefined ? allowText(Object.keys(vaults)) : allow
+  await setAllowed(defaultState(fake), fake.allowedText)
   return { fake, ...placed }
 }
 
@@ -65,6 +72,8 @@ async function run(fake, args, { target = null, extra = {}, yml } = {}) {
 }
 
 async function collect(fake, args, { repo, stateDir, extra = {} }) {
+  // The state folder is the one the run was told to use, so the allowlist goes there.
+  if (fake.allowedText !== undefined) await setAllowed(stateDir, fake.allowedText)
   const stdout = []
   const stderr = []
   const code = await runCollector({
@@ -122,7 +131,7 @@ test('the log counts vaults, notes and lines - never a vault name, a title or a 
   const text = summarizeVaults(fixture.sample).join('\n')
   for (const word of ['Field Notes', 'Ideas', 'Shopping', 'Garden', 'Plans']) assert.ok(!text.includes(word), `the log says ${word}`)
   const doc = (vaults) => ({ ...fixture.sample, vaults })
-  assert.deepEqual(summarizeVaults(doc({ status: 'not found' })), ['- Vaults not found: none named in vaults.yml, or none of them on this computer'])
+  assert.deepEqual(summarizeVaults(doc({ status: 'not found' })), ['- Vaults not found: none is both allowed on this computer and named in vaults.yml, or none of them is here'])
   assert.deepEqual(summarizeVaults(doc({ status: 'unavailable', why: VAULTS_WHY.unreadable })), ['- Vaults unavailable (could not be read)'])
   assert.deepEqual(vaultsStatuses(fixture.sample), { vaults: 'found', items: 2 })
   assert.deepEqual(vaultsStatuses(doc({ status: 'not found' })), { vaults: 'not found', items: 0 })
@@ -140,13 +149,15 @@ test('--only vaults with nothing named writes no file, opens neither Obsidian\'s
       assert.equal(result.code, 0, result.stderr)
       assert.deepEqual(await filesUnder(result.target), yml === undefined ? [] : [join(result.target, 'vaults.yml')])
       assert.match(result.stdout, /^Vaults:$/m)
-      assert.match(result.stdout, /- Vaults not found: none named in vaults.yml/)
+      assert.match(result.stdout, /- Vaults not found: none is both allowed on this computer and named in vaults.yml/)
       assert.match(result.stdout, /No file written: nothing to draw here, and no earlier file to replace/)
+      assert.match(result.stdout, /The allowlist on this computer .* names no vault|is both allowed/)
       assert.match(result.stdout, /Nothing changed since the last snapshot, so nothing was written/)
       await rm(result.target, { recursive: true, force: true })
     }
-    // vaults.yml, and the earlier vaults file (to know there is none): nothing of Obsidian's, nothing of a vault.
-    assert.ok(fs.touched.every((path) => path.endsWith('vaults.yml') || path.endsWith('test-pc.json')), JSON.stringify(fs.touched))
+    // The allowlist, vaults.yml, and the earlier vaults file (to know there is none): nothing of Obsidian's,
+    // nothing of a vault.
+    assert.ok(fs.touched.every((path) => path.endsWith('vaults.yml') || path.endsWith('test-pc.json') || path.endsWith(ALLOWED_FILE)), JSON.stringify(fs.touched))
     assert.ok(!fs.touched.some((path) => path.includes('obsidian') || path.includes(ORCHARD)))
   } finally {
     await fake.cleanup()
@@ -241,8 +252,10 @@ test('a run with no --only writes the four older parts and, when a vault is name
     const help = await run(fake, ['--help'])
     assert.equal(help.code, 0)
     assert.match(help.stdout, /--only usage,connections,hermes,jobs,vaults/)
-    assert.match(help.stdout, /vaults: .*Obsidian vault named in vaults\.yml/s)
-    assert.match(help.stdout, /keeps no note text/)
+    assert.match(help.stdout, /vaults: .*Only a vault this computer allows/s)
+    assert.match(help.stdout, /allowed-vaults\.yml/)
+    assert.match(help.stdout, /no note text is kept/)
+    assert.match(help.stdout, /No allowlist: nothing is read/)
     await rm(help.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()
@@ -367,7 +380,7 @@ test('nothing named but a file from earlier: the file is replaced by "not found"
 })
 
 test('a list of vaults that cannot be read is written as unavailable, with the fixed reason and no word of what it held', async () => {
-  const { fake } = await aHome({}, { raw: `{ not json ${fakeClaudeToken()} ${FAKE_EMAIL}` })
+  const { fake } = await aHome({}, { raw: `{ not json ${fakeClaudeToken()} ${FAKE_EMAIL}`, allow: allowText([ORCHARD]) })
   try {
     const result = await run(fake, ['--only', 'vaults'], { yml: YML_SHAPE })
     assert.equal(result.code, 0, result.stderr)
@@ -663,6 +676,148 @@ test('in a full run an unnamed vault is never opened: not listed, not read, not 
   }
 })
 
+// --- the computer decides which vaults are read; the team repo can only narrow ---------------------------------------------------------
+
+test('no allowlist on the computer: a team repo that names vaults at titles still gets no vaults file, and the log says why', async () => {
+  const { fake } = await aHome(undefined, { allow: null })
+  const fs = recordingFs()
+  try {
+    const full = await run(fake, [], { yml: YML_TITLES, extra: { fs } })
+    assert.equal(full.code, 0, full.stderr)
+    assert.deepEqual((await relativeFiles(full.target)).filter((file) => file !== 'vaults.yml'), [CONNECTIONS, HERMES, JOBS, USAGE], 'a vaults file was written with no allowlist')
+    assert.match(full.stdout, /No allowlist on this computer \(allowed-vaults\.yml in the state folder\), so no vault is read, whatever vaults\.yml says/)
+    assert.match(full.stdout, /- Vaults not found/)
+    assert.ok(!fs.touched.some((path) => path.endsWith('obsidian.json') || path.includes(ORCHARD)), 'Obsidian\'s list or a vault was read')
+    assert.ok(!fs.touched.some((path) => /[\\/]vaults\.yml$/.test(path)), 'vaults.yml was read although nothing can be allowed')
+    await rm(full.target, { recursive: true, force: true })
+
+    const only = await run(fake, ['--only', 'vaults'], { yml: YML_TITLES })
+    assert.equal(only.code, 0, only.stderr)
+    assert.deepEqual((await relativeFiles(only.target)).filter((file) => file !== 'vaults.yml'), [])
+    assert.match(only.stdout, /Nothing changed since the last snapshot, so nothing was written/)
+    await rm(only.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('taking the allowlist away replaces an earlier vaults file once with "not found", so what was shown is no longer shown', async () => {
+  const { fake } = await aHome()
+  try {
+    const first = await run(fake, ['--only', 'vaults'], { yml: YML_TITLES })
+    const { target } = first
+    assert.equal((await readAt(target, VAULTS)).vaults.items[0].level, 'titles')
+    await setAllowed(defaultState(fake), null)
+    const second = await run(fake, ['--only', 'vaults'], { target, extra: { now: NOW + HOUR } })
+    assert.equal(second.code, 0, second.stderr)
+    const doc = await readAt(target, VAULTS)
+    assert.deepEqual(doc.vaults, { status: 'not found' })
+    assert.ok(!JSON.stringify(doc).includes('Pear'))
+    const text = await textAt(target, VAULTS)
+    const third = await run(fake, ['--only', 'vaults'], { target, extra: { now: NOW + 2 * HOUR } })
+    assert.equal(await textAt(target, VAULTS), text)
+    assert.match(third.stdout, /Nothing changed since the last snapshot/)
+    await rm(target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('a vault the team repo names that the computer does not allow is not opened, not published, and counted in the log only', async () => {
+  const { fake } = await aHome({
+    [ORCHARD]: { files: NOTES },
+    'Therapy Sessions': { files: { 'Dr Lee.md': 'PRIVATE-PROSE-31 [[Dr Lee follow-up]]', 'Dr Lee follow-up.md': 'PRIVATE-PROSE-32' } }
+  }, { allow: allowText([ORCHARD]) })
+  const fs = recordingFs()
+  try {
+    const result = await run(fake, ['--only', 'vaults'], { yml: `vaults:\n  - name: Therapy Sessions\n    level: titles\n  - name: ${ORCHARD}\n    level: titles\n`, extra: { fs } })
+    assert.equal(result.code, 0, result.stderr)
+    const text = await textAt(result.target, VAULTS)
+    const doc = JSON.parse(text)
+    assert.deepEqual(doc.vaults.items.map((item) => item.name), [ORCHARD])
+    assert.equal(doc.vaults.hidden, 0)
+    for (const word of ['Therapy', 'Dr Lee', 'PRIVATE-PROSE']) assert.ok(!text.includes(word) && !(result.stdout + result.stderr).includes(word), `${word} reached an output`)
+    assert.ok(!fs.touched.some((path) => path.includes('Therapy')), 'the vault that is not allowed was touched')
+    assert.match(result.stdout, /1 vault named in vaults\.yml is not in this computer's allowlist, so it was ignored\./)
+    await rm(result.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('titles asked for by the team repo on a vault the computer allows only as dots: the file has dots, and the log says so', async () => {
+  const { fake } = await aHome(undefined, { allow: allowText([ORCHARD], 'shape') })
+  try {
+    const result = await run(fake, ['--only', 'vaults'], { yml: YML_TITLES })
+    assert.equal(result.code, 0, result.stderr)
+    const text = await textAt(result.target, VAULTS)
+    const [item] = JSON.parse(text).vaults.items
+    assert.equal(item.level, 'shape')
+    assert.equal(item.nodes, undefined)
+    for (const word of ['Pear', 'Apple', 'Raised', 'Lonely', 'orchard']) assert.ok(!text.includes(word), `the file holds ${word}`)
+    assert.match(result.stdout, /1 vault asked for titles in vaults\.yml but this computer's allowlist allows only dots, so it is shown as dots\./)
+    assert.match(result.stdout, /- Vaults found: 1 listed \(0 at titles, 1 at shape\)/)
+    await rm(result.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('the team repo lowering a level, or dropping a vault, is honoured in a run', async () => {
+  const { fake } = await aHome({ [ORCHARD]: { files: NOTES }, Second: { files: { 'One.md': 'text' } } }, { allow: allowText([ORCHARD, 'Second']) })
+  try {
+    const lowered = await run(fake, ['--only', 'vaults'], { yml: `vaults:\n  - name: ${ORCHARD}\n    level: shape\n  - name: Second\n    level: titles\n` })
+    assert.deepEqual((await readAt(lowered.target, VAULTS)).vaults.items.map((item) => [item.name, item.level]), [[ORCHARD, 'shape'], ['Second', 'titles']])
+    await rm(lowered.target, { recursive: true, force: true })
+    const dropped = await run(fake, ['--only', 'vaults'], { yml: 'vaults:\n  - name: Second\n' })
+    assert.deepEqual((await readAt(dropped.target, VAULTS)).vaults.items.map((item) => item.name), ['Second'])
+    await rm(dropped.target, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('an allowlist committed to the team repo is never read: in the dedicated clone only the state folder\'s counts', async () => {
+  const repo = await makeRemote({ 'vaults.yml': YML_TITLES, [ALLOWED_FILE]: allowText([ORCHARD]) })
+  const { fake } = await aHome(undefined, { allow: null })
+  try {
+    const dedicated = await repo.clone('dedicated')
+    assert.ok(existsSync(join(dedicated, ALLOWED_FILE)), 'the pusher\'s allowlist is in the clone')
+    const stateDir = join(repo.root, 'state')
+    const result = await collect(fake, ['--commit', '--clone', dedicated, '--only', 'vaults'], { repo: repo.work, stateDir })
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal(existsSync(join(dedicated, ...VAULTS.split('/'))), false, 'a vaults file was written from the team repo\'s own allowlist')
+    assert.match(result.stdout, /No allowlist on this computer/)
+    assert.match(result.stdout, /nothing was committed/)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
+test('the allowlist is read from the state folder the run uses: --state-dir moves it, and the default folder is then not looked at', async () => {
+  const repo = await makeRemote()
+  const { fake } = await aHome()
+  // collect() must not write the allowlist for this test: the point is where it is looked for.
+  fake.allowedText = undefined
+  try {
+    await writeFile(join(repo.work, 'vaults.yml'), YML_SHAPE)
+    // The default folder allows the vault; the folder this run is told to use does not.
+    const refused = await collect(fake, ['--commit', '--only', 'vaults'], { repo: repo.work, stateDir: join(repo.root, 'state-a') })
+    assert.equal(refused.code, 0, refused.stderr)
+    assert.match(refused.stdout, /No allowlist on this computer/)
+    assert.equal(existsSync(join(repo.work, ...VAULTS.split('/'))), false)
+    const stateB = join(repo.root, 'state-b')
+    await setAllowed(stateB, allowText([ORCHARD], 'shape'))
+    const allowed = await collect(fake, ['--commit', '--only', 'vaults'], { repo: repo.work, stateDir: stateB, extra: { now: NOW + HOUR } })
+    assert.equal(allowed.code, 0, allowed.stderr)
+    assert.equal((await readAt(repo.work, VAULTS)).vaults.items[0].name, ORCHARD)
+  } finally {
+    await fake.cleanup()
+    await repo.cleanup()
+  }
+})
+
 // --- the hostile machine, through a whole run -----------------------------------------------------------------------------------------
 
 test('a home and a vault full of secrets, through a whole committed run: the files, the receipt, the log and every error say none of it', async () => {
@@ -685,6 +840,7 @@ test('a home and a vault full of secrets, through a whole committed run: the fil
       },
       Quiet: { files: { 'One note.md': PRIVATE, 'Two note.md': `${PRIVATE} [[One note]]` } }
     })
+    fake.allowedText = allowText(['Hostile', 'Quiet'])
     await writeFile(join(repo.work, 'vaults.yml'), 'vaults:\n  - name: Hostile\n    level: titles\n  - name: Quiet\n')
     const stateDir = join(repo.root, 'state')
     const result = await collect(fake, ['--commit', '--only', 'vaults'], { repo: repo.work, stateDir })

@@ -23,7 +23,7 @@ import {
 } from '../scripts/lib/status/vaults-schema.mjs'
 import { checkVaults } from '../scripts/lib/status/safe.mjs'
 import { fakeClaudeToken, FAKE_USERNAME, FAKE_HOSTNAME } from './helpers/fake-home.mjs'
-import { team, obsidianHome, recordingFs } from './helpers/obsidian-home.mjs'
+import { team, obsidianHome, recordingFs, allowText } from './helpers/obsidian-home.mjs'
 
 /* From a vault's notes to its dots and lines. The notes are read in memory to find their links, their
    day and their tags, and nothing a note says is kept: the item that comes out holds numbers, and (only at
@@ -743,7 +743,7 @@ test('the part says what happened: not found, unavailable (with one of two fixed
 })
 
 test('a broken Obsidian list makes the part unavailable and says nothing of what it held', async () => {
-  const home = await obsidianHome('darwin', {}, { raw: `{ not json ${PRIVATE}` })
+  const home = await obsidianHome('darwin', {}, { raw: `{ not json ${PRIVATE}`, allow: allowText(['Vault']) })
   const dir = await team({ 'vaults.yml': 'vaults:\n  - name: Vault\n' })
   try {
     const doc = await named(home, dir)
