@@ -89,7 +89,7 @@ function isRealIsoTime(value) {
   return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 19) === value.slice(0, 19)
 }
 
-function isRealDay(value) {
+export function isRealDay(value) {
   if (typeof value !== 'string' || !CALENDAR_DAY.test(value)) return false
   const ms = Date.parse(`${value}T00:00:00Z`)
   return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value

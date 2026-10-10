@@ -13,48 +13,10 @@ import {
 } from '../scripts/lib/status/vaults.mjs'
 import { VAULTS_CAPS } from '../scripts/lib/status/vaults-schema.mjs'
 import { makeFakeHome, fakeClaudeToken, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME } from './helpers/fake-home.mjs'
+import { team, obsidianHome, recordingFs } from './helpers/obsidian-home.mjs'
 
 /* Which vaults get opened. Only those the owner names in vaults.yml, found through Obsidian's own
    list of vaults; an unnamed vault is never read, and neither its name nor its place is kept. */
-
-async function team(files = {}) {
-  const dir = await mkdtemp(join(tmpdir(), 'agent-vaults-team-'))
-  for (const [name, content] of Object.entries(files)) {
-    await mkdir(join(dir, ...name.split('/').slice(0, -1)), { recursive: true })
-    await writeFile(join(dir, ...name.split('/')), content)
-  }
-  return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
-}
-
-// A pretend home with Obsidian's list of vaults in the right place for the platform, and a folder for each.
-async function obsidianHome(platform, vaults, { env = {}, raw } = {}) {
-  const fake = await makeFakeHome()
-  const listPath = obsidianListPath({ home: fake.home, platform, env: { ...env, ...(platform === 'win32' ? { APPDATA: join(fake.home, 'AppData', 'Roaming') } : {}) } })
-  const entries = {}
-  let index = 0
-  for (const [folder, { files = {}, asPath } = {}] of Object.entries(vaults)) {
-    const path = asPath ?? join(fake.root, 'Vaults', folder)
-    await mkdir(path, { recursive: true }).catch(() => {})
-    for (const [file, text] of Object.entries(files)) {
-      await mkdir(join(path, ...file.split('/').slice(0, -1)), { recursive: true })
-      await writeFile(join(path, ...file.split('/')), text)
-    }
-    entries[`id${index += 1}`] = { path, ts: 1760000000000, open: index === 1 }
-  }
-  await mkdir(join(listPath, '..'), { recursive: true })
-  await writeFile(listPath, raw ?? JSON.stringify({ vaults: entries }))
-  return { ...fake, listPath, depsFor: (extra = {}) => ({ home: fake.home, platform, env: {}, identity: fake.identity, ...extra }) }
-}
-
-// A file system that remembers every path it was asked about.
-function recordingFs() {
-  const touched = []
-  const wrap = (name) => (path, ...rest) => {
-    touched.push(String(path))
-    return nodeFs[name](path, ...rest)
-  }
-  return { touched, lstat: wrap('lstat'), stat: wrap('stat'), readFile: wrap('readFile'), readdir: wrap('readdir') }
-}
 
 /* ---------- where Obsidian keeps its list ----------------------------------------------------- */
 

@@ -374,12 +374,12 @@
           ],
           "nodes": [
             {
-              "title": "Weekly plan",
+              "title": "Shopping list",
               "folder": "Plans",
               "day": "2026-10-09"
             },
             {
-              "title": "Shopping list",
+              "title": "Weekly plan",
               "folder": "Plans",
               "day": "2026-10-09"
             },
@@ -408,5 +408,558 @@
       "hidden": 0,
       "more": 0
     }
-  }
+  },
+  "resolution": {
+    "note": "Each case is a vault (its note paths, from the vault root), one note in it and that note's text, and the lines that note makes: the note each link reaches and the kind (link for a wikilink or an embed, mention for a markdown link), links first, then in path order. A vault's lines are all of its notes' cases at once. The collector builds the graph this way for an extra vault; the board builds the same lines for the team repo, so both hold to this table.",
+    "cases": [
+      {
+        "why": "a plain wikilink finds the note by its name, wherever it is",
+        "notes": [
+          "A.md",
+          "Folder/B.md"
+        ],
+        "from": "A.md",
+        "text": "See [[B]].",
+        "edges": [
+          {
+            "to": "Folder/B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "an alias is not part of the name",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[B|my label]] and [[B|one|two]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a heading or a block reference is not part of the name, and one note is one line",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[B#Goals]] and [[B^abc123]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "an embed of a note is a link",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "![[B]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "an embed of a file that is not a note is nothing",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "![[B.png]] ![[doc.pdf]] ![[B.md.bak]]",
+        "edges": []
+      },
+      {
+        "why": "case does not matter",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[b]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "the extension may be written",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[B.md]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "spaces round the name are not part of it",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[ B ]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a path from the vault root is exact",
+        "notes": [
+          "A.md",
+          "Projects/Plan.md",
+          "Archive/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Projects/Plan]]",
+        "edges": [
+          {
+            "to": "Projects/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a path that is only the end of a longer path still matches",
+        "notes": [
+          "A.md",
+          "Work/Projects/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Projects/Plan]]",
+        "edges": [
+          {
+            "to": "Work/Projects/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a path with folders in it never reaches a note that merely has the same name",
+        "notes": [
+          "A.md",
+          "Archive/Plan.md",
+          "Work/Projects/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Projects/Plan]]",
+        "edges": [
+          {
+            "to": "Work/Projects/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "two notes with one name: the one with the fewest folders wins",
+        "notes": [
+          "A.md",
+          "Archive/Old/Plan.md",
+          "Projects/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Plan]]",
+        "edges": [
+          {
+            "to": "Projects/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "the fewest folders wins, even when a path with more folders is shorter",
+        "notes": [
+          "A.md",
+          "Long folder name/Plan.md",
+          "x/y/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Plan]]",
+        "edges": [
+          {
+            "to": "Long folder name/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a note at the root beats the same name in a folder",
+        "notes": [
+          "A.md",
+          "Plan.md",
+          "Projects/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Plan]]",
+        "edges": [
+          {
+            "to": "Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "the same number of folders: the shorter path wins, then the first in order",
+        "notes": [
+          "A.md",
+          "Xy/Plan.md",
+          "Y/Plan.md",
+          "Z/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Plan]]",
+        "edges": [
+          {
+            "to": "Y/Plan.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a link to a note that is not there is nothing",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[Nowhere]] and [[Bearer abc]]",
+        "edges": []
+      },
+      {
+        "why": "a link to a folder is nothing",
+        "notes": [
+          "A.md",
+          "Projects/Plan.md"
+        ],
+        "from": "A.md",
+        "text": "[[Projects]]",
+        "edges": []
+      },
+      {
+        "why": "a note linking to itself, or to a heading in itself, is nothing",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[A]] [[#Heading]] [[A#Heading]] [a](A.md)",
+        "edges": []
+      },
+      {
+        "why": "code is not text: a link inside a fence or between backticks is not a link",
+        "notes": [
+          "A.md",
+          "B.md",
+          "C.md"
+        ],
+        "from": "A.md",
+        "text": "Before\n```\n[[B]]\n```\n`[[B]]` and\n~~~\n[[B]]\n~~~\nand [[C]]",
+        "edges": [
+          {
+            "to": "C.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "one line for a pair and a kind, however often it is linked",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[B]] [[B]] ![[B]] [[b]]",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "a markdown link to a note is a mention, from the folder of the note it is written in",
+        "notes": [
+          "A.md",
+          "Folder/B.md"
+        ],
+        "from": "A.md",
+        "text": "[b](Folder/B.md)",
+        "edges": [
+          {
+            "to": "Folder/B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "two dots climb a folder",
+        "notes": [
+          "Folder/A.md",
+          "B.md"
+        ],
+        "from": "Folder/A.md",
+        "text": "[b](../B.md)",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "one dot is this folder",
+        "notes": [
+          "Folder/A.md",
+          "Folder/B.md"
+        ],
+        "from": "Folder/A.md",
+        "text": "[b](./B.md)",
+        "edges": [
+          {
+            "to": "Folder/B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "a leading slash is the vault root",
+        "notes": [
+          "Folder/A.md",
+          "B.md"
+        ],
+        "from": "Folder/A.md",
+        "text": "[b](/B.md)",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "a space is written %20 or inside angle brackets, and both mean the same note",
+        "notes": [
+          "A.md",
+          "Pasta ideas.md"
+        ],
+        "from": "A.md",
+        "text": "[p](Pasta%20ideas.md) [q](<Pasta ideas.md>)",
+        "edges": [
+          {
+            "to": "Pasta ideas.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "a fragment, a query or a title is not part of the path",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[b](B.md#goals) [b](B.md?x=1) [b](B.md \"a title\")",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "an address is not a note",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[w](https://example.com/B.md) [m](mailto:me@example.com) [o](obsidian://open?vault=x) [p](//example.com/B.md)",
+        "edges": []
+      },
+      {
+        "why": "a markdown link to a file that is not a note, or that climbs out of the vault, is nothing",
+        "notes": [
+          "Folder/A.md",
+          "B.md"
+        ],
+        "from": "Folder/A.md",
+        "text": "[x](pic.png) [y](../../B.md) [z](../../../B.md)",
+        "edges": []
+      },
+      {
+        "why": "a markdown link needs the .md, as Obsidian writes it",
+        "notes": [
+          "A.md",
+          "Folder/B.md"
+        ],
+        "from": "A.md",
+        "text": "[b](Folder/B)",
+        "edges": []
+      },
+      {
+        "why": "case does not matter in a markdown path either",
+        "notes": [
+          "A.md",
+          "Folder/B.md"
+        ],
+        "from": "A.md",
+        "text": "[b](folder/b.md)",
+        "edges": [
+          {
+            "to": "Folder/B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "a wikilink and a markdown link to the same note are two lines, a link and a mention",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "[[B]] [b](B.md)",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          },
+          {
+            "to": "B.md",
+            "kind": "mention"
+          }
+        ]
+      },
+      {
+        "why": "a link in the frontmatter counts",
+        "notes": [
+          "A.md",
+          "B.md"
+        ],
+        "from": "A.md",
+        "text": "---\nrelated: \"[[B]]\"\n---\nBody",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          }
+        ]
+      },
+      {
+        "why": "several links make several lines, in path order",
+        "notes": [
+          "A.md",
+          "C.md",
+          "B.md",
+          "Zed/D.md"
+        ],
+        "from": "A.md",
+        "text": "[[Zed/D]] [[C]] [[B]] [c](C.md)",
+        "edges": [
+          {
+            "to": "B.md",
+            "kind": "link"
+          },
+          {
+            "to": "C.md",
+            "kind": "link"
+          },
+          {
+            "to": "Zed/D.md",
+            "kind": "link"
+          },
+          {
+            "to": "C.md",
+            "kind": "mention"
+          }
+        ]
+      }
+    ]
+  },
+  "sampleSources": [
+    {
+      "name": "Field Notes",
+      "level": "shape",
+      "hidden": 1,
+      "more": 0,
+      "notes": [
+        {
+          "path": "Garden.md",
+          "text": "Garden plan. See [[Kitchen]] and [[Notes/Compost|the compost heap]]."
+        },
+        {
+          "path": "Kitchen.md",
+          "text": "Kitchen notes. Seeds are in [[Seeds#Storage]]."
+        },
+        {
+          "path": "Notes/Compost.md",
+          "text": "Compost. Details in [seeds](Seeds.md)."
+        },
+        {
+          "path": "Notes/Seeds.md",
+          "text": "Seeds. Tools: [[Tools]]."
+        },
+        {
+          "path": "Notes/Tools.md",
+          "text": "Tools for the garden."
+        },
+        {
+          "path": "Zzz Lonely.md",
+          "text": "Nothing links here."
+        }
+      ]
+    },
+    {
+      "name": "Ideas",
+      "level": "titles",
+      "hidden": 0,
+      "more": 0,
+      "notes": [
+        {
+          "path": "Plans/Shopping list.md",
+          "text": "---\ndate: 2026-10-09\n---\nShopping. The plan is in [[Weekly plan]]."
+        },
+        {
+          "path": "Plans/Weekly plan.md",
+          "text": "---\ncreated: 2026-10-09T08:00:00Z\n---\nThe week. Dinner: [Pasta](../Recipes/Pasta%20ideas.md)."
+        },
+        {
+          "path": "Recipes/Pasta ideas.md",
+          "text": "---\ntags: [recipes, dinner]\n---\nPasta."
+        },
+        {
+          "path": "Recipes/Soup.md",
+          "text": "---\ntags:\n  - Recipes\n---\nSoup."
+        },
+        {
+          "path": "sk-live-notes.md",
+          "text": "Nothing links here."
+        }
+      ]
+    }
+  ]
 }
