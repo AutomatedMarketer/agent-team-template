@@ -25,6 +25,8 @@ import {
   VAULTS_CAPS,
   VAULTS_SCHEMA,
   VAULTS_WHY,
+  VAULTS_MAX_FILE_BYTES,
+  REWRITE_AFTER_HOURS,
   NOTE_MAX_BYTES,
   VAULT_BYTES_BUDGET,
   EDGE_KINDS,
@@ -566,7 +568,7 @@ export const vaultBytes = (item) => 8 + Buffer.byteLength(write(item, 3))
 // ---- reading a vault off the disk -------------------------------------------------------------------------
 
 // A vault is walked this deep and this many entries wide, then no further.
-const WALK_LIMITS = { depth: 20, entries: 20000 }
+export const WALK_LIMITS = { depth: 20, entries: 20000 }
 const READ_BATCH = 16
 
 // Every note's path (from the vault root, '/' between folders) and how many things were left out: a link
@@ -673,4 +675,33 @@ export async function collectVaults(deps, computer) {
     else items.push(item)
   }
   return envelope({ status: 'found', items, hidden, more: named.more })
+}
+
+// ---- when the file need not be written -------------------------------------------------------------------------
+//
+// A file that says the same as the one already there is not rewritten, until that one is a day old. A vault changes
+// slowly, and a 256 KB file written at every three-hourly run is about 2 MB a day of new blobs in the team repo
+// before git compresses them: this keeps it to one write a day for a vault that did not change, and one for each
+// change. A team that has named no vault gets no file at all.
+
+const graphOf = (doc) => JSON.stringify([doc?.schema, doc?.computer, doc?.vaults])
+
+// Why the file at `relativePath` (in the data folder) is left as it is, or null if it should be written:
+//   'nothing named'  there is nothing to draw and no earlier file to replace
+//   'unchanged'      the earlier file says the same and is under REWRITE_AFTER_HOURS old
+// An earlier file that is a link, too big, not JSON, from the future or without a time is no earlier file.
+export async function whyLeaveVaultsAlone(deps, relativePath, doc) {
+  if (typeof deps.dataDir !== 'string') return null
+  const read = await readSmall(fsOf(deps), join(deps.dataDir, ...relativePath.split('/')), VAULTS_MAX_FILE_BYTES)
+  if (read.state === 'missing') return doc.vaults?.status === 'not found' ? 'nothing named' : null
+  if (read.state !== 'ok') return null
+  let earlier
+  try {
+    earlier = JSON.parse(read.text)
+  } catch {
+    return null
+  }
+  const age = deps.now - Date.parse(earlier?.takenAt)
+  if (!(age >= 0 && age < REWRITE_AFTER_HOURS * 3600_000)) return null
+  return graphOf(earlier) === graphOf(doc) ? 'unchanged' : null
 }

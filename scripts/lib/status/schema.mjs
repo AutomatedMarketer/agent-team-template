@@ -176,7 +176,7 @@ export const USAGE_SHAPE = {
 // The parts one run can collect, each its own file under .agent-team/status/<part>/. A run with no
 // --only collects them all. LATER_PARTS names a part that is planned but not built yet, so --only
 // can say when it arrives instead of calling it unknown; there is none at the moment.
-export const PARTS = ['usage', 'connections', 'hermes', 'jobs']
+export const PARTS = ['usage', 'connections', 'hermes', 'jobs', 'vaults']
 export const LATER_PARTS = {}
 
 // The one file a run writes outside .agent-team/status: Hermes's heartbeat, written with the Hermes
@@ -245,6 +245,12 @@ export const RECEIPT_SHAPE = {
           type: 'object',
           keys: { launchd: statusWord, hermes: statusWord, items: { type: 'count' } },
           required: ['launchd', 'hermes', 'items']
+        },
+        // A status and a count: never a vault name or a title.
+        vaults: {
+          type: 'object',
+          keys: { vaults: statusWord, items: { type: 'count' } },
+          required: ['vaults', 'items']
         }
       }
     }

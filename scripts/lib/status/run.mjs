@@ -4,7 +4,7 @@
 // programs, identity - so the tests can run the whole thing against a fake home with a fake
 // network, and the leak test exercises exactly the code that runs on the real machine.
 //
-// A run collects one or more parts (schema.mjs, PARTS): usage, connections, hermes, jobs. They travel
+// A run collects one or more parts (schema.mjs, PARTS): usage, connections, hermes, jobs, vaults. They travel
 // together: every part passes the gate before anything is written, and in commit mode every file
 // goes into one commit. The Hermes part can bring one more file: Hermes's heartbeat, written only
 // when the alive rule holds (hermes-schema.mjs), checked and committed with the rest.
@@ -27,7 +27,8 @@ import {
 import { connectionsPath, LIVE_STATES } from './connections-schema.mjs'
 import { hermesPath, aliveFrom, HEARTBEAT, HEARTBEAT_SHAPE } from './hermes-schema.mjs'
 import { jobsPath, JOBS_SCHEMA, JOBS_WHY } from './jobs-schema.mjs'
-import { checkUsage, checkConnections, checkHermes, checkJobs, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
+import { vaultsPath, VAULTS_SCHEMA, VAULTS_WHY, REWRITE_AFTER_HOURS } from './vaults-schema.mjs'
+import { checkUsage, checkConnections, checkHermes, checkJobs, checkVaults, checkLine, checkComputerLabel, checkAgainst } from './safe.mjs'
 import { isoSeconds } from './util.mjs'
 import { writeSnapshots, assertNoLinks, LinkedPath, PartlyWritten } from './write.mjs'
 import { collectClaudeLimits } from './claude-limits.mjs'
@@ -37,6 +38,7 @@ import { claudePlan, collectCodexPlan } from './plans.mjs'
 import { collectConnections } from './connections.mjs'
 import { collectHermes, removeLeftoverCopies } from './hermes.mjs'
 import { collectJobs } from './jobs.mjs'
+import { collectVaults, stringifyVaults, whyLeaveVaultsAlone } from './vaults.mjs'
 import {
   takeLock,
   releaseLock,
@@ -217,9 +219,35 @@ function jobsRefused(doc, deps, computer) {
   return { schema: JOBS_SCHEMA, takenAt: isoSeconds(deps.now), computer, timezone: 'UTC', launchd: { ...refused }, hermes: { ...refused } }
 }
 
+// Counts only - never a vault's name or a title, which are the person's own words.
+export function summarizeVaults(doc) {
+  const { vaults } = doc
+  if (vaults.status === 'not found') return ['- Vaults not found: none named in vaults.yml, or none of them on this computer']
+  if (vaults.status !== 'found') return [`- Vaults ${blockDetail(vaults)}`]
+  const sum = (key) => vaults.items.reduce((total, item) => total + item[key], 0)
+  const titles = vaults.items.filter((item) => item.level === 'titles').length
+  return [
+    `- Vaults found: ${vaults.items.length} listed (${titles} at titles, ${vaults.items.length - titles} at shape), ${vaults.hidden} hidden, ${vaults.more} more`,
+    `- Notes: ${sum('notes')} drawn, ${sum('hidden')} withheld, ${sum('more')} past the caps`,
+    `- Lines: ${sum('lines')} drawn, ${sum('moreLines')} cut by the caps, ${sum('lonely')} notes with no link`
+  ]
+}
+
+export function vaultsStatuses(doc) {
+  return { vaults: doc.vaults.status, items: itemsOf(doc.vaults).length }
+}
+
+// What the vaults file says when the safety check refused the one it collected: unavailable, with the fixed
+// reason and nothing else. Like the jobs file, it depends on nothing the refused file held.
+function vaultsRefused(doc, deps, computer) {
+  return { schema: VAULTS_SCHEMA, takenAt: isoSeconds(deps.now), computer, vaults: { status: 'unavailable', why: VAULTS_WHY.refused } }
+}
+
 // Each part: where it goes, how it is collected, the gate it passes, and what the log says.
 // `alsoWrites` lists the paths a part may write besides its own file - they are link-checked before
 // anything is read, like the part's own - and `extras` builds those files from the part's document.
+// `stringify` writes the part's file where the usual two-space JSON is not the way, and `leaveAlone` says why
+// the part's file need not be written this time (it is still collected, gated and reported).
 const PART_TABLE = {
   usage: {
     title: 'Usage',
@@ -257,6 +285,18 @@ const PART_TABLE = {
     whenRefused: jobsRefused,
     summarize: (doc) => summarizeJobs(doc),
     statuses: jobsStatuses
+  },
+  vaults: {
+    title: 'Vaults',
+    path: vaultsPath,
+    collect: (deps, computer) => (deps.sources?.vaults ?? collectVaults)(deps, computer),
+    check: checkVaults,
+    // Refused like the jobs file: it is written as unavailable, and the others keep their snapshot.
+    whenRefused: vaultsRefused,
+    stringify: stringifyVaults,
+    leaveAlone: (doc, deps, relativePath) => whyLeaveVaultsAlone(deps, relativePath, doc),
+    summarize: (doc) => summarizeVaults(doc),
+    statuses: vaultsStatuses
   }
 }
 
@@ -279,10 +319,14 @@ export function partsFrom(only) {
   return { parts: PARTS.filter((part) => asked.includes(part)) }
 }
 
+const plainText = (doc) => `${JSON.stringify(doc, null, 2)}\n`
+const textOf = (entry, doc) => (entry.stringify ?? plainText)(doc)
+
 // Collects every part asked for, then holds every one to the gate, and every extra file to its own.
-// Returns { snapshots, files, degraded } when all passed - snapshots per part, files every file to write, in
-// order, and a line for each part whose file was replaced by an unavailable one (the jobs part only) - or
-// { problems } naming each refused field with its part. Nothing is written either way.
+// Returns { snapshots, files, degraded } when all passed - snapshots per part (each with `skipped` when its file
+// is to be left as it is), files every file to write, in order, and a line for each part whose file was replaced
+// by an unavailable one (the jobs and vaults parts) - or { problems } naming each refused field with its part.
+// Nothing is written either way.
 async function collectParts(parts, deps, computer, identity) {
   // A run that crashed while counting Hermes's sessions may have left its private copy behind.
   await removeLeftoverCopies(deps.stateDir)
@@ -291,7 +335,7 @@ async function collectParts(parts, deps, computer, identity) {
     const entry = PART_TABLE[part]
     const trail = []
     const doc = await entry.collect(deps, computer, trail)
-    snapshots.push({ part, entry, trail, doc, relativePath: entry.path(computer), text: `${JSON.stringify(doc, null, 2)}\n` })
+    snapshots.push({ part, entry, trail, doc, relativePath: entry.path(computer), text: textOf(entry, doc), skipped: null })
   }
   const problems = []
   const degraded = []
@@ -302,15 +346,20 @@ async function collectParts(parts, deps, computer, identity) {
     const instead = entry.whenRefused?.(doc, deps, computer)
     if (instead && entry.check(instead, identity).length === 0) {
       snapshot.doc = instead
-      snapshot.text = `${JSON.stringify(instead, null, 2)}\n`
+      snapshot.text = textOf(entry, instead)
       degraded.push(`The ${part} file was refused by the safety check (${found.join('; ')}), so it says it is unavailable. The other files are written.`)
     } else {
       problems.push(...found)
     }
   }
   if (problems.length) return { problems }
+  // What the gate passed is final; only now is it decided whether a part's file is worth writing again.
+  for (const snapshot of snapshots) {
+    snapshot.skipped = (await snapshot.entry.leaveAlone?.(snapshot.doc, deps, snapshot.relativePath)) ?? null
+  }
   const files = []
   for (const snapshot of snapshots) {
+    if (snapshot.skipped) continue
     files.push({ relativePath: snapshot.relativePath, text: snapshot.text })
     for (const extra of snapshot.entry.extras?.(snapshot.doc) ?? []) {
       const refused = checkAgainst(extra.doc, extra.shape, identity).map((problem) => `${snapshot.part}: ${extra.relativePath}: ${problem}`)
@@ -321,15 +370,28 @@ async function collectParts(parts, deps, computer, identity) {
   return { snapshots, files, degraded }
 }
 
+const LEFT_ALONE = {
+  unchanged: `Not rewritten: nothing changed and the file is under ${REWRITE_AFTER_HOURS} hours old.`,
+  'nothing named': 'No file written: nothing to draw here, and no earlier file to replace.'
+}
+
+const DRY_RUN_LEFT_ALONE = {
+  unchanged: `A real run would leave the earlier file as it is: nothing changed and it is under ${REWRITE_AFTER_HOURS} hours old.`,
+  'nothing named': 'A real run would write nothing for it: nothing is named and there is no earlier file.'
+}
+
+const NOTHING_WRITTEN = 'Nothing changed since the last snapshot, so nothing was written.'
+
 function report(snapshots, say) {
-  for (const { entry, doc, trail } of snapshots) {
+  for (const { entry, doc, trail, skipped } of snapshots) {
     say(`${entry.title}:`)
     entry.summarize(doc, trail).forEach(say)
+    if (skipped) say(`- ${LEFT_ALONE[skipped]}`)
   }
 }
 
 const USAGE_TEXT = [
-  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes,jobs] [--dry-run]',
+  'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes,jobs,vaults] [--dry-run]',
   '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
   'Parts (every one, unless --only picks some):',
   '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
@@ -339,6 +401,9 @@ const USAGE_TEXT = [
   '          files. It never runs hermes. When Hermes is alive it also writes runs/heartbeat/hermes.json.',
   '  jobs: scheduled jobs - Mac LaunchAgents and Hermes cron jobs - names, times and states only.',
   '        On a Mac it runs /usr/bin/plutil and /bin/launchctl list; it never runs hermes.',
+  '  vaults: the memory graph - each Obsidian vault named in vaults.yml, as dots and lines. It reads the notes of a',
+  '          named vault in memory, keeps no note text, and opens no vault that is not named. A vault shows titles',
+  '          only if vaults.yml says level: titles. Written when it changed, or when the file is a day old.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 
@@ -448,7 +513,9 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain('Give a --state-dir outside it. The default, ~/.local/state/agent-status-collector, is fine.')
     return 2
   }
-  deps = { ...deps, stateDir, clone: values.clone }
+  // vaults.yml is read from the folder the snapshot files go to: the dedicated clone when there is one (as the team
+  // repo has it, never the code checkout, which is only code), otherwise this folder.
+  deps = { ...deps, stateDir, clone: values.clone, dataDir: values.clone ?? repoRoot }
 
   if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
 
@@ -474,7 +541,18 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
       say(text.trimEnd())
       say(`Dry run for ${computer}. Nothing written. It would go to ${relativePath}`)
     }
+    for (const { text, skipped } of snapshots) {
+      if (!skipped) continue
+      say(text.trimEnd())
+      say(`Dry run for ${computer}. Nothing written. ${DRY_RUN_LEFT_ALONE[skipped]}`)
+    }
     report(snapshots, say)
+    return 0
+  }
+
+  if (!files.length) {
+    report(snapshots, say)
+    say(NOTHING_WRITTEN)
     return 0
   }
 
@@ -593,6 +671,13 @@ async function commitRun({ values, parts, computer, deps, repoRoot, say, complai
       }
       const { snapshots, files } = collected
       collected.degraded.forEach(complain)
+      // Every part left its file as it is: no write, no receipt (a receipt lists files), no commit.
+      if (!files.length) {
+        report(snapshots, say)
+        await finish('nothing to commit')
+        say(OUTCOME_LINES['nothing to commit'].line)
+        return 0
+      }
       const write = () => writeAll(target, files, { git })
       try {
         await write()

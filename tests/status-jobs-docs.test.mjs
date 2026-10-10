@@ -19,15 +19,15 @@ const section = (text, heading) => {
   return text.slice(start, next < 0 ? undefined : next)
 }
 
-test('the status README says there are four parts and lists the jobs file with its schema and contract', async () => {
+test('the status README says there are five parts and lists the jobs file with its schema and contract', async () => {
   const doc = await read('.agent-team/status/README.md')
-  assert.match(doc, /It writes four kinds, called \*\*parts\*\*/)
+  assert.match(doc, /It writes five kinds, called \*\*parts\*\*/)
   for (const phrase of [
     '**jobs**',
     '.agent-team/status/jobs/<computer>.json',
     JOBS_SCHEMA,
     JOBS_FOLDER,
-    '--only usage,connections,hermes,jobs',
+    '--only usage,connections,hermes,jobs,vaults',
     'tests/fixtures/jobs-parity.json',
     'scripts/lib/status/jobs-schema.mjs'
   ]) {

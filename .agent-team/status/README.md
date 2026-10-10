@@ -4,7 +4,7 @@ This folder holds small files that describe a computer, written by a script on t
 read by the dashboard. The dashboard runs in the cloud and cannot look at your machine, so the
 machine writes down what it sees and commits it here.
 
-It writes four kinds, called **parts**:
+It writes five kinds, called **parts**:
 
 - **usage** (Phase 4) - how much of your Claude and Codex plan limits are used, which plan you are
   on, and an estimate of how much Claude Code you have been using.
@@ -17,12 +17,16 @@ It writes four kinds, called **parts**:
 - **jobs** - the Readiness wall: every scheduled job on this computer, one row each - the Mac's
   LaunchAgents and Hermes's cron jobs - with how it is scheduled, when it last reported and when it
   should have. **Names, schedules, times and states only** - see [The jobs file](#the-jobs-file).
+- **vaults** - the Memory screen's graph: each Obsidian vault you name in [`vaults.yml`](../../vaults.yml),
+  one dot for each note and one line for each link. **Numbers only, unless you choose titles for a
+  vault - and never what a note says** - see [The vaults file](#the-vaults-file).
 
 ```
 .agent-team/status/usage/<computer>.json
 .agent-team/status/connections/<computer>.json
 .agent-team/status/hermes/<computer>.json
 .agent-team/status/jobs/<computer>.json
+.agent-team/status/vaults/<computer>.json          (only when a vault is named, and when it changed or is a day old)
 runs/heartbeat/hermes.json                       (only when Hermes is alive - see below)
 ```
 
@@ -33,7 +37,9 @@ often its owner's name.
 
 A run collects every part unless `--only` picks some. The parts travel together: every part passes
 the safety check before **any** file is written, and `--commit` puts all of them in one commit -
-except that a refused jobs file is written as unavailable instead (see [The jobs file](#the-jobs-file)).
+except that a refused jobs file is written as unavailable instead (see
+[The jobs file](#the-jobs-file)); a refused vaults file is too, and a vaults file that has not changed is left
+as it is (see [The vaults file](#the-vaults-file)).
 
 ## Run it
 
@@ -44,6 +50,7 @@ npm run collect:status -- --computer "Mac Mini" --commit  # write them, commit o
 npm run collect:status -- --only connections --dry-run    # one part only
 npm run collect:status -- --only hermes --dry-run         # the Hermes card only
 npm run collect:status -- --only jobs --dry-run           # the Readiness wall's jobs only
+npm run collect:status -- --only vaults --dry-run         # the memory graph's vaults only
 ```
 
 | Option | What it does |
@@ -53,7 +60,7 @@ npm run collect:status -- --only jobs --dry-run           # the Readiness wall's
 | `--commit` | Writes, commits only the snapshot files, in one commit (anything else you have staged stays staged), pushes it if that is safe - see below |
 | `--clone <dir>` | With `--commit`: work in a dedicated clone instead of this copy (see the Mac schedule below) |
 | `--state-dir <dir>` | With `--commit`: where the lock and receipts go. Default `~/.local/state/agent-status-collector`. The empty folder programs run from, `empty-cwd`, and the private copies of Hermes's sessions are made here too. Refused (exit 2) when it is inside the `--clone` folder |
-| `--only usage,connections,hermes,jobs` | Only these parts, in any order: one, two, three or all four |
+| `--only usage,connections,hermes,jobs,vaults` | Only these parts, in any order: one, two, three, four or all five |
 
 Exit code 0 means it worked, or skipped on purpose (another run held the lock, or this run's time
 slot was already claimed). 1 means it refused or failed after reading, or could not reach the team
@@ -577,6 +584,109 @@ The contract the dashboard reads this by is `scripts/lib/status/jobs-schema.mjs`
 examples for labels, the schedule examples (cron, calendar, interval), the due times for the days the
 clocks change, and a full sample.
 
+## The vaults file
+
+What the Memory screen's graph shows for the Obsidian vaults you choose: each note a dot, each link
+between notes a line. **Only a vault you name in [`vaults.yml`](../../vaults.yml) is ever opened.** A vault
+you did not name is not listed, not counted and not mentioned: the collector never looks inside it.
+By default a vault is published as **numbers only** - how many notes, how many lines, and anonymous
+dots joined by lines - and you choose, one vault at a time, to add its titles. **What a note says is
+never kept, at either level.**
+
+```json
+{
+  "schema": "agent-status/vaults/v1",
+  "takenAt": "2026-10-10T15:00:00Z",
+  "computer": "Mac Mini",
+  "vaults": {
+    "status": "found",
+    "items": [
+      {
+        "name": "Field Notes",
+        "level": "shape",
+        "notes": 6, "lines": 5, "lonely": 1, "hidden": 1, "more": 0, "moreLines": 0,
+        "edges": [[0,1,0], [0,2,0], [1,3,0], [3,4,0], [2,3,1]]
+      },
+      {
+        "name": "Ideas",
+        "level": "titles",
+        "notes": 5, "lines": 6, "lonely": 2, "hidden": 0, "more": 0, "moreLines": 0, "untitled": 1,
+        "edges": [[0,1,0], [1,2,1], [0,5,2], [1,5,2], [2,6,3], [3,6,3]],
+        "nodes": [{"title":"Shopping list","folder":"Plans","day":"2026-10-09"}, {"title":"Weekly plan","folder":"Plans","day":"2026-10-09"}, {"title":"Pasta ideas","folder":"Recipes"}, {"title":"Soup","folder":"Recipes"}, {}],
+        "hubs": [{"kind":"day","label":"2026-10-09"}, {"kind":"tag","label":"recipes"}]
+      }
+    ],
+    "hidden": 0,
+    "more": 0
+  }
+}
+```
+
+**How to read it.** A dot is a number. The notes are `0` up to `notes - 1`, in the order of their paths
+(without regard to case), and a hub - a day or a tag that two or more notes share - is numbered after the
+last note. A line is `[from, to, kind]`: `from` is always the lower number, a line has no direction,
+and `kind` is `0` for a link (`[[Note]]`, `![[Note]]`), `1` for a mention (a markdown link to a `.md` file), `2` for
+"on the same day" and `3` for "has the same tag". A day or tag line goes from a note to its hub, so thirty notes
+on one day are thirty lines, not four hundred and thirty-five. `lonely` is the number of notes that no link or
+mention joins to anything - a day or a tag does not count. The `titles` level also has a `nodes` list (one
+entry per note, in the same order) and the `hubs`; at `shape` neither exists, and the file cannot say
+what a dot is.
+
+| What | Read from | Kept |
+|---|---|---|
+| Which vaults | `vaults.yml` in the team repo - on the Mac, the data clone's copy, never the code checkout - up to 64 KB: each `name:` and an optional `level:` | the name and the level. Three vaults at most; a name that fails the name rule, or is listed twice, is counted in `hidden` |
+| Where they are | Obsidian's own list, read **only when a vault is named**: `~/Library/Application Support/obsidian/obsidian.json` on a Mac, `%APPDATA%\obsidian\obsidian.json` on Windows, `~/.config/obsidian/obsidian.json` on Linux | the folder's last name, which is the vault's name. The place is used to open the vault and is never kept: it holds the username. The vault's id, its time and its "open" flag are not used. Two vaults with one folder name cannot be told apart, so neither is opened and it is counted in `hidden` |
+| Notes | the `.md` files in the named vault, in memory, up to 20 folders deep and 20,000 entries. Not `.obsidian`, `.trash`, any other dot folder, or `node_modules`; and **never a link** - a link is how a loop, or the rest of the disk, gets in | counted. A note over 256 KB, a link, or a note that cannot be read is not read: it is counted in `hidden`. At most 600 notes are read; the rest are counted in `more` |
+| Links | `[[Note]]`, `[[Note\|alias]]`, `[[Note#Heading]]`, `![[Note]]`, and markdown links to `.md` files, found the way Obsidian finds them (a name finds the closest note: fewest folders, then shortest path), code left out | which note each link reaches, as numbers - one line for a pair and a kind, however often it is written |
+| Days and tags (`titles` only) | the frontmatter at the very top of a note: `date` and `created`, and `tags`, `tag`, `project` and `people`; a day is also taken from a file name that starts `2026-10-09` | a note's day, and its first eight tags. A day or tag that two or more notes share becomes a hub; one note's own is just on that note's dot |
+
+**The two levels.** `level: shape` (the default) publishes counts, anonymous dots and lines - nothing
+that says what a dot is. `level: titles` adds, for each note, its title (the file name), its top folder
+and its day, and the hub labels (days and tags). Only the exact word `titles` turns it on: a typo, a
+capital or a list keeps the vault at `shape`. Every title, folder, tag and label must pass the **title
+rule**: 80 characters at most; no `@`, `/` or `\`; no `eyj`, `sk-` or `bearer` in any case; no control or
+invisible character; no id; no stretch of 24 characters without a space or a separator; and not the
+owner's username, computer name or home folder. A title that fails is left out and the dot is counted in
+`untitled`; a folder, a day or a tag that fails is left out on its own. The dashboard holds the same rule
+from `tests/fixtures/vaults-parity.json`.
+
+**What was left out is counted.** `hidden` is what was withheld (notes too big or unreadable, links, a
+folder too deep, a vault that could not be opened), `more` is notes past the 600, and `moreLines` is
+lines cut by the caps. The caps are 3 vaults, 600 notes, 2,000 lines and 200 hubs for a vault, and 80 KB
+for a vault's share of the file, so the whole file stays under 256 KB. Past the line cap, tag lines go
+first, then day lines, then mentions, then links; a hub left with fewer than two lines goes with them.
+Past 80 KB the hubs go first, then the last notes, a tenth at a time.
+
+**When it is written.** A file whose graph is the same as the one already there is **not rewritten** until
+that one is 24 hours old; then it is rewritten with a new time, so the dashboard - which calls a vaults file
+stale after 7 days - does not call a quiet vault stale. A changed vault is rewritten at the next run. A
+256 KB file rewritten at every three-hourly run would add about 2 MB a day of new blobs to the team repo
+before git compresses them; this keeps it to one write a day per vault that did not change. If nothing is
+named, **no file is written at all**; if you name nothing after having named some, the file is replaced once
+by one that says `not found`. The log says when a file was left as it is.
+
+**Its statuses.** `found` has the vaults; `not found` means nothing is named, or none of what is named is on
+this computer (a vault on your other computer is not a problem); `unavailable` has one of two fixed reasons -
+`could not be read` (`vaults.yml` or Obsidian's list is broken) or `refused by the safety check`. Like the
+jobs file, a vaults file the safety check refuses is written as unavailable and the other files are still
+written.
+
+### How to name a vault
+
+1. Ask Claude, in the team repo: "add my Second Brain vault to the memory graph". The name is the vault's
+   folder name, the way Obsidian lists it.
+2. Claude adds `- name: Second Brain` to [`vaults.yml`](../../vaults.yml) and commits it. To show titles for
+   that vault, ask for it by name: "show titles for my Ideas vault" adds `level: titles`.
+3. The next scheduled run on the computer that has the vault draws it. On Windows nothing is scheduled (the
+   team's policy): run `npm run collect:status -- --only vaults` by hand.
+
+The Memory screen only reads these files. It never writes `vaults.yml`.
+
+The contract the dashboard reads this by is `scripts/lib/status/vaults-schema.mjs` and
+`tests/fixtures/vaults-parity.json`: the caps, the title rule with accept and refuse examples, the
+Obsidian link-resolution table (so the dashboard draws the team repo's own links the same way), and a
+full sample.
+
 ## What is never written
 
 Every file, receipt and printed line passes a safety check (`scripts/lib/status/safe.mjs`) before
@@ -603,6 +713,12 @@ never the value. These are never written:
   (a Hermes job is published as `Hermes job <id>`); where a job
   delivers or came from, its model, `last_error` and every other word of error text; a
   label or id that fails the name rule
+- from vaults: what a note says, in any form - its text, its headings, its frontmatter beyond the keys
+  `date`, `created`, `tags`, `tag`, `project` and `people`, its links as written, its path; the contents of
+  `.obsidian`, `.trash` and every other dot folder, which are never opened; a vault you did not name, which is
+  not listed, counted or mentioned; the vault's place on the computer, and Obsidian's ids, times and
+  "open" flags; at the `shape` level, any title, folder, tag, day or word at all; at the `titles` level, anything
+  that fails the title rule
 
 ## Receipts
 
@@ -618,8 +734,8 @@ own copy is named after its UTC second instead (`2026-10-07T20-00-00Z.claim/`), 
 later always takes a fresh reading. It writes `receipt.json` there once the snapshots are
 written - `agent-status/receipt/v2`: the parts, each file with its hash (`files`, which includes
 `runs/heartbeat/hermes.json` when it was written), and which sources were found (for Hermes:
-install, gateway and profiles, and whether a heartbeat was written; for jobs: launchd and Hermes statuses and how many jobs were listed) - and `final.json` when it is
-done: the outcome and the commit id. A claim with a
+install, gateway and profiles, and whether a heartbeat was written; for jobs: launchd and Hermes statuses and how many jobs were listed; for vaults: its status and how many
+vaults were listed) - and `final.json` when it is done: the outcome and the commit id. A claim with a
 receipt and no final record means the outcome is unknown; look before running it again.
 
 Every collector commit is titled `Status snapshot from <computer>`. Before there were parts it was
@@ -827,6 +943,27 @@ leaves out Hermes and the jobs; `usage` is the Phase 4 behaviour. After editing 
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.donna.agent-status-collector.plist`.
 A part left out keeps its last file on the dashboard until that file goes stale (8 hours).
 
+### What changes when you move the pin to the memory-graph version
+
+The plist still has no `--only`, so moving the pin to this version adds one more part to every scheduled
+run, with nothing changed in the plist:
+
+| Part | What starts happening every 3 hours |
+|---|---|
+| **vaults** | It reads `vaults.yml` from the data clone (one file, up to 64 KB). **If nothing is named there, that is all it does** - it opens neither Obsidian's list nor any vault, and writes no file. For each vault you name (three at most) it also reads Obsidian's list of vaults (`obsidian.json`, once), lists the vault's folders and reads up to 600 `.md` notes in memory, a few at a time. It runs no program, and keeps no note text. It checks the earlier vaults file in the data clone (one small read) to decide whether to write a new one. |
+
+What that costs a run, measured on the build PC with warm caches and notes of about 3 KB (the Mac has not
+run it yet): with nothing named, under a millisecond and 1 file read (`vaults.yml`), plus a look for an earlier vaults file; one vault of 600 notes, about 30 to 40
+milliseconds and 602 files read (`vaults.yml`, Obsidian's list and the 600 notes); three vaults of 600 notes,
+about 110 milliseconds and 1,802 files read, writing a file of about 210 KB. These are the vaults part's
+own numbers; the other parts are as they were. The vaults file is committed only when the graph changed or is
+a day old, so most runs add nothing to the repo for it.
+
+**To keep the vaults part out**, name the other parts with `--only` in the plist, as above:
+`usage,connections,hermes,jobs` leaves out only the vaults part. Or leave `vaults.yml` as `vaults: []`,
+which is the same thing for the Mac: it is then a single small file read and no file. A part left out keeps
+its last file on the dashboard until that file goes stale (the vaults file: 7 days).
+
 ### Rollback
 
 ```bash
@@ -841,6 +978,10 @@ The receipts in `~/.local/state/agent-status-collector` are left for the record.
 
 These are checked on the first live run on the Mac, not assumed:
 
+- the memory graph on the Mac: that Obsidian keeps its list of vaults at
+  `~/Library/Application Support/obsidian/obsidian.json` there, that macOS lets a LaunchAgent read a vault kept
+  in Documents, Desktop or iCloud Drive (if it does not, the vault is counted in `hidden`), and how long a
+  vault of 600 notes takes on the Mac's disk - the numbers above are from the build PC
 - the Keychain item name and whether the one-time "Always Allow" prompt appears
 - whether the Keychain item is printed as hex by `security -w` (the collector decodes it if so)
 - the first run (2026-10-08) found a sign-in naming a plan but holding no usable key; the new

@@ -95,14 +95,14 @@ async function collect(fake, args, { repo, stateDir, extra = {} }) {
 
 // --- the part list ------------------------------------------------------------------------------------------------
 
-test('the parts are usage, connections, hermes and jobs; --only jobs is a part, in any order', () => {
-  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs'])
+test('the parts are usage, connections, hermes, jobs and vaults; --only jobs is a part, in any order', () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
   assert.deepEqual(partsFrom('jobs'), { parts: ['jobs'] })
   assert.deepEqual(partsFrom('jobs,usage'), { parts: ['usage', 'jobs'] })
   assert.deepEqual(partsFrom('hermes, jobs ,connections'), { parts: ['connections', 'hermes', 'jobs'] })
-  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes', 'jobs'] })
+  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes', 'jobs', 'vaults'] })
   assert.ok(partsFrom('jobs,bogus').refusal)
-  assert.match(partsFrom('bogus').refusal, /usage, connections, hermes, jobs/)
+  assert.match(partsFrom('bogus').refusal, /usage, connections, hermes, jobs, vaults/)
 })
 
 // --- one run --------------------------------------------------------------------------------------------------------
@@ -380,13 +380,13 @@ test('--commit: the jobs file travels in the one commit with the other parts, an
 
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
-    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
     assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, JOBS])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
       assert.equal(entry.sha256, createHash('sha256').update(bytes).digest('hex'))
     }
-    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
     assert.deepEqual(receipt.sources.jobs, { launchd: 'found', hermes: 'not found', items: 3 })
     assert.deepEqual(checkAgainst(receipt, RECEIPT_SHAPE, fake.identity), [])
   } finally {

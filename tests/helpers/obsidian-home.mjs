@@ -18,10 +18,10 @@ export async function team(files = {}) {
   return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 
-// A pretend home with Obsidian's list of vaults in the right place for the platform, and a folder for each.
-// `vaults` maps a folder name to { files: { 'Folder/Note.md': 'text' }, asPath }.
-export async function obsidianHome(platform, vaults, { env = {}, raw } = {}) {
-  const fake = await makeFakeHome()
+// Folders for each vault under `fake.root/Vaults`, and Obsidian's list of them in the right place for the
+// platform, inside an existing pretend home. `vaults` maps a folder name to { files: { 'Folder/Note.md': 'text' },
+// asPath }. Returns where the list is and where each vault is.
+export async function placeVaults(fake, platform, vaults, { env = {}, raw } = {}) {
   const listPath = obsidianListPath({ home: fake.home, platform, env: { ...env, ...(platform === 'win32' ? { APPDATA: join(fake.home, 'AppData', 'Roaming') } : {}) } })
   const entries = {}
   let index = 0
@@ -38,7 +38,14 @@ export async function obsidianHome(platform, vaults, { env = {}, raw } = {}) {
   }
   await mkdir(join(listPath, '..'), { recursive: true })
   await writeFile(listPath, raw ?? JSON.stringify({ vaults: entries }))
-  return { ...fake, listPath, places, depsFor: (extra = {}) => ({ home: fake.home, platform, env: {}, identity: fake.identity, ...extra }) }
+  return { listPath, places }
+}
+
+// A new pretend home with its vaults placed (see placeVaults).
+export async function obsidianHome(platform, vaults, options) {
+  const fake = await makeFakeHome()
+  const placed = await placeVaults(fake, platform, vaults, options)
+  return { ...fake, ...placed, depsFor: (extra = {}) => ({ home: fake.home, platform, env: {}, identity: fake.identity, ...extra }) }
 }
 
 // A file system that remembers every path it was asked about (`touched`), and what it was asked to do

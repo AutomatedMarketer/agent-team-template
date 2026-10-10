@@ -1,0 +1,36 @@
+# The Obsidian vaults the memory graph draws - one dot for each note, one line for each link.
+#
+# Only a vault named here is ever opened. A vault you do not name is not listed, not counted and not
+# mentioned anywhere: the status collector (scripts/collect-status.mjs) never looks inside it.
+#
+# Name a vault by its folder name, the way Obsidian lists it (a vault kept in Documents/Second Brain is
+# "Second Brain"). A vault that is not on the computer the collector runs on is simply skipped there.
+#
+# Each vault has a level, and the default is the one that shares less:
+#
+#   shape    (the default)  counts, and anonymous dots joined by lines. No title, no folder name, no tag, no
+#                           date. Nobody who sees the file can tell what a dot is.
+#   titles                  the same, plus each note's title, its top folder, its day and its tags - each held
+#                           to the safety rule (80 characters at most; nothing that looks like a key, a token,
+#                           an email address or the owner's name). A title that fails the rule is just a dot.
+#
+# Only the exact word titles turns titles on. A typo, a capital or anything else keeps the vault at shape.
+#
+# What a note says is never kept at either level. The collector reads a note in memory to find its links,
+# its day and its tags, and throws the text away. The vault's place on the computer is never kept either:
+# it holds the username.
+#
+# At most 3 vaults are read, and from each up to 600 notes (a note over 256 KB is not read). What was left
+# out is counted and shown, never guessed at.
+#
+# The dashboard only reads this file. It never writes it, so you change it by asking Claude:
+# "add my Second Brain vault to the memory graph" or "show titles for my Ideas vault".
+#
+# Examples, commented out until you have them:
+
+# vaults:
+#   - name: Second Brain
+#   - name: Ideas
+#     level: titles
+
+vaults: []

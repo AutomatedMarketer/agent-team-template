@@ -61,8 +61,8 @@ async function collect(fake, args, { repo, stateDir, extra = {} }) {
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') }
 }
 
-test('the parts are usage, connections, hermes and jobs, and a run with no --only writes them all', async () => {
-  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs'])
+test('the parts are usage, connections, hermes, jobs and vaults, and a run with no --only writes a file for each but vaults (nothing is named)', async () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
   const fake = await makeFakeHome()
   try {
     const result = await runIn(fake, ['--computer', 'Test PC'])
@@ -265,13 +265,13 @@ test('the receipt lists every file written with its hash, and the parts', async 
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
     assert.equal(receipt.schema, 'agent-status/receipt/v2')
-    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
     assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, JOBS])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
       assert.equal(entry.sha256, createHash('sha256').update(bytes).digest('hex'))
     }
-    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(Object.keys(receipt.sources), ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
     assert.deepEqual(Object.keys(receipt.sources.connections).sort(), ['claude', 'codex', 'tools'])
     assert.deepEqual(checkAgainst(receipt, RECEIPT_SHAPE, fake.identity), [])
   } finally {

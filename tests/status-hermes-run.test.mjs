@@ -71,11 +71,11 @@ async function makeRemote() {
   return { root, remote, work, clone, cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
-test('the parts are usage, connections, hermes and jobs; --only hermes is a part', () => {
-  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs'])
+test('the parts are usage, connections, hermes, jobs and vaults; --only hermes is a part', () => {
+  assert.deepEqual(PARTS, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
   assert.deepEqual(partsFrom('hermes'), { parts: ['hermes'] })
   assert.deepEqual(partsFrom('hermes,usage'), { parts: ['usage', 'hermes'] })
-  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes', 'jobs'] })
+  assert.deepEqual(partsFrom(undefined), { parts: ['usage', 'connections', 'hermes', 'jobs', 'vaults'] })
   assert.ok(partsFrom('hermes,bogus').refusal)
 })
 
@@ -197,7 +197,7 @@ test('one commit carries every status file and the heartbeat; the receipt lists 
     assert.deepEqual(subjects, ['Status snapshot from Test PC', 'start'])
     const [claim] = await readdir(join(stateDir, 'claims'))
     const receipt = JSON.parse(await readFile(join(stateDir, 'claims', claim, 'receipt.json'), 'utf8'))
-    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs'])
+    assert.deepEqual(receipt.parts, ['usage', 'connections', 'hermes', 'jobs', 'vaults'])
     assert.deepEqual(receipt.files.map((entry) => entry.file), [USAGE, CONNECTIONS, HERMES, BEAT, JOBS])
     for (const entry of receipt.files) {
       const bytes = await readFile(join(repo.work, ...entry.file.split('/')))
