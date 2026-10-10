@@ -9,8 +9,10 @@ import {
   obsidianListPath,
   readVaultsYml,
   listObsidianVaults,
-  findNamedVaults
+  findNamedVaults,
+  collectVaults
 } from '../scripts/lib/status/vaults.mjs'
+import { checkVaults } from '../scripts/lib/status/safe.mjs'
 import { VAULTS_CAPS } from '../scripts/lib/status/vaults-schema.mjs'
 import { makeFakeHome, fakeClaudeToken, FAKE_EMAIL, FAKE_USERNAME, FAKE_HOSTNAME } from './helpers/fake-home.mjs'
 import { team, obsidianHome, recordingFs, allowText } from './helpers/obsidian-home.mjs'
@@ -364,6 +366,30 @@ test('the vault\'s place and nothing else of Obsidian\'s list is held: no id, no
     const found = await findNamedVaults(home.depsFor(), dir.dir)
     assert.deepEqual(Object.keys(found.vaults[0]).sort(), ['level', 'name', 'path'])
     assert.ok(FAKE_EMAIL)
+  } finally {
+    await Promise.all([home.cleanup(), dir.cleanup()])
+  }
+})
+
+test('a vault whose folder is spelled with combining marks, as a Mac can, matches by letter but is counted, not opened - and does not make the whole file refused', async () => {
+  const composed = 'Caf' + String.fromCharCode(0xe9) + ' Notes'
+  const decomposed = 'Cafe' + String.fromCharCode(0x301) + ' Notes'
+  const home = await obsidianHome('darwin', {}, { allow: allowText([composed]) })
+  const place = join(home.root, 'Vaults', decomposed)
+  await mkdir(place, { recursive: true })
+  await writeFile(join(place, 'A.md'), 'a note')
+  await writeFile(home.listPath, JSON.stringify({ vaults: { a: { path: place } } }))
+  const dir = await team({ 'vaults.yml': `vaults:\n  - name: ${composed}\n` })
+  try {
+    // The names are the same letters, so the vault is matched; the name it would be published under is the
+    // folder's own spelling, which the board does not show - so the vault is withheld and counted.
+    const found = await findNamedVaults(home.depsFor(), dir.dir)
+    assert.equal(found.status, 'found')
+    assert.deepEqual(found.vaults, [])
+    assert.equal(found.hidden, 1)
+    const doc = await collectVaults(home.depsFor({ now: Date.UTC(2026, 9, 10, 12), dataDir: dir.dir }), 'Mac Mini')
+    assert.deepEqual(doc.vaults, { status: 'found', items: [], hidden: 1, more: 0 })
+    assert.deepEqual(checkVaults(doc, home.identity), [], 'one oddly spelled folder made the whole file refused')
   } finally {
     await Promise.all([home.cleanup(), dir.cleanup()])
   }
