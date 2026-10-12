@@ -90,6 +90,11 @@ test('the work-the-tasks skill exists and carries the sweep rules', async () => 
   assert.match(skill, /`task-sweep`/, 'run logs must carry the task-sweep workflow slug')
   assert.match(skill, /\.claude\/skills\/run-log\/SKILL\.md/, 'the sweep must invoke run-log')
   assert.match(skill, /for:/, 'the sweep must respect the for field')
+  // The board's Jev picks a model tier for a voice task card and writes `model:` into it
+  // (2026-10-11); the sweep runs the card on it, and only on one of the three tiers.
+  assert.match(skill, /`model:`/, 'the sweep must read the card\'s model field')
+  assert.match(skill, /`opus`, `sonnet` or `haiku`/, 'the sweep must accept only the three model tiers')
+  assert.match(skill, /sub-agent/i, 'a card with a model runs in a sub-agent on that model')
 })
 
 test('the task-sweep workflow validates against real agents and skills', async () => {

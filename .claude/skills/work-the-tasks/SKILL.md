@@ -35,6 +35,12 @@ For each card, in order:
 3. Do the work **as that agent**: read its definition in `.claude/agents/<slug>.md` and
    follow it — the shared files it reads, the output format it produces, the boundaries
    it keeps. The deliverable lands in `agents/<slug>/output/` with a dated filename.
+   - **The model.** A card whose frontmatter has `model:` set to `opus`, `sonnet` or `haiku`
+     (the dashboard's Jev writes it for voice tasks) is worked in a **sub-agent** started
+     on that model, with the agent's definition as its instructions and the card as its task.
+     Without a `model:` field, the work runs on the agent's own `model:` as before. Any
+     other value is ignored — the agent's own model is used — and the digest says so. The
+     model never changes the rules: same agent, same boundaries, drafts only.
 4. Drafts only, exactly as on any other run. Nothing is sent, published, deleted, or
    spent; anything outbound waits for the owner to say yes.
 
