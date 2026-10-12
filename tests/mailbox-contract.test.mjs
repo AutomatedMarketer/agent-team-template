@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import { verifyEnvelope, signBody } from '../scripts/lib/mailbox/envelope.mjs'
 import * as contract from '../scripts/lib/mailbox/contract.mjs'
+import { validatePayload, FIELDS, MODEL_TIERS, TASK_STATUSES, FIELD_RULES } from '../scripts/lib/mailbox/validate.mjs'
 
 /* tests/fixtures/mailbox-parity.json is the Mac mailbox's contract, the same bytes in agent-cockpit (copied
    from there, never written here). The board signs and checks orders by it; this side checks them by it
@@ -106,5 +107,32 @@ test('mailbox parity: only an order that was signed is called authentic, and a r
       assert.ok(result.authentic, `${name}: an id from an order nobody signed`)
       assert.match(result.id, new RegExp(fixture.body.idShape), name)
     }
+  }
+})
+
+/* ---------- the payload: the typed fields, held to the board's rules ---------- */
+
+
+test('mailbox parity: the fields each action has, the tiers, the statuses and the slug are the contract\'s', () => {
+  assert.deepEqual(Object.keys(FIELDS), Object.keys(fixture.payload.fields))
+  for (const [action, fields] of Object.entries(fixture.payload.fields)) assert.deepEqual({ ...FIELDS[action] }, fields, action)
+  assert.deepEqual(MODEL_TIERS, fixture.payload.modelTiers)
+  assert.deepEqual(TASK_STATUSES, fixture.payload.taskStatuses)
+  assert.equal(FIELD_RULES.slug.max, fixture.payload.slugMaxLength)
+  assert.deepEqual(Object.keys(FIELDS).sort(), [...fixture.actions].sort())
+  assert.equal(FIELD_RULES.title.min, 3)
+  assert.equal(FIELD_RULES.title.max, 200)
+  assert.equal(FIELD_RULES.details.max, 2000)
+  assert.equal(FIELD_RULES.approve.max, 200)
+})
+
+test('mailbox parity: every payload case gets the contract\'s verdict from this side\'s rules', () => {
+  for (const { name, payload, verdict } of fixture.payload.cases) {
+    // The cases leave the source out: every payload has it, and a payload without it is refused.
+    assert.equal(validatePayload({ source: fixture.payload.source, ...payload }).ok ? 'ok' : 'refused', verdict, name)
+    assert.equal(validatePayload(payload).ok, false, `${name}: accepted with no source`)
+  }
+  for (const action of fixture.actions) {
+    assert.ok(fixture.payload.cases.some((item) => item.payload.action === action && item.verdict === 'ok'), `no good case for ${action}`)
   }
 })

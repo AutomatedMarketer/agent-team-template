@@ -116,7 +116,7 @@ test('a key id that is not shaped like one, or names no key this Mac holds, is u
 
 test('a secret that is not of the right shape is not a key: too short, with a space inside, or not text', () => {
   const text = body()
-  for (const secret of ['short', 'a'.repeat(31), 'has a space inside it, which is no secret at all 123', 'accent-é-'.repeat(8), 7, null, '']) {
+  for (const secret of ['short', 'a'.repeat(31), 'has a space inside it, which is no secret at all 123', 'accent-\u00e9-'.repeat(8), 7, null, '']) {
     assert.equal(verdictOf({ kid: 'k1', body: text, sig: sign(text) }, ctx({ keys: { k1: secret } })), 'unknown-key', String(secret))
   }
 })
@@ -146,7 +146,7 @@ test('a body over 16 KB is malformed, and is not even hashed', () => {
   assert.ok(Buffer.byteLength(justUnder) < MAX_BODY_BYTES)
   assert.equal(verdictOf({ kid: 'k1', body: justUnder, sig: sign(justUnder) }), 'ok')
   // The limit is in bytes, not characters.
-  const wide = body({ payload: { source: 'agent-cockpit', action: 'task', title: '€'.repeat(6000) } })
+  const wide = body({ payload: { source: 'agent-cockpit', action: 'task', title: '\u20ac'.repeat(6000) } })
   assert.ok(wide.length < MAX_BODY_BYTES && Buffer.byteLength(wide) > MAX_BODY_BYTES)
   assert.equal(verdictOf({ kid: 'k1', body: wide, sig: sign(wide) }), 'malformed')
 })
@@ -155,7 +155,7 @@ test('a signature that is not 43 URL-safe characters never matches, however clos
   const text = body()
   const good = sign(text)
   const standard = createHmac('sha256', Buffer.from(SECRET)).update(text).digest('base64')
-  for (const sig of [`${good}=`, ` ${good}`, `${good} `, `${standard}=`, good.slice(1), `${good}A`, good.toUpperCase(), good.replace(/[A-Za-z]/, '*'), 'é'.repeat(43), '+'.repeat(43)]) {
+  for (const sig of [`${good}=`, ` ${good}`, `${good} `, `${standard}=`, good.slice(1), `${good}A`, good.toUpperCase(), good.replace(/[A-Za-z]/, '*'), '\u00e9'.repeat(43), '+'.repeat(43)]) {
     assert.equal(verdictOf({ kid: 'k1', body: text, sig }), 'bad-signature', sig)
   }
 })
