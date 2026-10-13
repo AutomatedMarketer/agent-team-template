@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 2120
+ℹ tests 2144
 ℹ fail 0
 ```
 
@@ -304,6 +304,19 @@ never publishes what a note says, a path, or where a vault is on your computer.
 
 - **How it works:** [The vaults file](.agent-team/status/README.md#the-vaults-file) - what it reads,
   what it keeps at each level, and what is never kept.
+
+## Orders on your own computer (the Mac mailbox)
+
+Optional, and off unless you switch it on. Out of the box, the board sends its Run, Add task and voice
+orders to a cloud routine. With the mailbox it signs each order and leaves it waiting, and your always-on
+Mac asks for it every 5 minutes, checks it, does it, and pushes the result to this repo. The Mac opens no
+port. It does not trust the board or this repo to say what it may do: a file only you can write on the
+Mac (`allowed-orders.yml`) does. At first that is two jobs, the morning intel and the task sweep, and plain
+edits to your task cards. Claude runs with no shell, no connectors and no repo hooks, and only the runner
+pushes.
+
+- **Set it up:** [The Mac mailbox guide](.agent-team/mailbox/README.md) - eight copy-paste steps for the Mac
+  Mini, how to pause it, and how to take it out again.
 
 ---
 

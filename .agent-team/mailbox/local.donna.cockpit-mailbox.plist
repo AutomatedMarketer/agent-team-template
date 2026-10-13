@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Mac mailbox runner, as a LaunchAgent. Copy it to ~/Library/LaunchAgents/ and change YOUR-MAC-USER (the guide's
+  step 8 does this). A GUI LaunchAgent (Aqua) on purpose: Claude Code's login is in the login Keychain, and only a
+  program started from your own desktop session can read it. It wakes every 5 minutes; the board's own pace decides
+  whether a wake-up really asks. It never runs a second copy of itself.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.donna.cockpit-mailbox</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>node</string>
+    <string>/Users/YOUR-MAC-USER/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR-MAC-USER/.local/state/agent-mailbox/runner.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR-MAC-USER/.local/state/agent-mailbox/runner.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

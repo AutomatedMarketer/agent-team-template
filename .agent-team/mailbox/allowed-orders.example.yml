@@ -1,0 +1,30 @@
+# What this Mac will do for your board. Copy this file to
+#   ~/.local/state/agent-mailbox/allowed-orders.yml
+# and change the first four lines. The team repo and the board can never widen this file: it is written here, by you.
+# No file means nothing runs. A line the runner cannot read breaks the whole file, on purpose.
+
+# The only address the Mac will ever ask for orders (https, a name, nothing after it).
+board: https://YOUR-BOARD.vercel.app
+# The team repo these orders are for. Orders for another repo are refused.
+repo: YOUR-GITHUB-NAME/YOUR-TEAM-REPO
+# This computer's label. It must be the board's MAILBOX_RUNNER. Orders for another computer are refused.
+runner: mac-mini
+# The name the board shows for this computer.
+computer: Mac Mini
+
+# The kinds of order this Mac does. Add task, Start, Done, Approve and Pause are plain edits with no AI.
+# Arm, Add skill and Add agent only file a card for you to finish in a Claude session.
+actions: [task, move, approve, pause, run, arm, skill, agent]
+
+# The jobs Claude may run from the board, and the most minutes each gets (30 at most). A job
+# that is not named here is never run, whatever the board or the repo says.
+jobs:
+  - slug: morning-intel
+    minutes: 20
+  - slug: task-sweep
+    minutes: 30
+
+# The most this Mac will do in one New York day. These numbers cannot go above 40 orders and 6 runs.
+per_day:
+  orders: 40
+  runs: 6
