@@ -25,7 +25,7 @@
 // a word anyone typed), and one line through ctx.log.
 
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { releaseLock, takeLock } from '../status/commit.mjs'
 import { isoSeconds } from '../status/util.mjs'
@@ -371,22 +371,33 @@ async function execute(s, { id, action, fields, minutes }) {
   return publish(s, { id, action, head: reset.head, files: first.files, redo, level, fail, startedAt: null })
 }
 
-// Whether the Claude Code that would start now is the one the self-test passed for, with the settings it passed for. The version is asked of
-// the program itself, from an empty folder and with the small environment (so it reads no team repo, and does not update itself), because
-// a Claude Code on this Mac can be updated between the daily check and a run - by its own background check if it was ever started without
-// the switch, or by the owner using it by hand. { ok: true } or { ok: false, words }.
+// The Claude Code that would start now, and whether it is the one the self-test passed for, with the settings it passed for.
+//
+// The name Claude Code is found by (~/.local/bin/claude) is a link into a folder of versions (https://code.claude.com/docs/en/setup#auto-updates),
+// and an update - by its own background check if it was ever started without the switch, or by the owner using it by hand - moves that link.
+// So the link is followed to the real file ONCE, here; the version is asked of that file, from an empty folder and with the small environment
+// (so it reads no team repo, and does not update itself); and that same file is what starts. The name is never looked up a second time, so a
+// link swapped between the check and the start changes nothing: the file that was checked is the file that runs.
+// { ok: true, file } or { ok: false, why, words }.
 async function versionToRun(s) {
   const { ctx } = s
+  let file = null
+  try {
+    file = await (ctx.realpath ?? realpath)(s.claudePath)
+  } catch {
+    file = null
+  }
+  if (typeof file !== 'string' || file === '') return { ok: false, why: 'claude-missing', words: 'The Claude Code program could not be found, so no job was started.' }
   let version = null
   try {
-    const answer = await ctx.exec(s.claudePath, ['--version'], { cwd: s.emptyCwd, env: claudeEnv(ctx.env, ctx.platform), timeout: 15_000 })
+    const answer = await ctx.exec(file, ['--version'], { cwd: s.emptyCwd, env: claudeEnv(ctx.env, ctx.platform), timeout: 15_000 })
     version = parseVersion(answer.stdout)
   } catch {
     version = null
   }
-  if (version === null) return { ok: false, words: 'Claude Code did not say which version it is, so it needs a new self-test.' }
+  if (version === null) return { ok: false, why: 'selftest-needed', words: 'Claude Code did not say which version it is, so it needs a new self-test.' }
   const proof = await proofHolds({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, version })
-  return proof.holds ? { ok: true } : { ok: false, words: `Claude Code ${version.join('.')} is not the version the self-test passed for, so it needs a new self-test.` }
+  return proof.holds ? { ok: true, file } : { ok: false, why: 'selftest-needed', words: `Claude Code ${version.join('.')} is not the version the self-test passed for, so it needs a new self-test.` }
 }
 
 async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level }) {
@@ -408,11 +419,11 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   // The last thing before Claude starts: which version is it now? Not the one the daily check saw.
   const fit = await versionToRun(s)
   if (!fit.ok) {
-    s.log(`mailbox: a run was refused as not ready (selftest-needed): ${fit.words}`)
+    s.log(`mailbox: a run was refused as not ready (${fit.why}): ${fit.words}`)
     return settle(s, id, action, { state: 'refused', why: 'not-ready' })
   }
   const ran = await runClaude({
-    file: s.claudePath,
+    file: fit.file,
     argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
     cwd: workDir,
     env: claudeEnv(ctx.env, ctx.platform),

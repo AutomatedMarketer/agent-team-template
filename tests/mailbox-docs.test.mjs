@@ -440,6 +440,7 @@ test('the guide says Claude is started with its updates switched off, and that t
   }
   assert.match(flatDoc, /asks Claude Code which version it is just before every job/)
   assert.doesNotMatch(flatDoc, /seen at the runner's daily check/, 'the guide still says an update is seen only at the daily check')
+  assert.match(flatDoc, /follows the link to the program once, asks that file which version it is and starts that same file/)
   const step = flat(section(doc, '### 6. ', '### 7. '))
   assert.match(step, /if you use Claude Code yourself and it updates/i)
   assert.ok(doc.includes('https://code.claude.com/docs/en/env-vars') && doc.includes('https://code.claude.com/docs/en/setup'), 'the pages the switches come from')

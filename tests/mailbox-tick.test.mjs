@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, writeFile, readFile, readdir, rm, chmod, rename, symlink } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { git } from './helpers/git.mjs'
@@ -1318,3 +1318,74 @@ test('the version is asked before every run, not once a day: a run after an upda
   assert.deepEqual([entryFor(status, second.id).state, entryFor(status, second.id).why], ['refused', 'not-ready'])
   assert.equal(w.claude.calls.length, 1, 'only the first run started Claude')
 }))
+
+/* ---------- the program that was checked is the program that starts ----------------------------------------------------- */
+
+// The name Claude Code is found by (~/.local/bin/claude) is a link into a folder of versions, and an update - by hand, between the check
+// and the start - moves that link. So the link is followed ONCE per run, that file is asked its version, and that very file is started: the
+// name is never looked up a second time.
+const VERSIONS = { '/fake/bin/claude': '2.1.290', '/fake/versions/2.1.290/claude': '2.1.290', '/fake/versions/2.1.291/claude': '2.1.291' }
+
+test('the launcher is followed to its real file once per run, that file is asked its version, and that file is what starts - even if the link is swapped in between', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const followed = []
+  // The first look finds version 2.1.290; any later look at the link finds that an update has swapped it for 2.1.291.
+  const realpathOf = async (path) => {
+    followed.push(path)
+    return followed.length === 1 ? '/fake/versions/2.1.290/claude' : '/fake/versions/2.1.291/claude'
+  }
+  const asked = []
+  const exec = async (file, args, options) => {
+    if (args[0] !== '--version') return w.exec(file, args, options)
+    asked.push(file)
+    return { stdout: `${VERSIONS[file]} (Claude Code)\n`, code: 0 }
+  }
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx({ exec, realpath: realpathOf }))
+  assert.equal(entryFor(await statusIn(w), run.id).state, 'ok')
+  assert.deepEqual(followed, ['/fake/bin/claude'], 'the link is followed once, from the name the daily check found')
+  assert.equal(asked.at(-1), '/fake/versions/2.1.290/claude', 'the version asked is that of the file the link led to')
+  assert.equal(w.claude.calls.length, 1)
+  assert.equal(w.claude.calls[0].file, '/fake/versions/2.1.290/claude', 'and that file is what starts, not the link and not what the link leads to now')
+}))
+
+test('a launcher that cannot be followed to a file is no run: refused as "not ready", never started, and the log says Claude Code was not found', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const logs = []
+  for (const [name, realpathOf] of [['an error', async () => { throw new Error('ENOENT') }], ['an empty answer', async () => ''], ['no text', async () => undefined]]) {
+    const run = w.send({ action: 'run', workflow: 'morning-intel' })
+    w.clock.advance(MINUTE)
+    await runTick(w.ctx({ realpath: realpathOf, force: true, log: (line) => logs.push(line) }))
+    assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'], name)
+  }
+  assert.equal(w.claude.calls.length, 0)
+  assert.ok(logs.some((line) => line.includes('claude-missing')), 'the log says why')
+}))
+
+test('on a real file system a link to the program is followed to the program itself: its real path is asked for the version and started', async (t) => {
+  await withWorld(async (w) => {
+    const target = join(w.root, 'bin', 'versions', '2.1.290', 'claude')
+    const link = join(w.root, 'bin', 'claude')
+    await mkdir(join(w.root, 'bin', 'versions', '2.1.290'), { recursive: true })
+    await writeFile(target, 'not a real program\n')
+    try {
+      await symlink(target, link)
+    } catch {
+      t.skip('this system does not let this test make a link')
+      return
+    }
+    w.claude.script = w.claude.good
+    const asked = []
+    const exec = async (file, args, options) => {
+      if (args[0] === '--version') asked.push(file)
+      return w.exec(file, args, options)
+    }
+    w.send({ action: 'run', workflow: 'morning-intel' })
+    await runTick(w.ctx({ exec, find: async () => ({ state: 'found', path: link }), realpath: undefined }))
+    const real = await realpath(target)
+    assert.equal(w.claude.calls.length, 1)
+    assert.equal(w.claude.calls[0].file, real, 'the program itself, not the link')
+    assert.equal(asked.at(-1), real)
+    assert.notEqual(real, link)
+  })
+})

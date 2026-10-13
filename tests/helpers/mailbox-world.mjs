@@ -207,6 +207,7 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
     git,
     exec,
     find: async () => ({ state: 'found', path: '/fake/bin/claude' }),
+    realpath: async (path) => path,
     spawn,
     kill,
     originAccepted: () => true,
