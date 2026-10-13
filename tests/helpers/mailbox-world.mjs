@@ -14,6 +14,7 @@ import { repoRoot } from './repo.mjs'
 import { git } from './git.mjs'
 import { signBody } from '../../scripts/lib/mailbox/envelope.mjs'
 import { openStore } from '../../scripts/lib/mailbox/claims.mjs'
+import { keepProof } from '../../scripts/lib/mailbox/proof.mjs'
 
 export const SECRET = ['signing', 'secret', 'one', 'made', 'for', 'this', 'test', '9876543210'].join('-')
 export const FAKE_API_KEY = ['sk', 'ant', 'test', 'not', 'real', '0123456789012345'].join('-')
@@ -56,7 +57,9 @@ const line = (value) => `${JSON.stringify(value)}\n`
 
 // `storeAgo`: how long before the clock starts the runner's claims folder was made. An order issued before that is refused (the
 // contract's "claims since" rule), so a world where orders are issued a minute ago needs a runner that was set up earlier.
-export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockAt = T0, storeAgo = 3600_000 } = {}) {
+// `proof`: whether this Mac has passed its self-test for the Claude version the fake `exec` reports (2.1.290) and this repo's setup; a run is
+// refused without it, so a world starts with it unless a test is about its absence.
+export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockAt = T0, storeAgo = 3600_000, proof = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mailbox-world-'))
   const place = (...parts) => join(root, ...parts)
   const places = { stateDir: place('state'), codeDir: repoRoot, workDir: place('work'), envFile: place('config', 'env') }
@@ -69,6 +72,7 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
   if (storeAgo !== null) await openStore(places.stateDir, clockAt - storeAgo)
   await writeFile(places.envFile, `MAILBOX_KEY=${KEY}\nMAILBOX_SECRET_k1=${SECRET}\n`)
   if (process.platform !== 'win32') await chmod(places.envFile, 0o600)
+  if (proof) await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version: [2, 1, 290], now: () => clockAt })
 
   await git(['init', '-q', '--bare', '-b', 'main', originDir], root)
   await git(['clone', '-q', originDir, seedDir], root)

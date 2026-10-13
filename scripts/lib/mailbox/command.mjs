@@ -3,7 +3,7 @@
 //   node scripts/mailbox-runner.mjs               one tick, at the board's pace (what the schedule runs)
 //   node scripts/mailbox-runner.mjs --once        one tick now, whatever the pace (a supervised first order)
 //   node scripts/mailbox-runner.mjs --preflight   say in plain words what is ready and what is not; changes nothing
-//   node scripts/mailbox-runner.mjs --selftest    plant traps in a throwaway folder and run the real Claude against them
+//   node scripts/mailbox-runner.mjs --selftest    run the real Claude against planted traps and files it must not touch; no run is done until it passes
 //   --state-dir D  --work-dir D  --env-file F     use these places instead of the usual ones
 //
 // Output is plain lines for a person to read: never a key, a path with a user name in it, or a word anyone typed.
@@ -20,13 +20,14 @@ import { MINIMUM_VERSION, preflight, originMatches } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
+import { proofHolds } from './proof.mjs'
 
 export const USAGE = [
   'Usage: node scripts/mailbox-runner.mjs [switch]',
   '  (no switch)   one tick, at the board\'s pace - what the schedule runs',
   '  --once        one tick now, whatever the pace',
   '  --preflight   say what is ready and what is not; changes nothing',
-  '  --selftest    plant traps in a throwaway folder and run the real Claude against them',
+  '  --selftest    run the real Claude against planted traps and files it must not touch (runs wait for it to pass)',
   '  --help        this text',
   '  --state-dir D, --work-dir D, --env-file F   use these places instead of the usual ones'
 ].join('\n')
@@ -79,7 +80,8 @@ const PROBLEM_WORDS = {
   'not-logged-in': 'Claude Code is not logged in.',
   'wrong-login': 'Claude Code is not logged in with your own Claude account (a subscription login).',
   'key-in-environment': 'An API key or address for Claude is set in the environment (ANTHROPIC_API_KEY and the like); take it out.',
-  'origin-mismatch': 'The work copy\'s origin is not the team repo the allowlist names.'
+  'origin-mismatch': 'The work copy\'s origin is not the team repo the allowlist names.',
+  'selftest-needed': 'not passed for this Claude Code version and these settings. Run `node scripts/mailbox-runner.mjs --selftest` (a few minutes, with the real Claude); no job runs until it passes.'
 }
 
 async function report(ctx, places, out) {
@@ -113,6 +115,10 @@ async function report(ctx, places, out) {
     const login = ['not-logged-in', 'wrong-login'].find(has)
     say(login === undefined, login === undefined ? 'login: your own Claude account' : `login: ${PROBLEM_WORDS[login]}`)
   }
+  if (checks.version) {
+    const proof = await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checks.version })
+    say(proof.holds, proof.holds ? `self-test: passed on ${proof.at.slice(0, 10)} for this Claude and these settings` : `self-test: ${PROBLEM_WORDS['selftest-needed']}`)
+  }
   say(!has('key-in-environment'), has('key-in-environment') ? `API key: ${PROBLEM_WORDS['key-in-environment']}` : 'API key: none set')
   say(!has('origin-mismatch'), has('origin-mismatch') ? `team repo: ${PROBLEM_WORDS['origin-mismatch']}` : 'team repo: the work copy\'s origin is the team repo')
 
@@ -138,8 +144,9 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
     if (parsed.mode === 'preflight') return await report(ctx, places, out)
     if (parsed.mode === 'selftest') {
       const result = await selftest(ctx)
-      out(result.ok ? 'Self-test passed: the traps did not fire and the secret stayed put.' : 'Self-test FAILED:')
+      out(result.ok ? 'Self-test passed: the traps did not fire, nothing outside the work copy could be read or written, and jobs may run.' : 'Self-test FAILED:')
       for (const problem of result.problems) out(`  - ${problem}`)
+      if (!result.ok) out('No job runs until a self-test passes.')
       return result.ok ? 0 : 1
     }
     const result = await tick(ctx)

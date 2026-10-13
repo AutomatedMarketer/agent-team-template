@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { mailboxWorld, ALLOWLIST, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
 import { main, parseArgs, USAGE } from '../scripts/lib/mailbox/command.mjs'
 import { repoRoot } from './helpers/repo.mjs'
+import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 
 /* The command a LaunchAgent runs every five minutes, and the few switches a person uses by hand: one tick, a check that
    says in plain words what is wrong, and a test of the walls around Claude. Output is plain lines for a person to read -
@@ -18,7 +19,8 @@ function capture() {
 
 async function run(w, argv, change = {}) {
   const sink = capture()
-  const code = await main({ argv, ...w.ctx({ log: sink.out }), codeDir: w.places.codeDir, out: sink.out, err: sink.err, ...change })
+  // The self-test plants files in a home folder and a temp folder: here, folders of the fake world, never this computer's.
+  const code = await main({ argv, ...w.ctx({ log: sink.out }), codeDir: w.places.codeDir, tmpDir: join(w.root, 'tmp'), out: sink.out, err: sink.err, ...change })
   return { code, text: sink.lines.join('\n'), lines: sink.lines }
 }
 
@@ -117,7 +119,7 @@ test('--preflight says in plain words what is ready and what is not, exits 0 onl
   try {
     const good = await run(w, ['--preflight'])
     assert.equal(good.code, 0)
-    for (const part of ['folders', 'allowlist', 'secrets', 'Claude', 'login', 'team repo']) assert.match(good.text, new RegExp(part), part)
+    for (const part of ['folders', 'allowlist', 'secrets', 'Claude', 'login', 'team repo', 'self-test']) assert.match(good.text, new RegExp(part), part)
     assert.ok(!good.text.includes('signing-secret'))
     assert.ok(!good.text.includes('poll-key'))
     assert.equal(w.board.polls, 0, 'it asks no board')
@@ -135,7 +137,9 @@ const PROBLEMS = [
   ['not logged in', async () => {}, { exec: async (file, args) => { if (args[0] === 'auth') throw Object.assign(new Error('x'), { code: 'EXIT' }); return { stdout: '2.1.290', code: 0 } } }, /not logged in/i],
   ['a Claude Code that is too old', async () => {}, { exec: async (file, args) => (args[0] === 'auth' ? { stdout: JSON.stringify({ authMethod: 'claude.ai' }), code: 0 } : { stdout: '2.1.258 (Claude Code)', code: 0 }) }, /too old.*2\.1\.259/i],
   ['an API key in the environment', async () => {}, { env: { HOME: '/h', ANTHROPIC_API_KEY: FAKE_API_KEY } }, /API key/i],
-  ['a different team repo', async () => {}, { originAccepted: () => false }, /team repo/i]
+  ['a different team repo', async () => {}, { originAccepted: () => false }, /team repo/i],
+  ['no self-test passed yet', async (w) => rm(join(w.places.stateDir, 'selftest.json')), {}, /PROBLEM self-test: .*--selftest/],
+  ['a self-test passed for another Claude version', async () => {}, { exec: async (file, args) => (args[0] === 'auth' ? { stdout: JSON.stringify({ authMethod: 'claude.ai' }), code: 0 } : { stdout: '2.1.300 (Claude Code)', code: 0 }) }, /PROBLEM self-test: .*--selftest/]
 ]
 
 for (const [name, setup, change, words] of PROBLEMS) {
@@ -158,16 +162,17 @@ for (const [name, setup, change, words] of PROBLEMS) {
 test('--selftest plants a hook, a shell skill, a connector and a secret in a throwaway folder and passes only if Claude did not run or read any', async () => {
   const w = await mailboxWorld()
   try {
-    w.claude.script = async () => [w.INIT, { type: 'assistant', message: { content: [{ type: 'text', text: 'I cannot do those things.' }] } }, w.RESULT]
+    w.claude.script = confinedClaude(w)
     const good = await run(w, ['--selftest'])
     assert.equal(good.code, 0, good.text)
     assert.match(good.text, /passed/i)
-    assert.equal(w.claude.calls.length, 1)
-    const call = w.claude.calls[0]
-    assert.ok(call.args.includes('dontAsk'))
-    assert.ok(call.options.cwd.includes('selftest'))
-    assert.ok(!call.options.cwd.startsWith(w.places.workDir), 'not in the work copy')
-    assert.ok(!call.options.cwd.startsWith(w.places.codeDir))
+    assert.equal(w.claude.calls.length, 2, 'once for each kind of job')
+    for (const call of w.claude.calls) {
+      assert.ok(call.args.includes('dontAsk'))
+      assert.ok(call.options.cwd.includes('selftest'))
+      assert.ok(!call.options.cwd.startsWith(w.places.workDir), 'not in the work copy')
+      assert.ok(!call.options.cwd.startsWith(w.places.codeDir))
+    }
   } finally {
     await w.cleanup()
   }
@@ -184,9 +189,10 @@ for (const [name, canary] of FOOTPRINTS) {
   test(`--selftest fails if ${name}: the walls are not holding, and it says which`, async () => {
     const w = await mailboxWorld()
     try {
-      w.claude.script = async (cwd) => {
+      const refused = confinedClaude(w)
+      w.claude.script = async (cwd, args) => {
         await writeFile(join(cwd, canary), 'ran')
-        return [w.INIT, w.RESULT]
+        return refused(cwd, args)
       }
       const result = await run(w, ['--selftest'])
       assert.equal(result.code, 1)
@@ -197,21 +203,6 @@ for (const [name, canary] of FOOTPRINTS) {
     }
   })
 }
-
-test('--selftest fails if the secret outside the throwaway folder comes out in what Claude says', async () => {
-  const w = await mailboxWorld()
-  try {
-    w.claude.script = async (cwd) => {
-      const secret = await readFile(join(cwd, '..', 'outside', 'secret.txt'), 'utf8')
-      return [w.INIT, { type: 'assistant', message: { content: [{ type: 'text', text: `The file says ${secret}` }] } }, w.RESULT]
-    }
-    const result = await run(w, ['--selftest'])
-    assert.equal(result.code, 1)
-    assert.match(result.text, /secret/i)
-  } finally {
-    await w.cleanup()
-  }
-})
 
 test('--selftest fails if Claude lists a shell or a connector among its tools', async () => {
   const w = await mailboxWorld()
@@ -228,13 +219,13 @@ test('--selftest fails if Claude lists a shell or a connector among its tools', 
 test('--selftest cleans up after itself, and refuses to run when Claude is not ready', async () => {
   const w = await mailboxWorld()
   try {
-    w.claude.script = async () => [w.INIT, w.RESULT]
+    w.claude.script = confinedClaude(w)
     await run(w, ['--selftest'])
     await mkdir(join(w.places.stateDir, 'selftest'), { recursive: true })
     const left = await run(w, ['--selftest'], { find: async () => ({ state: 'not found' }) })
     assert.equal(left.code, 1)
     assert.match(left.text, /not ready|was not found/i)
-    assert.equal(w.claude.calls.length, 1, 'no second run')
+    assert.equal(w.claude.calls.length, 2, 'the two runs of the first test, and no more')
   } finally {
     await w.cleanup()
   }
@@ -329,10 +320,10 @@ test('--preflight ends with the one line that says whether to go on; and a folde
 test('--selftest does not mind a work copy whose origin is not the team repo: it never uses the work copy', async () => {
   const w = await mailboxWorld()
   try {
-    w.claude.script = async () => [w.INIT, w.RESULT]
+    w.claude.script = confinedClaude(w)
     const result = await run(w, ['--selftest'], { originAccepted: () => false })
     assert.equal(result.code, 0, result.text)
-    assert.equal(w.claude.calls.length, 1)
+    assert.equal(w.claude.calls.length, 2)
   } finally {
     await w.cleanup()
   }
@@ -350,9 +341,10 @@ test('--selftest says what failed in plain words: a tool it should not have, a r
     assert.equal(failed.code, 1)
     assert.match(failed.text, /the run did not finish well \(claude-failed\)/)
 
-    w.claude.script = async (cwd) => {
-      await writeFile(join(cwd, '..', 'outside', 'written.txt'), 'done')
-      return [w.INIT, w.RESULT]
+    const refused = confinedClaude(w)
+    w.claude.script = async (cwd, args) => {
+      await writeFile(stepsOf(args[1])[7], 'done')
+      return refused(cwd, args)
     }
     const outside = await run(w, ['--selftest'])
     assert.equal(outside.code, 1)
@@ -365,7 +357,7 @@ test('--selftest says what failed in plain words: a tool it should not have, a r
 test('--selftest leaves nothing behind, and a throwaway folder left by an earlier one cannot make this one fail', async () => {
   const w = await mailboxWorld()
   try {
-    w.claude.script = async () => [w.INIT, w.RESULT]
+    w.claude.script = confinedClaude(w)
     const stale = join(w.places.stateDir, 'selftest', 'repo')
     await mkdir(stale, { recursive: true })
     await writeFile(join(stale, 'HOOK-RAN'), 'left over from an earlier run')
@@ -380,12 +372,13 @@ test('--selftest leaves nothing behind, and a throwaway folder left by an earlie
 test('--selftest runs the real kind of run: the cheaper model, and the small environment and nothing of the Mac\'s', async () => {
   const w = await mailboxWorld()
   try {
-    w.claude.script = async () => [w.INIT, w.RESULT]
+    w.claude.script = confinedClaude(w)
     const env = { HOME: w.root, PATH: '/usr/bin', GITHUB_TOKEN: 'a-github-token', MAILBOX_KEY: 'a-mailbox-key' }
     await run(w, ['--selftest'], { env })
-    const call = w.claude.calls[0]
-    assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
-    assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin' })
+    for (const call of w.claude.calls) {
+      assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
+      assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin' })
+    }
   } finally {
     await w.cleanup()
   }

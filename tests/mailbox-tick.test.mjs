@@ -10,6 +10,7 @@ import { runTick } from '../scripts/lib/mailbox/tick.mjs'
 import { checkMailbox } from '../scripts/lib/status/safe.mjs'
 import { newCardText } from '../scripts/lib/mailbox/cards.mjs'
 import { dayOf } from '../scripts/lib/mailbox/allow.mjs'
+import { PROOF_FILE, dropProof, keepProof } from '../scripts/lib/mailbox/proof.mjs'
 
 /* One tick of the runner, from the board's answer to the pushed commit, in a world where only git and the file system are
    real. Every promise the plan makes about an order is held here: the claim comes first and is durable, an order runs once
@@ -1172,4 +1173,71 @@ test('a run is held to the tools it was given: a sweep that reaches for the web 
   w.clock.advance(MINUTE)
   await runTick(w.ctx({ force: true }))
   assert.equal(entryFor(await statusIn(w), intel.id).state, 'ok')
+}))
+
+/* ---------- the self-test gate: no run until the confinement was proven on this Mac, for this Claude and these settings ---------- */
+
+const refusedAsNotReady = async (w, id) => {
+  const entry = entryFor(await statusIn(w), id)
+  return [entry.state, entry.why]
+}
+
+test('with no self-test passed, a run is refused as "not ready" and the log says a self-test is needed - a card order still lands, and Claude is never started', () => withWorld({ proof: false }, async (w) => {
+  const card = w.send({ action: 'task', title: 'Chase the invoice' })
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  const sweep = w.send({ action: 'run', workflow: 'task-sweep' })
+  w.claude.script = w.claude.good
+  const logs = []
+  await runTick(w.ctx({ log: (line) => logs.push(line) }))
+  assert.equal(entryFor(await statusIn(w), card.id).state, 'ok')
+  assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'])
+  assert.deepEqual(await refusedAsNotReady(w, sweep.id), ['refused', 'not-ready'])
+  assert.equal(w.claude.calls.length, 0)
+  assert.ok(logs.some((line) => line.includes('selftest-needed')), 'the log says why')
+}))
+
+test('a self-test passed for another Claude version, or for other settings, does not count: a run is refused until it is made again', () => withWorld({ proof: false }, async (w) => {
+  w.claude.script = w.claude.good
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 289], now: w.clock.now })
+  const older = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  assert.deepEqual(await refusedAsNotReady(w, older.id), ['refused', 'not-ready'], 'a proof for 2.1.289 is not a proof for 2.1.290')
+
+  const kept = JSON.parse(await readFile(join(w.places.stateDir, PROOF_FILE), 'utf8'))
+  await writeFile(join(w.places.stateDir, PROOF_FILE), JSON.stringify({ ...kept, version: [2, 1, 290], fingerprint: 'f'.repeat(64) }))
+  const changed = w.send({ action: 'run', workflow: 'morning-intel' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.deepEqual(await refusedAsNotReady(w, changed.id), ['refused', 'not-ready'], 'a proof for other settings is not a proof for these')
+  assert.equal(w.claude.calls.length, 0)
+}))
+
+test('a self-test passed before Claude Code was updated does not count after it: the version the daily check found is the one the proof must be for', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const newer = async (file, args) => (args[0] === '--version' ? { stdout: '2.1.300 (Claude Code)', code: 0 } : w.exec(file, args))
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx({ exec: newer }))
+  assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'], 'the proof in this world is for 2.1.290')
+  assert.equal(w.claude.calls.length, 0)
+}))
+
+test('the self-test is looked at on every tick and never remembered: once it is passed the very next tick runs, and when it is lost the next one stops', () => withWorld({ proof: false }, async (w) => {
+  w.claude.script = w.claude.good
+  const first = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  assert.deepEqual(await refusedAsNotReady(w, first.id), ['refused', 'not-ready'])
+
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], now: w.clock.now })
+  const second = w.send({ action: 'run', workflow: 'morning-intel' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.equal(entryFor(await statusIn(w), second.id).state, 'ok', 'passed now: no waiting until tomorrow')
+  assert.equal(w.claude.calls.length, 1)
+
+  await dropProof(w.places.stateDir)
+  const third = w.send({ action: 'run', workflow: 'task-sweep' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.deepEqual(await refusedAsNotReady(w, third.id), ['refused', 'not-ready'], 'the same day, with the daily check remembered')
+  assert.equal(w.claude.calls.length, 1)
 }))

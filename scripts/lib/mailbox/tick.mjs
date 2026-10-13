@@ -41,6 +41,7 @@ import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
 import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude, toolsFor } from './claude.mjs'
+import { proofHolds } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
@@ -166,6 +167,12 @@ async function locked(ctx, { orders, end, log }) {
   s.claudeReady = checked.ok
   s.claudePath = checked.claudePath
   s.notReady = checked.problems
+  // No run until the walls around Claude were proven on this Mac (--selftest) for this Claude Code and these settings. It is a file
+  // read and two small files hashed, so it is checked on every tick: an update or a change of settings stops the runs at once.
+  if (checked.ok && !(await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checked.version })).holds) {
+    s.claudeReady = false
+    s.notReady = [...s.notReady, 'selftest-needed']
+  }
 
   // The clone's own config is written again before git is first run in it, then orders lost track of are settled by reading.
   const level = await resetWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, originAccepted: s.originAccepted })
