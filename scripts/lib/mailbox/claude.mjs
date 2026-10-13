@@ -56,7 +56,7 @@ const TOLERATED = Object.freeze(['EndConversation'])
 // start another, and every run would be refused with no way to fix it by running the self-test again. The native installer puts a link at
 // ~/.local/bin/claude (https://code.claude.com/docs/en/setup#auto-updates, read 2026-10-13), so that comes first; the Homebrew cask and an
 // older npm install put theirs in the two folders after it.
-export const claudeFolders = (home) => [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
+export const claudeFolders = (home) => [...(typeof home === 'string' && home !== '' ? [join(home, '.local', 'bin')] : []), '/opt/homebrew/bin', '/usr/local/bin']
 export const SETTINGS_FILE = '.agent-team/mailbox/claude-settings.json'
 export const MCP_FILE = '.agent-team/mailbox/empty-mcp.json'
 export const MAX_TURNS = 80
