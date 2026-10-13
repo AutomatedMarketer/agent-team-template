@@ -8,6 +8,7 @@ import { main, parseArgs, USAGE } from '../scripts/lib/mailbox/command.mjs'
 import { repoRoot } from './helpers/repo.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
+import { keepProof } from '../scripts/lib/mailbox/proof.mjs'
 
 /* The command a LaunchAgent runs every five minutes, and the few switches a person uses by hand: one tick, a check that
    says in plain words what is wrong, and a test of the walls around Claude. Output is plain lines for a person to read -
@@ -381,6 +382,30 @@ test('--selftest runs the real kind of run: the cheaper model, and the small env
       assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
       assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
     }
+  } finally {
+    await w.cleanup()
+  }
+})
+
+/* ---------- the self-test proof is for the file the link leads to ------------------------------------------------------- */
+
+// Where the link leads. The fake world's realpath is the identity, so without this the link and the file are the same text and a check that
+// handed the link where the file belongs would still pass.
+const LINK = '/fake/bin/claude'
+const FILE = '/fake/versions/2.1.290/claude'
+
+test('--preflight asks whether the self-test holds for the file the link leads to, not for the link: a proof kept for the file is "passed", one kept for the link is not', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const stateDir = w.places.stateDir
+    const followed = { realpath: async (path) => (path === LINK ? FILE : path) }
+    const kept = (file) => keepProof({ stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file, now: () => Date.parse('2026-10-13T10:00:00Z') })
+    assert.equal(await kept(FILE), true)
+    const forTheFile = await run(w, ['--preflight'], followed)
+    assert.match(forTheFile.text, /self-test: passed/)
+    assert.equal(await kept(LINK), true)
+    const forTheLink = await run(w, ['--preflight'], followed)
+    assert.match(forTheLink.text, /PROBLEM self-test: .*--selftest/)
   } finally {
     await w.cleanup()
   }

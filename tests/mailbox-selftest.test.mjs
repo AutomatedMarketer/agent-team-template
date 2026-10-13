@@ -551,3 +551,24 @@ test('--selftest fails in plain words when the file it follows to does not say w
     await w.cleanup()
   }
 })
+
+test('--selftest keeps the version asked of the file it followed to, not the version the link answered: when the two differ the proof is for the file\'s', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w)
+    // The link answers 2.1.280 (the readiness check asks it); the real file it leads to says 2.1.290.
+    const exec = async (file, args, options) => {
+      if (args[0] === '--version') return { stdout: `${file === VERSION_ONE ? '2.1.290' : '2.1.280'} (Claude Code)\n`, code: 0 }
+      return w.exec(file, args, options)
+    }
+    const result = await selftest(w, { exec, realpath: async (path) => (path === LINK ? VERSION_ONE : path) })
+    assert.equal(result.code, 0, result.text)
+    const kept = JSON.parse(await readFile(join(placesOf(w).stateDir, PROOF_FILE), 'utf8'))
+    assert.deepEqual(kept.version, [2, 1, 290])
+    const holds = (version) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version, file: VERSION_ONE })
+    assert.equal((await holds([2, 1, 290])).holds, true)
+    assert.equal((await holds([2, 1, 280])).holds, false, 'the link\'s version is not what was proven')
+  } finally {
+    await w.cleanup()
+  }
+})

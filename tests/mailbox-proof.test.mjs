@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { MCP_FILE, SETTINGS_FILE } from '../scripts/lib/mailbox/claude.mjs'
-import { CHECK_FILES, PROOF_FILE, configFingerprint, dropProof, keepProof, proofHolds, proofKept } from '../scripts/lib/mailbox/proof.mjs'
+import { CHECK_FILES, CODE_PARTS, PROOF_FILE, configFingerprint, dropProof, keepProof, proofHolds, proofKept } from '../scripts/lib/mailbox/proof.mjs'
 import { repoRoot } from './helpers/repo.mjs'
 
 /* The self-test proves, on this Mac, that Claude cannot read or write outside the work copy. That proof is only worth
@@ -23,6 +23,11 @@ async function folders() {
   for (const file of [SETTINGS_FILE, MCP_FILE]) {
     await mkdir(dirname(at(code, file)), { recursive: true })
     await copyFile(at(repoRoot, file), at(code, file))
+  }
+  // The runner's own code is part of the setup too: a copy of it, so a test can change one file of it.
+  for (const part of CODE_PARTS) {
+    await mkdir(dirname(at(code, part)), { recursive: true })
+    await cp(at(repoRoot, part), at(code, part), { recursive: true })
   }
   return { root, code, state, done: () => rm(root, { recursive: true, force: true }) }
 }
@@ -64,6 +69,80 @@ test('the fingerprint holds the flags of each kind of run and the text of the ch
   } finally {
     await f.done()
   }
+})
+
+// One file from each place the runner's code lives.
+const CODE_CHANGES = [
+  ['the entry file', 'scripts/mailbox-runner.mjs'],
+  ['the mailbox library', 'scripts/lib/mailbox/claude.mjs'],
+  ['the status library', 'scripts/lib/status/programs.mjs'],
+  ['the prompts the runner sends Claude', '.agent-team/mailbox/prompts/run.md']
+]
+
+test("a change to any one file of the runner's own code - the entry file, the mailbox library, the status library, a prompt - is a change of setup: the fingerprint moves and the kept proof no longer holds", async () => {
+  const f = await folders()
+  try {
+    const version = [2, 1, 290]
+    assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version, file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') }), true)
+    const base = await configFingerprint(f.code)
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, true)
+    for (const [what, relative] of CODE_CHANGES) {
+      const path = at(f.code, relative)
+      const original = await readFile(path, 'utf8')
+      await writeFile(path, `${original}\n// changed\n`)
+      assert.notEqual(await configFingerprint(f.code), base, `${what} changed`)
+      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, false, `${what} changed: the old proof must not hold`)
+      await writeFile(path, original)
+      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, true, `${what} put back`)
+    }
+  } finally {
+    await f.done()
+  }
+})
+
+test('a new file in the code folders, or one taken away, is a change of setup, and the order the files were made in does not matter', async () => {
+  const f = await folders()
+  try {
+    const base = await configFingerprint(f.code)
+    const extra = at(f.code, 'scripts/lib/mailbox/zz-new.mjs')
+    await writeFile(extra, 'export {}\n')
+    assert.notEqual(await configFingerprint(f.code), base, 'a new file')
+    await rm(extra)
+    assert.equal(await configFingerprint(f.code), base, 'taken away again')
+    const gone = at(f.code, 'scripts/lib/status/util.mjs')
+    const kept = await readFile(gone, 'utf8')
+    await rm(gone)
+    assert.notEqual(await configFingerprint(f.code), base, 'a file taken away')
+    await writeFile(gone, kept)
+    assert.equal(await configFingerprint(f.code), base, 'put back later, so made in another order: the same')
+  } finally {
+    await f.done()
+  }
+})
+
+test('with a folder of the runner code missing there is no fingerprint, so nothing can be proven', async () => {
+  const f = await folders()
+  try {
+    await rm(at(f.code, 'scripts/lib/status'), { recursive: true })
+    assert.equal(await configFingerprint(f.code), null)
+  } finally {
+    await f.done()
+  }
+})
+
+test('the fingerprint covers every file the runner can load: following the imports from the entry file, nothing lies outside the covered places', async () => {
+  const covered = (relative) => CODE_PARTS.some((part) => relative === part || relative.startsWith(`${part}/`))
+  const seen = new Set()
+  const queue = ['scripts/mailbox-runner.mjs']
+  while (queue.length) {
+    const relative = queue.pop()
+    if (seen.has(relative)) continue
+    seen.add(relative)
+    assert.ok(covered(relative), `${relative} is loaded by the runner and the fingerprint does not cover it`)
+    const source = await readFile(at(repoRoot, relative), 'utf8')
+    for (const match of source.matchAll(/from '(\.[^']+)'/g)) queue.push(posix.join(posix.dirname(relative), match[1]))
+  }
+  assert.ok(seen.size > 30, 'the walk found the runner files')
 })
 
 test('the check itself is the self-test and everything it judges with: each file it imports from the mailbox folder is in the fingerprint', async () => {

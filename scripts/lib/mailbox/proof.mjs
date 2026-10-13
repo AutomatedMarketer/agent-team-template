@@ -8,10 +8,13 @@
 // to run Claude when any of them no longer matches (the order is refused as "not ready" and the log says a self-test is needed).
 //
 // The fingerprint covers: the two files Claude is started with (settings, connector list), the whole argument list of both
-// kinds of run (with the web, without it), and the text of the check itself.
+// kinds of run (with the web, without it), the text of the check itself, and the contents of every file of the runner's own code
+// (CODE_PARTS). That last part is why a new runner commit needs a new self-test: a change to how Claude is started (its environment,
+// how it is run or stopped, the tick's wiring, the prompts it is sent) can quietly take a protection away, and the runner must notice
+// that by itself, with no git, from what is on disk.
 
 import { createHash } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MCP_FILE, SETTINGS_FILE, buildArgv } from './claude.mjs'
 
@@ -24,6 +27,33 @@ const own = (name) => new URL(name, import.meta.url)
 export const CHECK_FILES = Object.freeze(['selftest.mjs', 'evidence.mjs'])
 const checkText = () => Promise.all(CHECK_FILES.map((name) => text(own(name))))
 
+// The runner's own code, relative to the code folder: the entry file, every file under the mailbox and status libraries it imports, and the
+// prompt files it sends Claude (jobs.mjs). The settings and connector list are covered on their own above.
+export const CODE_PARTS = Object.freeze(['scripts/mailbox-runner.mjs', 'scripts/lib/mailbox', 'scripts/lib/status', 'scripts/lib/yaml-lite.mjs', 'scripts/lib/frontmatter.mjs', 'scripts/lib/run-log.mjs', '.agent-team/mailbox/prompts'])
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+
+// [path, content hash] for every file under a part, in path order, so the same files always give the same list. A link or anything that is not a
+// plain file is listed by name with a marker of its own (it could point anywhere), never followed. A part that is not there throws.
+async function listCode(codeDir, relative, found) {
+  const path = join(codeDir, ...relative.split('/'))
+  const info = await lstat(path)
+  if (info.isDirectory()) {
+    for (const name of (await readdir(path)).sort()) await listCode(codeDir, `${relative}/${name}`, found)
+  } else if (info.isFile()) {
+    found.push([relative, sha256(await text(path))])
+  } else {
+    found.push([relative, 'not-a-plain-file'])
+  }
+  return found
+}
+
+export const codeHashes = async (codeDir) => {
+  const found = []
+  for (const part of CODE_PARTS) await listCode(codeDir, part, found)
+  return found.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+}
+
 // A 64-character hex fingerprint, or null when a part of the setup cannot be read (so nothing can be proven).
 // `argv` and `check` are what the runner really uses; a test may hand in others to see the fingerprint move.
 export async function configFingerprint(codeDir, { argv = buildArgv, check = checkText } = {}) {
@@ -33,7 +63,8 @@ export async function configFingerprint(codeDir, { argv = buildArgv, check = che
       connectors: await text(join(codeDir, ...MCP_FILE.split('/'))),
       withoutWeb: argv({ prompt: 'x', model: 'sonnet', codeDir, web: false }),
       withWeb: argv({ prompt: 'x', model: 'sonnet', codeDir, web: true }),
-      check: await check()
+      check: await check(),
+      code: await codeHashes(codeDir)
     }
     return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
   } catch {

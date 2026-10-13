@@ -236,6 +236,14 @@ test('no one paste block in the guide both pauses and un-pauses, or both pauses 
   assert.equal(bash.filter((body) => runs(body, /^launchctl bootout/)).length, 1)
 })
 
+test('the guide says a change to any file of the runner code needs a new self-test, and the fingerprint really covers those folders', async () => {
+  const doc = flat(await guide())
+  assert.match(doc, /So is a change to any file of the runner's own code: its program, its libraries or its prompts/)
+  assert.match(doc, /until `--selftest` passes again/)
+  const { CODE_PARTS } = await import('../scripts/lib/mailbox/proof.mjs')
+  for (const part of ['scripts/mailbox-runner.mjs', 'scripts/lib/mailbox', 'scripts/lib/status', '.agent-team/mailbox/prompts']) assert.ok(CODE_PARTS.includes(part), part)
+})
+
 test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
   const doc = flat(await guide())
   assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)
