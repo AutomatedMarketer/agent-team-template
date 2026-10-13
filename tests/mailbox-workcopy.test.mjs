@@ -613,3 +613,60 @@ test('when the trailer is on more than one commit the newest is the one found, a
     await w.cleanup()
   }
 })
+
+test('a push that lands but whose git reports a failure is "landed", even with another pusher\'s commit on top of it - and is not "moved"', async () => {
+  const w = await world()
+  try {
+    const expected = (await reset(w)).head
+    await writeFile(join(w.work, 'tasks', 'mine.md'), 'card\n')
+    const commit = await commitPaths({ git, work: w.work, emptyHooks: w.empty, paths: ['tasks/mine.md'], message: 'mine' })
+    const dropped = async (args, cwd) => {
+      const done = await git(args, cwd)
+      if (args.includes('push')) throw new Error('the connection was reset after the server took the push')
+      return done
+    }
+    assert.deepEqual(await pushCommits({ git: dropped, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: true, landed: true })
+    await w.push('theirs.md')
+    const again = await reset(w)
+    assert.equal(again.ok, true)
+    assert.equal((await git(['merge-base', '--is-ancestor', commit, 'refs/heads/main'], w.origin).then(() => true, () => false)), true)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a push that failed after main moved to something without our commit is "moved", and a push that failed with main untouched is "refused"', async () => {
+  const w = await world()
+  try {
+    const expected = (await reset(w)).head
+    await writeFile(join(w.work, 'tasks', 'mine.md'), 'card\n')
+    const commit = await commitPaths({ git, work: w.work, emptyHooks: w.empty, paths: ['tasks/mine.md'], message: 'mine' })
+    const refusing = async (args, cwd) => {
+      if (args.includes('push')) throw new Error('refused')
+      return git(args, cwd)
+    }
+    assert.deepEqual(await pushCommits({ git: refusing, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'refused' })
+    await w.push('theirs.md')
+    assert.deepEqual(await pushCommits({ git: refusing, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'moved' })
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a failed push whose team repo answers the tip but cannot be fetched is "unreachable": whether it landed is not known', async () => {
+  const w = await world()
+  try {
+    const expected = (await reset(w)).head
+    await writeFile(join(w.work, 'tasks', 'mine.md'), 'card\n')
+    const commit = await commitPaths({ git, work: w.work, emptyHooks: w.empty, paths: ['tasks/mine.md'], message: 'mine' })
+    const halfDown = async (args, cwd) => {
+      if (args.includes('fetch')) throw new Error('unreachable')
+      const done = await git(args, cwd)
+      if (args.includes('push')) throw new Error('timed out')
+      return done
+    }
+    assert.deepEqual(await pushCommits({ git: halfDown, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'unreachable' })
+  } finally {
+    await w.cleanup()
+  }
+})

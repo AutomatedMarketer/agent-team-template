@@ -163,9 +163,13 @@ export async function commitPaths({ git, work, emptyHooks, paths, maybe = [], me
 // Push `commit` (one commit or two on top of `expected`, the commit the clone was based on) to main, and only if main is
 // still exactly `expected`. { ok: true } or { ok: false, why }:
 //   not-the-commits   what is to go is not exactly `count` commits on top of `expected`: nothing was sent
-//   moved             the team repo's main is no longer `expected`: someone else pushed
-//   unreachable       the team repo could not be reached
+//   moved             the team repo's main is no longer `expected`, and `commit` is not in it: someone else pushed
+//   unreachable       the team repo could not be reached to say whether the push landed - the push may have, so the
+//                     caller must treat the outcome as unknown, never as "nothing was sent"
 //   refused           main is still `expected` and the push was refused anyway
+// { ok: true, landed: true } is a push that reported a failure (git's own 120 s limit, or a connection dropped after the
+// server had already moved main) and yet is on main: `commit` is the team repo's tip or an ancestor of it. It is a success,
+// because doing the work again would apply it twice.
 export async function pushCommits({ git, work, emptyHooks, commit, expected, count }) {
   if (typeof commit !== 'string' || !FULL_HASH.test(commit) || typeof expected !== 'string' || !FULL_HASH.test(expected)) throw new TypeError('workcopy: a push names full commits')
   if (count !== 1 && count !== 2) throw new TypeError('workcopy: a push is one commit or two')
@@ -187,12 +191,25 @@ export async function pushCommits({ git, work, emptyHooks, commit, expected, cou
     ], work)
     return { ok: true }
   } catch {
-    // Why it was refused: is main still where the clone was based? Asked of the team repo itself, not of this clone.
+    // A failed report is not a failed push: the server may have taken the commit and the answer been lost. So first ask the
+    // team repo itself where main is, then whether our commit is in it. Asked of the team repo, not of this clone.
+    let tip
     try {
-      const tip = (await run(['ls-remote', 'origin', `refs/heads/${BRANCH}`], work)).stdout.split('\t')[0].trim()
-      return { ok: false, why: tip === expected ? 'refused' : 'moved' }
+      tip = (await run(['ls-remote', 'origin', `refs/heads/${BRANCH}`], work)).stdout.split('\t')[0].trim()
     } catch {
       return { ok: false, why: 'unreachable' }
+    }
+    if (tip === expected) return { ok: false, why: 'refused' }
+    try {
+      await run(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', BRANCH], work)
+    } catch {
+      return { ok: false, why: 'unreachable' }
+    }
+    try {
+      await run(['merge-base', '--is-ancestor', commit, `refs/remotes/origin/${BRANCH}`], work)
+      return { ok: true, landed: true }
+    } catch {
+      return { ok: false, why: 'moved' }
     }
   }
 }

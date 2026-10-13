@@ -697,21 +697,165 @@ test('a team repo that cannot be reached at the start stops the tick before the 
   assert.deepEqual(await readdir(join(w.places.stateDir, 'claims')), ['store.json'])
 }))
 
-test('a team repo that cannot be reached when an order is done: the order fails as "push-failed", nothing is lost, and the status follows when it can be', () => withWorld(async (w) => {
+test('a team repo that cannot be reached when an order is pushed: the order is outcome unknown (the push may have landed), it is not run again, and the next tick that can read the team repo settles it', () => withWorld(async (w) => {
   const sent = w.send({ action: 'task', title: 'Chase the invoice' })
   const down = async (args, cwd) => {
     if (args.includes('push') || args.includes('ls-remote')) throw new Error('unreachable')
     return git(args, cwd)
   }
   const result = await runTick(w.ctx({ git: down }))
-  assert.equal(result.orders.failed, 1)
-  assert.equal((await w.claimFile(sent.id, 'final.json')).why, 'push-failed')
+  assert.equal(result.orders.failed, 0, 'nothing is said to have failed that may have landed')
+  const unchecked = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([unchecked.state, unchecked.landed, unchecked.why], ['unknown', null, null])
   assert.equal(await w.inOrigin.file(STATUS), null, 'the board has heard nothing yet')
   w.clock.advance(5 * MINUTE)
   await runTick(w.ctx())
   const entry = entryFor(await statusIn(w), sent.id)
-  assert.deepEqual([entry.state, entry.why], ['failed', 'push-failed'])
+  assert.deepEqual([entry.state, entry.landed, entry.why], ['unknown', false, null])
   assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), null, 'the order was not run again')
+}))
+
+// A push whose answer is lost: the server took the commit and moved main, then git reported a failure (the connection was
+// reset, or git's own 120 second limit ran out). It is on main, so it is done - doing it again would make it twice.
+const landsThenFails = (isOrdersPush = async () => true) => {
+  const state = { dropped: false }
+  const run = async (args, cwd) => {
+    if (args.includes('push') && !state.dropped && (await isOrdersPush(args, cwd))) {
+      state.dropped = true
+      await git(args, cwd)
+      throw new Error('the connection was reset after the server took the push')
+    }
+    return git(args, cwd)
+  }
+  return { run, state }
+}
+const isRunPush = async (args, cwd) => (await git(['log', '-1', '--format=%s', args.at(-1).split(':')[0]], cwd)).stdout.startsWith('Mailbox order')
+const commitsWithTrailer = async (w, id) => (await git(['log', '--format=%H', '--grep', `^Mailbox-Order: ${id}$`, 'refs/heads/main'], w.originDir)).stdout.trim().split('\n').filter(Boolean)
+
+test('a card push that lands but reports a failure is done once: one card, one commit with the trailer, settled ok, nothing redone', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  const flaky = landsThenFails()
+  const result = await runTick(w.ctx({ git: flaky.run }))
+  assert.equal(flaky.state.dropped, true)
+  assert.deepEqual([result.orders.ok, result.orders.failed], [1, 0])
+  assert.ok(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'))
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice-2.md'), null, 'no second card')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1, 'one commit carries the order')
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.why], ['ok', null])
+  assert.match(final.commit, /^[0-9a-f]{12}$/)
+}))
+
+test('a run whose push lands but reports a failure is settled ok, not "push-failed", and Claude was started once', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  const flaky = landsThenFails(isRunPush)
+  await runTick(w.ctx({ git: flaky.run }))
+  assert.equal(flaky.state.dropped, true)
+  assert.ok(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), 'its files are on main')
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.why], ['ok', null])
+  assert.equal(entryFor(await statusIn(w), sent.id).state, 'ok')
+  assert.equal(w.claude.calls.length, 1)
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+}))
+
+test('a push that lands, reports a failure, and has another pusher\'s commit on top of it by the time it is checked is still done once', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  const flaky = landsThenFails()
+  const onTop = async (args, cwd) => {
+    try {
+      return await flaky.run(args, cwd)
+    } catch (error) {
+      await w.otherPush('theirs.md')
+      throw error
+    }
+  }
+  await runTick(w.ctx({ git: onTop }))
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice-2.md'), null)
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+  assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
+}))
+
+test('before an order is done a second time the team repo is asked whether it is already there: when it is, the order is ok and nothing is redone', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  // The push's own check is made to miss that its commit is on main (it answers "moved"); only the look through main's
+  // history for the order's trailer, made before any redo, can then keep the order from being done twice.
+  const flaky = landsThenFails()
+  let missed = false
+  const blind = async (args, cwd) => {
+    if (args.includes('merge-base') && args.includes('refs/remotes/origin/main')) {
+      missed = true
+      throw new Error('not an ancestor')
+    }
+    return flaky.run(args, cwd)
+  }
+  await runTick(w.ctx({ git: blind }))
+  assert.equal(missed, true)
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice-2.md'), null, 'not made twice')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+  assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
+}))
+
+test('after a failed push the team repo cannot be read: the order is outcome unknown, not failed, not redone - and a later tick that can read it settles it as landed without running anything', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  // The push lands, git reports a failure, and from then on every question to the team repo fails.
+  const flaky = landsThenFails(isRunPush)
+  const broken = async (args, cwd) => {
+    if (flaky.state.dropped && (args.includes('ls-remote') || args.includes('fetch'))) throw new Error('unreachable')
+    return flaky.run(args, cwd)
+  }
+  const first = await runTick(w.ctx({ git: broken }))
+  assert.equal(first.orders.failed, 0)
+  const unchecked = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([unchecked.state, unchecked.landed, unchecked.why], ['unknown', null, null])
+  assert.equal(w.claude.calls.length, 1)
+  w.clock.advance(5 * MINUTE)
+  await runTick(w.ctx({ force: true }))
+  const settled = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([settled.state, settled.landed], ['unknown', true])
+  assert.match(settled.commit, /^[0-9a-f]{12}$/)
+  assert.equal(w.claude.calls.length, 1, 'Claude was not started again')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+}))
+
+test('a push beaten by another pusher, when the team repo then cannot be read to look for the order, leaves the order outcome unknown: it is not redone on a guess', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  let raced = false
+  let afterPush = 0
+  const racing = async (args, cwd) => {
+    if (args.includes('commit') && !raced) {
+      raced = true
+      await w.otherPush('theirs.md')
+    }
+    // The push's own look at main is the first fetch after it; the look for the order's trailer is the second.
+    if (args.includes('push')) afterPush = 1
+    else if (args.includes('fetch') && afterPush > 0 && (afterPush += 1) > 2) throw new Error('unreachable')
+    return git(args, cwd)
+  }
+  const result = await runTick(w.ctx({ git: racing }))
+  assert.equal(result.orders.failed, 0)
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.landed], ['unknown', null])
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), null, 'not redone on a guess')
+}))
+
+test('a push that really was beaten by another pusher (our commit is not on main) is still put back on top of theirs - the race is not mistaken for a landed push', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  let raced = false
+  const racing = async (args, cwd) => {
+    if (args.includes('commit') && !raced) {
+      raced = true
+      await w.otherPush('theirs.md')
+    }
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: racing }))
+  assert.equal(await w.inOrigin.file('theirs.md'), 'x\n')
+  assert.ok(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'))
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+  assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
 }))
 
 /* ---------- the status file ------------------------------------------------------------------------------------------ */
@@ -1109,8 +1253,7 @@ test('a push the team repo cannot take at all - it cannot be reached - is tried 
     if (args.includes('push') || args.includes('ls-remote')) throw new Error('unreachable')
     return git(args, cwd)
   }
-  const result = await runTick(w.ctx({ git: down }))
-  assert.equal(result.orders.failed, 1)
+  await runTick(w.ctx({ git: down }))
   assert.equal(pushes >= 1 && pushes <= 2, true, `${pushes} pushes (the order, then the status)`)
 }))
 

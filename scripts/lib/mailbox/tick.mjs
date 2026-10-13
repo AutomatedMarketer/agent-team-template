@@ -479,16 +479,17 @@ async function publish(s, o) {
       trailer: `Mailbox-Order: ${o.id}`
     })
     const pushed = await pushCommits({ git: ctx.git, work: workDir, emptyHooks: s.hooks, commit, expected: o.head, count: 1 })
-    if (pushed.ok) {
-      const files = []
-      for (const path of [...o.files, statusPath]) {
-        const read = await readRepoFile(workDir, path, s.git)
-        files.push({ path, sha256: sha256(read.text ?? '') })
-      }
-      await settle(s, o.id, o.action, { state: 'ok', commit: commit.slice(0, 12), startedAt: o.startedAt, files })
-      return
-    }
-    if (pushed.why !== 'moved' || attempt === MOST_PUSH_ATTEMPTS) break
+    if (pushed.ok) return settleLanded(s, o, commit)
+    // The team repo could not be asked whether the push landed after git said it failed. It may have: a dropped connection or
+    // git's own time limit can come after the server moved main. Doing the order again could apply it twice, so it is neither
+    // failed (which invites a resend) nor redone: it is left as outcome unknown, and a later tick settles it by reading.
+    if (pushed.why === 'unreachable') return settle(s, o.id, o.action, { state: 'unknown', startedAt: o.startedAt })
+    if (pushed.why !== 'moved') break
+    // Before anything is done a second time, ask the team repo whether this very order is already on main.
+    const there = await landedCommit({ git: ctx.git, work: workDir, emptyHooks: s.hooks, id: o.id })
+    if (there.state === 'found') return settleLanded(s, o, there.commit)
+    if (there.state === 'unknown') return settle(s, o.id, o.action, { state: 'unknown', startedAt: o.startedAt })
+    if (attempt === MOST_PUSH_ATTEMPTS) break
     const reset = await o.level()
     if (!reset.ok) break
     o.head = reset.head
@@ -498,6 +499,17 @@ async function publish(s, o) {
   }
   // Nothing of it left this Mac. The clone is brought level again before anything else is done in it, and Claude is not run again.
   await o.fail('push-failed')
+}
+
+// The order is on main: say so, with the hashes of the files as they are in the work copy (which is where the commit was made).
+async function settleLanded(s, o, commit) {
+  const { workDir } = s.ctx.places
+  const files = []
+  for (const path of [...o.files, mailboxPath(s.allow.runner)]) {
+    const read = await readRepoFile(workDir, path, s.git)
+    files.push({ path, sha256: sha256(read.text ?? '') })
+  }
+  await settle(s, o.id, o.action, { state: 'ok', commit: commit.slice(0, 12), startedAt: o.startedAt, files })
 }
 
 /* ---------- the status file ----------------------------------------------------------------------------------------- */
