@@ -191,16 +191,56 @@ test('the guide has the runner run once with nothing waiting before the first or
   assert.ok(tick.includes('claimsSince: store.since'))
 })
 
-test('the guide tells the owner to wait two minutes after the first check, because a new claim store records its moment plus the clock skew the contract allows', async () => {
+test('the guide tells the owner to wait about two minutes after the first check, and says what the board then shows - the words the owner sees, not the word the code uses', async () => {
   const doc = await guide()
   const step = flat(section(doc, '### 7. One order, watched', '### 8.'))
-  assert.match(step, /Wait two minutes./)
-  assert.match(step, /refused as `before-claims`/)
-  assert.match(flat(doc), /| A test order refused as `before-claims` right after the runner's first check |/)
+  assert.match(step, /Wait about two minutes/)
+  assert.match(step, /Wait a little longer if your Mac's clock runs ahead of the board's/)
+  assert.ok(step.includes('The board shows it as **refused: not valid**'))
+  assert.match(step, /the order did not pass its checks/)
+  assert.ok(flat(doc).includes("| A test order shows **refused: not valid** right after the runner's first check |"))
+  // The code's word for this refusal is not one the owner ever sees.
+  assert.doesNotMatch(flat(doc), /before-claims/)
   // The two minutes are the contract's own skew, which is what the store adds (claims.mjs).
   const { LIFE } = await import('../scripts/lib/mailbox/contract.mjs')
   assert.equal(LIFE.futureSkewSeconds, 120)
   assert.ok((await read('scripts/lib/mailbox/claims.mjs')).includes('LIFE.futureSkewSeconds * 1000'))
+})
+
+test('what the guide says the board shows for a too-early order is what the code writes: before-claims is settled as "not-valid", and the contract\'s words for that are the ones in the guide', async () => {
+  // The code: an authentic order the contract's checks turn away with a word that is not one of the status file's own reasons is "not-valid".
+  const tick = await read('scripts/lib/mailbox/tick.mjs')
+  assert.ok(tick.includes("REFUSAL_FOR[verdict.verdict] ?? 'not-valid'"))
+  const table = tick.match(/const REFUSAL_FOR = ({[^}]*})/)[1]
+  assert.doesNotMatch(table, /before-claims/, 'before-claims has its own reason, so the guide would be wrong')
+  // And the board's words for "not-valid" are the shared contract's.
+  const fixture = JSON.parse(await read('tests/fixtures/mailbox-parity.json'))
+  assert.equal(fixture.status.reasons.refused['not-valid'], 'the order did not pass its checks')
+})
+
+test('no one paste block in the guide both pauses and un-pauses, or both pauses and removes the LaunchAgent: pasting one block must do one thing', async () => {
+  const doc = await guide()
+  const bash = blocks(doc).filter((one) => one.language === 'bash').map((one) => one.body)
+  // A line that runs a command (a comment does not count).
+  const runs = (body, pattern) => body.split('\n').some((line) => !line.trim().startsWith('#') && pattern.test(line))
+  for (const body of bash) {
+    const touches = runs(body, /^touch .*PAUSE/)
+    const removes = runs(body, /^rm .*PAUSE/)
+    const boots = runs(body, /^launchctl bootout/)
+    assert.ok(!(touches && removes), `a block both creates and removes PAUSE: ${body.split('\n')[1]}`)
+    assert.ok(!((touches || removes) && boots), `a block both pauses or resumes and removes the LaunchAgent: ${body.split('\n')[1]}`)
+  }
+  // The three exist, each as its own block.
+  assert.equal(bash.filter((body) => runs(body, /^touch .*PAUSE/)).length, 1)
+  assert.equal(bash.filter((body) => runs(body, /^rm .*PAUSE/)).length, 1)
+  assert.equal(bash.filter((body) => runs(body, /^launchctl bootout/)).length, 1)
+})
+
+test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
+  const doc = flat(await guide())
+  assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)
+  const { LIFE } = await import('../scripts/lib/mailbox/contract.mjs')
+  assert.equal(LIFE.maxSeconds, 3600)
 })
 
 test('the pause switch and the rollback are in the guide, and the pause file is the one the code reads', async () => {

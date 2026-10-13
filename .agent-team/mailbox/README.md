@@ -157,7 +157,7 @@ So run it once with nothing waiting. Then send the test order.
 node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --once
 ```
 
-Wait two minutes. The runner notes a moment two minutes after its first check, because your Mac's clock can run a little behind the board's. An order tapped before that moment is refused as `before-claims`. It just expires; tap a new one. Then, on the board, tap **Add task** with a card called "Mailbox test card". Then:
+Wait about two minutes. Wait a little longer if your Mac's clock runs ahead of the board's. The runner notes a moment two minutes after its first check, because your Mac's clock can run a little behind the board's. An order tapped before that moment is refused. The board shows it as **refused: not valid** ("the order did not pass its checks"). It just expires; tap a new one. Then, on the board, tap **Add task** with a card called "Mailbox test card". Then:
 
 ```bash
 # on the Mac Mini - the second check picks the order up
@@ -188,15 +188,34 @@ how often it really asks; the runner skips the ticks in between.
 
 ## Pause, stop, and put it back
 
-```bash
-# on the Mac Mini - pause: nothing is asked, claimed or run, until you remove the file
-touch ~/.local/state/agent-mailbox/PAUSE
-rm ~/.local/state/agent-mailbox/PAUSE
+Paste one block at a time.
 
-# on the Mac Mini - remove it completely (the claims stay, as a record)
+To **pause**: nothing is asked, claimed or run until you remove the file.
+
+```bash
+# on the Mac Mini - pause the runner
+touch ~/.local/state/agent-mailbox/PAUSE
+```
+
+To **resume** after a pause:
+
+```bash
+# on the Mac Mini - resume the runner
+rm ~/.local/state/agent-mailbox/PAUSE
+```
+
+To **remove the LaunchAgent** completely (the claims stay, as a record):
+
+```bash
+# on the Mac Mini - remove the LaunchAgent
 launchctl bootout gui/$(id -u)/local.donna.cockpit-mailbox
 mv ~/Library/LaunchAgents/local.donna.cockpit-mailbox.plist ~/Desktop/
 ```
+
+If you ever restore or delete the runner's state folder (`~/.local/state/agent-mailbox`), keep the runner paused for an hour before you resume it.
+The folder holds the record of which orders were already done.
+Every order expires within an hour.
+So after an hour no live order can be done a second time.
 
 To send orders back to cloud routines, set `FIRE_MODE=cloud` in Vercel (or remove it) and redeploy. Orders still
 waiting expire by themselves.
@@ -258,7 +277,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | An order shows **refused** on the board | The Mac turned it down for a fixed reason (not on its list, daily limit, expired...) | The board shows the reason in words |
 | An order shows **failed** | It started and nothing left the Mac | Look at the claim folder's transcript |
 | Everything refused as "not valid" after the claims folder was wiped | The runner records when its claims began and refuses any order issued before that, so a lost claims folder can never run an old order again | Wait for new orders; this is the safe behaviour |
-| A test order refused as `before-claims` right after the runner's first check | The runner's claims begin two minutes after its first check (your Mac's clock may run behind the board's), and an order tapped before then is refused | Wait two minutes after the first check, then tap a new order. The refused one expires by itself |
+| A test order shows **refused: not valid** right after the runner's first check | The runner's claims begin about two minutes after its first check (your Mac's clock may run behind the board's), and an order tapped before then is refused | Wait about two minutes after the first check, then tap a new order. Wait a little longer if your Mac's clock runs ahead of the board's. The refused one expires by itself |
 
 ## How it keeps your Mac safe
 
