@@ -1,0 +1,25 @@
+{
+  "disableAllHooks": true,
+  "disableSkillShellExecution": true,
+  "enableAllProjectMcpServers": false,
+  "autoMemoryEnabled": false,
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/**)",
+      "Read(~/.docker/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.local/state/**)",
+      "Read(~/.local/share/agent-mailbox/runner-code/**)",
+      "Read(~/Library/**)",
+      "Read(~/.claude/**)",
+      "Read(~/.claude.json)",
+      "Read(~/.netrc)",
+      "Read(~/.npmrc)",
+      "Read(~/.git-credentials)"
+    ]
+  }
+}

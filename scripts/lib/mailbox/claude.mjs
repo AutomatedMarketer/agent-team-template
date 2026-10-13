@@ -1,0 +1,333 @@
+// Running Claude Code for one job, on the owner's own login, with what it can do fixed here.
+//
+// The flags below are the ones the Claude Code docs describe (checked 2026-10-12):
+//   https://code.claude.com/docs/en/cli-reference   every flag
+//   https://code.claude.com/docs/en/headless        -p, stream-json, --permission-prompts, --bare (not used: it ignores the login)
+//   https://code.claude.com/docs/en/permissions     what a -p run reads from a folder it was never asked to trust
+//
+//   -p "<prompt>"                    one run, no conversation. The prompt is first so no list flag can swallow it
+//   --model <opus|sonnet>            the owner agent's own model
+//   --permission-mode dontAsk        anything not allowed is denied, never asked: a reach outside the work copy fails
+//   --permission-prompts none        nobody can answer a prompt, so Claude is told not to retry (v2.1.259 or newer)
+//   --tools <list>                   the built-in tools that exist at all. Bash is not one: there is no shell
+//   --allowedTools <list>            the same list, pre-approved
+//   --disallowedTools "mcp__*"       removes every connector tool
+//   --settings <file>                our own settings: hooks off, inline shell in skills off, deny rules (claude-settings.json)
+//   --setting-sources user           the team repo's settings are NOT read - not its hooks, its env block or its helpers.
+//                                    A -p run otherwise uses all three, in a folder it was never asked to trust
+//   --strict-mcp-config --mcp-config an empty server list: .mcp.json and every other source are ignored
+//   --disable-slash-commands         no skills and no commands: their hooks and allowed-tools never load. The job's
+//                                    steps are read as files, by the Read tool, because the prompt says to
+//   --no-session-persistence         nothing saved for a later --resume
+//   --max-turns 80                   a stop on a run that will not end
+//   --output-format stream-json --verbose   every message as a line: the transcript, and what is audited here
+//
+// Claude Code has no flag for a time limit ("The CLI has no run-timeout flag"), so the limit is kept here: ask it to
+// end, then kill the whole process group ten seconds later.
+//
+// Everything that touches another program goes through `spawn` and `kill` arguments, so the tests run a fake Claude and
+// the real one is never started on a development computer. This file never imports child_process.
+
+import { createWriteStream } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
+import { REPO_SHAPE } from './contract.mjs'
+
+export const TOOLS = Object.freeze(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+// The CLI reference says --tools cannot remove this one; calling it only ends the conversation.
+const TOLERATED = Object.freeze(['EndConversation'])
+const ALLOWED = new Set([...TOOLS, ...TOLERATED])
+export const SETTINGS_FILE = '.agent-team/mailbox/claude-settings.json'
+export const MCP_FILE = '.agent-team/mailbox/empty-mcp.json'
+export const MAX_TURNS = 80
+export const KILL_AFTER_MS = 10_000
+const CLOSE_WAIT_MS = 5_000
+const TRANSCRIPT_MAX_BYTES = 32 * 1024 * 1024
+export const LINE_MAX_CHARS = 4 * 1024 * 1024
+const STDERR_MAX_BYTES = 64 * 1024
+const MINIMUM_FOR_PERMISSION_PROMPTS = [2, 1, 259]
+const RUN_MODELS = ['opus', 'sonnet']
+
+/* ---------- the version ---------------------------------------------------------------------------------------------- */
+
+export function parseVersion(text) {
+  const found = typeof text === 'string' ? /(\d+)\.(\d+)\.(\d+)/.exec(text) : null
+  return found ? [Number(found[1]), Number(found[2]), Number(found[3])] : null
+}
+
+export function atLeast(version, minimum) {
+  for (let at = 0; at < 3; at += 1) {
+    if (version[at] !== minimum[at]) return version[at] > minimum[at]
+  }
+  return true
+}
+
+/* ---------- the argument list and the environment ------------------------------------------------------------------ */
+
+// `permissionPrompts` says this Claude Code knows --permission-prompts (see preflight): an older one rejects the flag.
+export function buildArgv({ prompt, model, codeDir, permissionPrompts }) {
+  if (typeof prompt !== 'string' || !prompt.trim() || prompt.startsWith('-')) throw new TypeError('claude: the prompt is text that does not start like a flag')
+  if (!RUN_MODELS.includes(model)) throw new TypeError('claude: the model is opus or sonnet')
+  if (typeof codeDir !== 'string' || !isAbsolute(codeDir)) throw new TypeError('claude: the code folder is a full path')
+  const tools = TOOLS.join(',')
+  return [
+    '-p', prompt,
+    '--model', model,
+    '--permission-mode', 'dontAsk',
+    ...(permissionPrompts ? ['--permission-prompts', 'none'] : []),
+    '--tools', tools,
+    '--allowedTools', tools,
+    '--disallowedTools', 'mcp__*',
+    '--settings', join(codeDir, ...SETTINGS_FILE.split('/')),
+    '--setting-sources', 'user',
+    '--strict-mcp-config', '--mcp-config', join(codeDir, ...MCP_FILE.split('/')),
+    '--disable-slash-commands',
+    '--no-session-persistence',
+    '--max-turns', String(MAX_TURNS),
+    '--output-format', 'stream-json', '--verbose'
+  ]
+}
+
+const ENV_BASE = ['HOME', 'PATH', 'USER', 'LANG', 'TMPDIR']
+// What a program on Windows cannot start without. (That setup is not tested on a Windows computer.)
+const ENV_WINDOWS = ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'Path']
+
+// The environment Claude is started with: these variables and no others - no key, no token, none of this Mac's secrets,
+// and nothing that changes where a program is loaded from or where it connects.
+export function claudeEnv(env, platform = process.platform) {
+  const wanted = platform === 'win32' ? [...ENV_BASE, ...ENV_WINDOWS] : ENV_BASE
+  return Object.fromEntries(wanted.filter((name) => typeof env?.[name] === 'string').map((name) => [name, env[name]]))
+}
+
+// Keys and addresses that would send a run to a different account, a different server or a per-token bill. The runner
+// is not started with one of these set; the names are returned, never the values.
+const UNSAFE_NAMES = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']
+
+export function unsafeEnv(env) {
+  return UNSAFE_NAMES.filter((name) => typeof env?.[name] === 'string' && env[name] !== '')
+}
+
+/* ---------- stopping a program and everything it started ----------------------------------------------------------- */
+
+// On a Mac or Linux the program is its own process group, so a signal to the group reaches everything it started; on
+// Windows the whole tree is ended by the system's own taskkill.
+export function killTree(pid, signal, { platform = process.platform, spawn, systemRoot = process.env.SystemRoot || 'C:\\Windows' } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  if (platform === 'win32') {
+    try {
+      spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+    } catch {
+      // Nothing more can be done from here.
+    }
+    return
+  }
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    try {
+      process.kill(pid, signal)
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+/* ---------- running it --------------------------------------------------------------------------------------------- */
+
+const TOOL_NAME = /^[A-Za-z0-9_*-]{1,64}$/
+
+// Claude's output is one JSON message per line. Every one is read for two things: the tools it lists or calls, which
+// must be the allowed ones, and the final result.
+//   { ok: true, calls, denials, exitCode, transcriptBytes }
+//   { ok: false, why: 'claude-failed' | 'timed-out' | 'tool-refused', calls, denials, exitCode, transcriptBytes, tool? }
+// The transcript - every byte it said - is written to `transcriptPath` for the owner alone. A tool outside the list
+// stops the run at once, the whole process group, with no time to finish.
+export function runClaude({
+  file, argv, cwd, env, timeoutMs, killAfterMs = KILL_AFTER_MS, closeWaitMs = CLOSE_WAIT_MS,
+  transcriptPath, stderrPath, maxTranscriptBytes = TRANSCRIPT_MAX_BYTES,
+  spawn, kill, platform = process.platform, openStream = createWriteStream
+}) {
+  const stop = kill ?? ((pid, signal) => killTree(pid, signal, { platform, spawn }))
+  return new Promise((resolve) => {
+    const calls = new Map()
+    let transcriptBytes = 0
+    let reason = null
+    let tool = null
+    let resultMessage = null
+    let exitCode = null
+    let settled = false
+    let child = null
+    let pending = ''
+    let stderrBytes = 0
+    let stderrFile = null
+    let killTimer = null
+    let closeTimer = null
+    const decoder = new StringDecoder('utf8')
+    const transcript = openStream(transcriptPath, { flags: 'w', mode: 0o600 })
+    transcript.on('error', () => hardStop('claude-failed'))
+
+    const answer = () => {
+      const base = { calls: Object.fromEntries(calls), denials: Array.isArray(resultMessage?.permission_denials) ? resultMessage.permission_denials.length : 0, exitCode, transcriptBytes }
+      if (reason === null && exitCode === 0 && resultMessage?.type === 'result' && resultMessage.is_error === false && resultMessage.subtype === 'success') return { ok: true, ...base }
+      return { ok: false, why: reason ?? 'claude-failed', ...base, ...(tool !== null ? { tool } : {}) }
+    }
+
+    const finalize = (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearTimeout(killTimer)
+      clearTimeout(closeTimer)
+      exitCode = typeof code === 'number' ? code : null
+      read(pending)
+      stderrFile?.end()
+      transcript.end(() => resolve(answer()))
+    }
+
+    // Stop the program now, whole group, and give it a short time to close; whatever it says meanwhile is only kept.
+    function hardStop(why) {
+      reason ??= why
+      if (child?.pid) stop(child.pid, 'SIGKILL')
+      closeTimer ??= setTimeout(() => finalize(null), closeWaitMs)
+    }
+
+    const refuseTool = (name) => {
+      tool = typeof name === 'string' && TOOL_NAME.test(name) ? name : 'unknown'
+      hardStop('tool-refused')
+    }
+
+    const audit = (name) => {
+      if (!ALLOWED.has(name)) return refuseTool(name)
+      calls.set(name, (calls.get(name) ?? 0) + 1)
+      return undefined
+    }
+
+    function read(text) {
+      let event
+      try {
+        event = JSON.parse(text)
+      } catch {
+        return
+      }
+      if (reason === 'tool-refused') return
+      if (event?.type === 'system' && event.subtype === 'init') {
+        if (!Array.isArray(event.tools)) return refuseTool('unknown')
+        for (const name of event.tools) {
+          if (!ALLOWED.has(name)) return refuseTool(name)
+        }
+        if (Array.isArray(event.mcp_servers) && event.mcp_servers.length) return refuseTool('mcp')
+      } else if (Array.isArray(event?.message?.content)) {
+        for (const block of event.message.content) {
+          if (block?.type === 'tool_use') audit(block.name)
+          if (reason === 'tool-refused') return
+        }
+      } else if (event?.type === 'result') {
+        resultMessage = event
+      }
+    }
+
+    let timer = null
+    try {
+      child = spawn(file, argv, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: platform !== 'win32', windowsHide: true, shell: false })
+    } catch {
+      finalize(null)
+      return
+    }
+    timer = setTimeout(() => {
+      reason ??= 'timed-out'
+      if (child.pid) stop(child.pid, 'SIGTERM')
+      killTimer = setTimeout(() => {
+        if (child.pid) stop(child.pid, 'SIGKILL')
+        closeTimer ??= setTimeout(() => finalize(null), closeWaitMs)
+      }, killAfterMs)
+    }, timeoutMs)
+
+    child.stdout?.on('data', (chunk) => {
+      transcriptBytes += chunk.length
+      transcript.write(chunk)
+      if (transcriptBytes > maxTranscriptBytes) hardStop('claude-failed')
+      pending += decoder.write(chunk)
+      const lines = pending.split('\n')
+      pending = lines.pop()
+      for (const text of lines) read(text)
+      if (pending.length > LINE_MAX_CHARS) {
+        pending = ''
+        hardStop('claude-failed')
+      }
+    })
+    child.stderr?.on('data', (chunk) => {
+      if (!stderrPath || stderrBytes >= STDERR_MAX_BYTES) return
+      stderrFile ??= openStream(stderrPath, { flags: 'w', mode: 0o600 })
+      const part = chunk.subarray(0, STDERR_MAX_BYTES - stderrBytes)
+      stderrBytes += part.length
+      stderrFile.write(part)
+    })
+    child.on('error', () => finalize(null))
+    child.on('close', (code) => finalize(code))
+  })
+}
+
+/* ---------- the daily check ---------------------------------------------------------------------------------------- */
+
+const escapeText = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// Whether a git address is the team repo on GitHub, written any of the usual ways. Anything else - another host, a
+// look-alike host, another repo, a repo with something after its name, a path on this computer - is not.
+export function originMatches(url, repo) {
+  if (typeof url !== 'string' || typeof repo !== 'string' || !REPO_SHAPE.test(repo)) return false
+  const [owner, name] = repo.split('/')
+  const address = new RegExp(`^(?:https://(?:[^@/\\s]+@)?github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${escapeText(owner)}/${escapeText(name)}(?:\\.git)?/?$`, 'i')
+  return address.test(url)
+}
+
+// The checks made once a day before any order is done. Every problem is named in a word and all of them are returned.
+//   find(name)        { state: 'found', path } | { state: 'not found' | 'refused' }
+//   exec(file, args, options)   a program run by absolute path: { stdout } or a rejection
+//   origin()          the work copy's origin as its config file says it: { fetch, push } (workcopy.mjs, readOrigin) or null.
+//                     Read as text, never by running git in a folder whose settings are not yet trusted
+//   originAccepted(url)   whether an address is the team repo
+//   emptyDir, env, platform
+// Claude is asked its version and its login from an empty folder, with the small environment, so it reads no team repo.
+// The two checks that cost nothing and can change from one tick to the next, so they are made on every tick and never
+// remembered: a key in the environment, and where the work copy's origin points (pushes can go somewhere else than
+// fetches do, so both addresses must be the team repo).
+const keyProblems = (env) => (unsafeEnv(env).length ? ['key-in-environment'] : [])
+
+async function originProblems({ origin, originAccepted }) {
+  let addresses = null
+  try {
+    addresses = await origin()
+  } catch {
+    addresses = null
+  }
+  return !addresses || !originAccepted(addresses.fetch) || !originAccepted(addresses.push) ? ['origin-mismatch'] : []
+}
+
+export async function localProblems({ env, origin, originAccepted }) {
+  return [...keyProblems(env), ...(await originProblems({ origin, originAccepted }))]
+}
+
+export async function preflight({ find, exec, origin, originAccepted, emptyDir, env, platform }) {
+  const problems = [...keyProblems(env)]
+  let version = null
+  const found = await find('claude')
+  if (found.state !== 'found') {
+    problems.push('claude-missing')
+  } else {
+    const run = (args) => exec(found.path, args, { cwd: emptyDir, env: claudeEnv(env, platform), timeout: 15_000 })
+    try {
+      version = parseVersion((await run(['--version'])).stdout)
+    } catch {
+      version = null
+    }
+    if (version === null) problems.push('version-unknown')
+    try {
+      const status = JSON.parse((await run(['auth', 'status'])).stdout)
+      if (status?.authMethod !== 'claude.ai') problems.push('wrong-login')
+    } catch {
+      problems.push('not-logged-in')
+    }
+  }
+  problems.push(...(await originProblems({ origin, originAccepted })))
+  return { ok: problems.length === 0, version, permissionPrompts: version !== null && atLeast(version, MINIMUM_FOR_PERMISSION_PROMPTS), problems }
+}

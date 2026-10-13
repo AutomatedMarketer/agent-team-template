@@ -123,7 +123,7 @@ const OPENING = /^---\r?\n/
 
 // Where the frontmatter is, the way the board's reader finds it (frontmatter.mjs): `---` and a line break at the very
 // start, up to the first line that starts with `---`. Not an end that is only nearly one.
-function frontmatterOf(text) {
+export function frontmatterOf(text) {
   const opening = OPENING.exec(text)
   if (!opening) return null
   const from = opening[0].length
@@ -279,7 +279,7 @@ const absolute = (root, relative) => join(root, ...relative.split('/'))
 
 // A file that should be there: its text, or the word 'link' (it, or a folder above it, is one - never followed),
 // or 'missing' (not there, not a plain file, or too big to be one).
-async function existing(root, relative, git) {
+export async function readRepoFile(root, relative, git) {
   try {
     await assertNoLinks(root, relative, { git })
   } catch (error) {
@@ -353,7 +353,7 @@ export async function applyCard({ root, action, fields, now, timeZone, git }) {
     }
     case 'arm': {
       const workflow = WORKFLOW_NAME_RULE(fields)
-      const found = workflow ? await existing(root, workflow, git) : { state: 'missing' }
+      const found = workflow ? await readRepoFile(root, workflow, git) : { state: 'missing' }
       if (found.state === 'link') return failed()
       if (found.state !== 'ok') return refused('no-workflow')
       const card = needsYouCard('arm', fields)
@@ -362,7 +362,7 @@ export async function applyCard({ root, action, fields, now, timeZone, git }) {
     case 'move': {
       // 'readme' is the folder's own README, which a case-blind system would find under the name of a card.
       const relative = isSlug(fields?.task) && fields.task !== 'readme' ? `tasks/${fields.task}.md` : null
-      const found = relative ? await existing(root, relative, git) : { state: 'missing' }
+      const found = relative ? await readRepoFile(root, relative, git) : { state: 'missing' }
       if (found.state === 'link') return failed()
       if (found.state !== 'ok') return refused('card-not-found')
       const after = setFrontmatter(found.text, { status: fields.status, doneAt: todayIn(now, timeZone) })
@@ -370,13 +370,13 @@ export async function applyCard({ root, action, fields, now, timeZone, git }) {
     }
     case 'pause': {
       const relative = WORKFLOW_NAME_RULE(fields)
-      const found = relative ? await existing(root, relative, git) : { state: 'missing' }
+      const found = relative ? await readRepoFile(root, relative, git) : { state: 'missing' }
       if (found.state === 'link') return failed()
       if (found.state !== 'ok') return refused('no-workflow')
       return save(root, relative, found.text, commentOutSchedule(found.text).text, git)
     }
     case 'approve': {
-      const found = await existing(root, 'proposals.yml', git)
+      const found = await readRepoFile(root, 'proposals.yml', git)
       if (found.state === 'link') return failed()
       if (found.state !== 'ok') return refused('no-such-row')
       const approved = approveRow(found.text, fields.task)
