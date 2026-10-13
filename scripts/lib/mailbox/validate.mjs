@@ -71,7 +71,7 @@ const isText = (value, { min, max }) => typeof value === 'string' && value.lengt
 // A line of text equal to itself trimmed, with nothing in it that is a control or cannot be seen.
 const isPlainLine = (value, rule) => isText(value, rule) && value === value.trim() && !CONTROL.test(value) && !hiddenText(value)
 // (The shape has at least one character, so an empty slug needs no check of its own.)
-const isSlug = (value) => typeof value === 'string' && value.length <= FIELD_RULES.slug.max && SLUG_SHAPE.test(value)
+export const isSlug = (value) => typeof value === 'string' && value.length <= FIELD_RULES.slug.max && SLUG_SHAPE.test(value)
 
 // How each field is held. Every one is checked by its name, so a field that is not here cannot be good.
 const CHECKS = {
