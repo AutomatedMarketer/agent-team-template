@@ -43,6 +43,7 @@ import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
 import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
 import { proofHolds, proofKept } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
+import { gitUnchanged, remakeWorkCopy, snapshotGit } from './gitguard.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
 import { ordersFromClaims, reconcile } from './ledger.mjs'
@@ -413,6 +414,9 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
     s.log(`mailbox: a run was refused as not ready (${fit.why}): ${fit.words}`)
     return settle(s, id, action, { state: 'refused', why: 'not-ready' })
   }
+  // What git reads as configuration, as it is now: compared again when Claude is done, before git is run in this folder (gitguard.mjs).
+  const before = await snapshotGit(workDir)
+  if (!before.ok) return fail('change-refused')
   const ran = await runClaude({
     file: fit.file,
     argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
@@ -426,6 +430,13 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
     kill: ctx.kill,
     platform: ctx.platform
   })
+  // Before anything else, and whether or not the run went well: git must not run in a folder where Claude changed what git reads. The order fails
+  // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.
+  if (!(await gitUnchanged(workDir, before))) {
+    s.log('mailbox: a run changed the git settings of the work copy, so the order failed and the work copy was made again')
+    await remakeWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, before })
+    return fail('change-refused')
+  }
   if (!ran.ok) return fail(ran.why)
 
   const checked = await checkChanges({ root: workDir, git: s.git, action, fields, plan })

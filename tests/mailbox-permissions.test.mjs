@@ -31,7 +31,7 @@ test('a rule is a tool name, with a path pattern in brackets or without one', ()
 })
 
 test('a leading / in a rule on the command line is the folder Claude is started in: inside it is allowed, anywhere else is not', () => {
-  assert.deepEqual(ask({}, 'Read', inside), { allowed: true, confined: false, denyList: false, notAllowed: false })
+  assert.deepEqual(ask({}, 'Read', inside), { allowed: true, confined: false, denyList: false, notAllowed: false, protectedPath: false })
   assert.equal(ask({}, 'Write', join(cwd, 'deeper', 'new.txt')).allowed, true, 'Edit covers Write')
   const out = ask({}, 'Read', outside)
   assert.deepEqual([out.allowed, out.notAllowed], [false, true])

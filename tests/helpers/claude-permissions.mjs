@@ -59,6 +59,11 @@ function absolutePattern(spec, { cwd, home, root }) {
   return `${cwd}/${spec.startsWith('./') ? spec.slice(2) : spec}`
 }
 
+// Writes to these folders are never approved without a person, and in dontAsk mode they are denied (permission-modes#protected-paths,
+// read 2026-10-13). Only the ones a test can meet are listed here, matched by a folder of that name anywhere on the path below the start folder.
+const PROTECTED_DIRS = ['.git', '.claude', '.vscode', '.idea', '.husky']
+const WRITES = ['Edit', 'Write']
+
 const matches = (spec, target, where) => globToRegex(absolutePattern(spec, where)).test(target)
 
 // Which rules cover which tool. Edit covers every tool that edits a file, Write included; a Read deny rule also covers Edit and Write.
@@ -66,7 +71,7 @@ const DENY_COVERS = { Read: ['Read', 'Edit', 'Write'], Edit: ['Edit', 'Write'], 
 const ALLOW_COVERS = { Read: ['Read'], Edit: ['Edit', 'Write'], Write: ['Write'] }
 
 // config: { allow: rules from the command line, deny: rules from the settings file, settingsDir, restricted, blockReads, mode }.
-// -> { allowed, confined, denyList, notAllowed }: why it was refused is kept apart, so a test can say it was confinement and not the deny list.
+// -> { allowed, confined, denyList, notAllowed, protectedPath }: why it was refused is kept apart, so a test can say it was confinement and not the deny list.
 export function decide(config, { tool, path, cwd, home }) {
   const where = { cwd: posix(cwd), home: posix(home) }
   const target = posix(path)
@@ -82,7 +87,10 @@ export function decide(config, { tool, path, cwd, home }) {
   const denyList = hit(config.deny ?? [], DENY_COVERS, posix(config.settingsDir ?? cwd))
   const allowHit = hit(config.allow ?? [], ALLOW_COVERS, where.cwd)
   const notAllowed = config.mode === 'dontAsk' && !allowHit
-  return { allowed: !confined && !denyList && !notAllowed, confined, denyList, notAllowed }
+  // Checked before the allow rules are looked at: an allow rule does not pre-approve a protected path.
+  const below = fold(target).startsWith(`${fold(where.cwd)}/`) ? fold(target).slice(fold(where.cwd).length + 1).split('/') : []
+  const protectedPath = config.protectedPaths !== false && config.mode === 'dontAsk' && WRITES.includes(tool) && below.slice(0, -1).some((part) => PROTECTED_DIRS.includes(part))
+  return { allowed: !confined && !denyList && !notAllowed && !protectedPath, confined, denyList, notAllowed, protectedPath }
 }
 
 // A settings file that cannot be read is no settings: a fake Claude carries on with none, where the real one would stop. (A test that points

@@ -244,6 +244,17 @@ test('the guide says a change to any file of the runner code needs a new self-te
   for (const part of ['scripts/mailbox-runner.mjs', 'scripts/lib/mailbox', 'scripts/lib/status', '.agent-team/mailbox/prompts']) assert.ok(CODE_PARTS.includes(part), part)
 })
 
+test('the guide says the runner guards .git itself, and the code has both halves: the self-test canary and the snapshot before git', async () => {
+  const doc = flat(await guide())
+  assert.match(doc, /write a file inside the `.git` folder/)
+  assert.match(doc, /those six things/)
+  assert.match(doc, /compares it as soon as Claude stops, before any git command/)
+  assert.match(doc, /The work copy is thrown away and cloned again/)
+  assert.ok((await read('scripts/lib/mailbox/selftest.mjs')).includes("key: 'gitWrite'"))
+  const tick = await read('scripts/lib/mailbox/tick.mjs')
+  assert.ok(tick.indexOf('gitUnchanged(workDir, before)') < tick.indexOf('await checkChanges({ root: workDir, git: s.git, action, fields, plan })'), 'the snapshot is compared before the first git command after Claude')
+})
+
 test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
   const doc = flat(await guide())
   assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)

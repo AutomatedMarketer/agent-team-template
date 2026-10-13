@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { CLAUDE_FILE, mailboxWorld } from './helpers/mailbox-world.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { main } from '../scripts/lib/mailbox/command.mjs'
-import { PROOF_FILE, keepProof, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
+import { PROOF_FILE, dropProof, keepProof, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
 import { defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
 import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
 
@@ -347,12 +347,14 @@ test('the self-test works in a folder next to the real work copy that no deny ru
       assert.equal(dirname(dirname(cwd)), selfFolder(w))
       assert.ok(!cwd.startsWith(placesOf(w).stateDir), 'not in the state folder, which the deny list covers')
     }
-    assert.equal(decisions.length, 14, 'seven steps in each of the two runs')
+    assert.equal(decisions.length, 16, 'eight steps in each of the two runs')
     for (const one of decisions) {
       assert.equal(one.denyList, false, `step ${one.step}: no deny rule covers the file, so a refusal is not the deny list's`)
-      if (one.step >= 8) assert.deepEqual([one.allowed, one.confined, one.notAllowed], [true, false, false], `step ${one.step}: its own folder works`)
+      if (one.step === 8 || one.step === 9) assert.deepEqual([one.allowed, one.confined, one.notAllowed], [true, false, false], `step ${one.step}: its own folder works`)
       else assert.equal(one.allowed, false, `step ${one.step}: outside is refused`)
       if (one.step < 8) assert.ok(one.confined || one.notAllowed, `step ${one.step}: refused by the walls`)
+      // .git is inside the folder it works in, so the walls let it through; only the protected-path rule refuses it.
+      if (one.step === 10) assert.deepEqual([one.confined, one.notAllowed, one.protectedPath], [false, false, true], 'step 10: refused as a protected path')
     }
   } finally {
     await w.cleanup()
@@ -568,6 +570,43 @@ test('--selftest keeps the version asked of the file it followed to, not the ver
     const holds = (version) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version, file: VERSION_ONE })
     assert.equal((await holds([2, 1, 290])).holds, true)
     assert.equal((await holds([2, 1, 280])).holds, false, 'the link\'s version is not what was proven')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+/* ---------- the .git canary ---------------------------------------------------------------------------------------------- */
+
+test('the self-test asks Claude to write inside .git, and passes only if that is refused: when the write goes through it fails, names it, and keeps no proof', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const recorded = []
+    w.claude.script = confinedClaude(w, { record: recorded })
+    const good = await selftest(w)
+    assert.equal(good.code, 0, good.text)
+    assert.equal(recorded.filter((one) => one.step === 10).length, 2, 'asked once in each kind of run')
+    assert.ok(recorded.filter((one) => one.step === 10).every((one) => one.path.includes(`${join('.git', 'hooks')}`) && one.protectedPath === true && one.allowed === false))
+
+    await dropProof(placesOf(w).stateDir)
+    w.claude.script = confinedClaude(w, { weaken: { noProtectedPaths: true } })
+    const broken = await selftest(w)
+    assert.equal(broken.code, 1)
+    assert.match(broken.text, /writing a file inside \.git was NOT refused/)
+    assert.match(broken.text, /WRITTEN-GIT/)
+    assert.equal((await proofFor(w)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a self-test in which Claude is never seen trying to write inside .git does not pass: a skipped step proves nothing', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w, { skip: [10] })
+    const result = await selftest(w)
+    assert.equal(result.code, 1)
+    assert.match(result.text, /never seen trying writing a file inside \.git/)
+    assert.equal((await proofFor(w)).holds, false)
   } finally {
     await w.cleanup()
   }

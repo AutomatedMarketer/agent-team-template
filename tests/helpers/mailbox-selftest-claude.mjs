@@ -14,7 +14,7 @@
 //   unanswered  steps that are tried and never answered
 //   refuseInside  its own folder is refused too (the allow rules are broken, so a refusal elsewhere would prove nothing)
 //   when(args)  whether the misbehaviour above applies to this run (the web run has its own list of tools)
-//   weaken      { dropFlags, settings, addTools, plainAllows, noRestricted, noBlockReads, noDeny }: the run is started as if the runner had
+//   weaken      { dropFlags, settings, addTools, plainAllows, noRestricted, noBlockReads, noDeny, noProtectedPaths }: the run is started as if the runner had
 //               left a protection out - so a trap fires, or a wall is not there
 //   say(steps, cwd)  one more line the assistant says (to put a secret into what it says)
 //   initTools(args)  the tools it says it has, when that is not the --tools list
@@ -30,14 +30,14 @@ const said = (content) => ({ type: 'assistant', message: { content: [{ type: 'te
 const used = (id, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } })
 const answered = (id, content, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } })
 
-// The text in backticks on numbered line `step` of the prompt: a full path for steps 3 to 7, a name in its own folder for 8 and 9.
+// The text in backticks on numbered line `step` of the prompt: a full path for steps 3 to 7, a name in its own folder for 8 to 10.
 export function stepsOf(prompt) {
   const steps = {}
-  for (let step = 3; step <= 9; step += 1) steps[step] = new RegExp(`^${step}\\. [^\`\\n]*\`([^\`]+)\``, 'm').exec(prompt)?.[1] ?? null
+  for (let step = 3; step <= 10; step += 1) steps[step] = new RegExp(`^${step}\\. [^\`\\n]*\`([^\`]+)\``, 'm').exec(prompt)?.[1] ?? null
   return steps
 }
 
-const STEPS = [[3, 'Read'], [4, 'Read'], [5, 'Read'], [6, 'Write'], [7, 'Write'], [8, 'Read'], [9, 'Write']]
+const STEPS = [[3, 'Read'], [4, 'Read'], [5, 'Read'], [6, 'Write'], [7, 'Write'], [8, 'Read'], [9, 'Write'], [10, 'Write']]
 
 export function confinedClaude(w, { when = () => true, through = [], skip = [], unanswered = [], refuseInside = false, weaken = null, say = null, before = null, initTools = null, record = null, home = w.root } = {}) {
   return async (cwd, args) => {
@@ -54,14 +54,17 @@ export function confinedClaude(w, { when = () => true, through = [], skip = [], 
     if (weak.noRestricted) config.restricted = false
     if (weak.noBlockReads) config.blockReads = false
     if (weak.noDeny) config.deny = []
+    if (weak.noProtectedPaths) config.protectedPaths = false
     const listed = started.includes('--tools') ? started[started.indexOf('--tools') + 1].split(',') : []
     const events = [{ ...w.INIT, tools: initTools ? initTools(args) : [...listed, ...(weak.addTools ?? [])] }]
 
     for (const [step, tool] of STEPS) {
-      const inside = step >= 8
+      // Steps 8 and 9 are the control in its own folder; step 10 is in its own folder too, but into .git, which Claude Code protects.
+      const inside = step === 8 || step === 9
+      const here = step >= 8
       if (misbehaves && skip.includes(step)) continue
       const id = `t${step}`
-      const target = inside ? join(cwd, steps[step]) : steps[step]
+      const target = here ? join(cwd, steps[step]) : steps[step]
       events.push(used(id, tool, { file_path: steps[step] }))
       if (misbehaves && unanswered.includes(step)) continue
       const decision = decide(config, { tool, path: target, cwd, home })

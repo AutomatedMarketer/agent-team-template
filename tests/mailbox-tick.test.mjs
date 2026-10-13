@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { appendFile, access, mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { git } from './helpers/git.mjs'
 import { signBody } from '../scripts/lib/mailbox/envelope.mjs'
@@ -1571,3 +1571,84 @@ test('a self-test kept in the old form, with a version and settings but no file,
   assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'])
   assert.equal(w.claude.calls.length, 0)
 }))
+
+/* ---------- Claude changes what git reads ------------------------------------------------------------------------------- */
+
+// After Claude exits the runner runs git in the work copy as the owner, so a setting or hook planted in .git would run with the owner's
+// rights. The folder is compared with a snapshot taken just before Claude started, and git is not run in it if anything differs.
+const TAMPERS = [
+  ['a credential helper in .git/config', async (cwd) => appendFile(join(cwd, '.git', 'config'), '[credential]\n\thelper = !touch /tmp/pwned\n')],
+  ['an ssh command in .git/config', async (cwd) => appendFile(join(cwd, '.git', 'config'), '[core]\n\tsshCommand = touch /tmp/pwned\n')],
+  ['a hook', async (cwd) => writeFile(join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ntouch /tmp/pwned\n')],
+  ['a filter in .git/info/attributes', async (cwd) => {
+    await mkdir(join(cwd, '.git', 'info'), { recursive: true })
+    await writeFile(join(cwd, '.git', 'info', 'attributes'), '* filter=evil\n')
+  }]
+]
+
+for (const [what, tamper] of TAMPERS) {
+  test(`a run in which Claude plants ${what}: the order fails as "change-refused", no git runs in that copy afterwards, and the work copy is made again from the team repo`, () => withWorld(async (w) => {
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    w.claude.script = async (cwd, args, call) => {
+      const events = await w.claude.good(cwd, args, call)
+      await tamper(cwd)
+      return events
+    }
+    const afterClaude = []
+    const watching = async (args, cwd) => {
+      if (w.claude.calls.length > 0) afterClaude.push({ verb: args.find((one) => ['clone', 'diff', 'add', 'commit', 'push', 'status', 'fetch', 'checkout', 'clean', 'rev-parse', 'show'].includes(one)), cwd })
+      return git(args, cwd)
+    }
+    const result = await runTick(w.ctx({ git: watching }))
+    const final = await w.claimFile(sent.id, 'final.json')
+    assert.deepEqual([final.state, final.why], ['failed', 'change-refused'])
+    assert.equal(result.orders.failed, 1)
+    assert.equal(w.claude.calls.length, 1)
+    // The first git command after Claude is the clone that makes the copy again, run beside the old folder and not in it.
+    assert.deepEqual([afterClaude[0].verb, afterClaude[0].cwd], ['clone', dirname(w.places.workDir)])
+    assert.equal(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'nothing of the run was pushed')
+    assert.equal((await w.inOrigin.log()).some((subject) => subject.startsWith('Mailbox order')), false)
+    // The fresh copy has none of it.
+    assert.ok(!(await readFile(join(w.places.workDir, '.git', 'config'), 'utf8')).includes('pwned'))
+    assert.equal(await exists(join(w.places.workDir, '.git', 'hooks', 'pre-commit')), false)
+    assert.equal(await exists(join(w.places.workDir, '.git', 'info', 'attributes')), false)
+    assert.ok(w.logs.some((line) => line.includes('git settings of the work copy')))
+  }))
+}
+
+test('a run whose Claude changes nothing in .git is not disturbed by the check: the work copy is the same one, and the order lands', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  w.claude.script = w.claude.good
+  const cloned = []
+  const watching = async (args, cwd) => {
+    if (args.includes('clone')) cloned.push(cwd)
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: watching }))
+  assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
+  assert.deepEqual(cloned, [], 'not made again')
+}))
+
+test('Claude plants a hook and the run also failed: git still does not run in that copy, and the order is failed once', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  // No result line at all: the run itself is a failure. The check comes first all the same.
+  w.claude.script = async (cwd) => {
+    await writeFile(join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ntouch /tmp/pwned\n')
+    return []
+  }
+  // Every git command from the moment Claude has started until the fresh copy is cloned: none may be run in the old folder.
+  const beforeRemade = []
+  let remade = false
+  const watching = async (args, cwd) => {
+    if (args.includes('clone')) remade = true
+    else if (w.claude.calls.length > 0 && !remade) beforeRemade.push(args)
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: watching }))
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.why], ['failed', 'change-refused'])
+  assert.deepEqual(beforeRemade, [], 'no git command between Claude and the fresh copy')
+  assert.equal(await exists(join(w.places.workDir, '.git', 'hooks', 'pre-commit')), false)
+}))
+
+const exists = (path) => access(path).then(() => true, () => false)
