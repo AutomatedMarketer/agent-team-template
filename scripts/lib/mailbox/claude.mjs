@@ -8,7 +8,7 @@
 //   -p "<prompt>"                    one run, no conversation. The prompt is first so no list flag can swallow it
 //   --model <opus|sonnet>            the owner agent's own model
 //   --permission-mode dontAsk        anything not allowed is denied, never asked: a reach outside the work copy fails
-//   --permission-prompts none        nobody can answer a prompt, so Claude is told not to retry (v2.1.259 or newer)
+//   --permission-prompts none        nobody can answer a prompt, so Claude is told not to retry
 //   --tools <list>                   the built-in tools that exist at all. Bash is not one: there is no shell
 //   --allowedTools <list>            the same list, pre-approved
 //   --disallowedTools "mcp__*"       removes every connector tool
@@ -45,7 +45,23 @@ const CLOSE_WAIT_MS = 5_000
 const TRANSCRIPT_MAX_BYTES = 32 * 1024 * 1024
 export const LINE_MAX_CHARS = 4 * 1024 * 1024
 const STDERR_MAX_BYTES = 64 * 1024
-const MINIMUM_FOR_PERMISSION_PROMPTS = [2, 1, 259]
+
+// WHY a floor: every protection below is something an older Claude Code does not have, and a flag it does not know is an
+// error - or, worse for a rule it does not know, nothing at all. So the runner refuses to run Claude below the highest of
+// these, each as the Claude Code docs state it (read 2026-10-13):
+//   --restricted                                      v2.1.248  https://code.claude.com/docs/en/cli-reference (the --restricted row)
+//   permissions.blockReadsOutsideWorkingDirectories   v2.1.257  https://code.claude.com/docs/en/settings-reference
+//   --permission-prompts none                         v2.1.259  https://code.claude.com/docs/en/cli-reference (the --permission-prompts row)
+//   a Read deny rule also blocks Edit                 v2.1.208  https://code.claude.com/docs/en/permissions#read-and-edit
+//   a Read deny rule also blocks Write                v2.1.228  (the same section)
+export const VERSION_NEEDS = Object.freeze({
+  '--restricted': Object.freeze([2, 1, 248]),
+  'permissions.blockReadsOutsideWorkingDirectories': Object.freeze([2, 1, 257]),
+  '--permission-prompts none': Object.freeze([2, 1, 259]),
+  'a Read deny rule blocks Edit': Object.freeze([2, 1, 208]),
+  'a Read deny rule blocks Write': Object.freeze([2, 1, 228])
+})
+export const MINIMUM_VERSION = Object.freeze(Object.values(VERSION_NEEDS).reduce((highest, needed) => (atLeast(needed, highest) ? needed : highest), [0, 0, 0]))
 const RUN_MODELS = ['opus', 'sonnet']
 
 /* ---------- the version ---------------------------------------------------------------------------------------------- */
@@ -64,8 +80,7 @@ export function atLeast(version, minimum) {
 
 /* ---------- the argument list and the environment ------------------------------------------------------------------ */
 
-// `permissionPrompts` says this Claude Code knows --permission-prompts (see preflight): an older one rejects the flag.
-export function buildArgv({ prompt, model, codeDir, permissionPrompts }) {
+export function buildArgv({ prompt, model, codeDir }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.startsWith('-')) throw new TypeError('claude: the prompt is text that does not start like a flag')
   if (!RUN_MODELS.includes(model)) throw new TypeError('claude: the model is opus or sonnet')
   if (typeof codeDir !== 'string' || !isAbsolute(codeDir)) throw new TypeError('claude: the code folder is a full path')
@@ -74,7 +89,7 @@ export function buildArgv({ prompt, model, codeDir, permissionPrompts }) {
     '-p', prompt,
     '--model', model,
     '--permission-mode', 'dontAsk',
-    ...(permissionPrompts ? ['--permission-prompts', 'none'] : []),
+    '--permission-prompts', 'none',
     '--tools', tools,
     '--allowedTools', tools,
     '--disallowedTools', 'mcp__*',
@@ -321,6 +336,7 @@ export async function preflight({ find, exec, origin, originAccepted, emptyDir, 
       version = null
     }
     if (version === null) problems.push('version-unknown')
+    else if (!atLeast(version, MINIMUM_VERSION)) problems.push('version-too-old')
     try {
       const status = JSON.parse((await run(['auth', 'status'])).stdout)
       if (status?.authMethod !== 'claude.ai') problems.push('wrong-login')
@@ -329,5 +345,5 @@ export async function preflight({ find, exec, origin, originAccepted, emptyDir, 
     }
   }
   problems.push(...(await originProblems({ origin, originAccepted })))
-  return { ok: problems.length === 0, version, permissionPrompts: version !== null && atLeast(version, MINIMUM_FOR_PERMISSION_PROMPTS), problems }
+  return { ok: problems.length === 0, version, problems }
 }

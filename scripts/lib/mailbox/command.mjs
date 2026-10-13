@@ -16,7 +16,7 @@ import { join, resolve } from 'node:path'
 import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
-import { preflight, originMatches } from './claude.mjs'
+import { MINIMUM_VERSION, preflight, originMatches } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
@@ -75,6 +75,7 @@ const PLACE_WORDS = {
 const PROBLEM_WORDS = {
   'claude-missing': 'Claude Code was not found.',
   'version-unknown': 'Claude Code did not say which version it is.',
+  'version-too-old': `Claude Code is too old: the protections need ${MINIMUM_VERSION.join('.')} or later (claude update).`,
   'not-logged-in': 'Claude Code is not logged in.',
   'wrong-login': 'Claude Code is not logged in with your own Claude account (a subscription login).',
   'key-in-environment': 'An API key or address for Claude is set in the environment (ANTHROPIC_API_KEY and the like); take it out.',
@@ -107,7 +108,7 @@ async function report(ctx, places, out) {
   const checks = await preflight({ find: ctx.find, exec: ctx.exec, origin: () => readOrigin(places.workDir), originAccepted: accepted, emptyDir: empty, env: ctx.env, platform: ctx.platform })
   const has = (problem) => checks.problems.includes(problem)
   say(!has('claude-missing'), has('claude-missing') ? 'Claude: Claude Code was not found.' : `Claude: found${checks.version ? `, version ${checks.version.join('.')}` : ''}`)
-  if (has('version-unknown')) say(false, `Claude: ${PROBLEM_WORDS['version-unknown']}`)
+  for (const problem of ['version-unknown', 'version-too-old']) if (has(problem)) say(false, `Claude: ${PROBLEM_WORDS[problem]}`)
   if (!has('claude-missing')) {
     const login = ['not-logged-in', 'wrong-login'].find(has)
     say(login === undefined, login === undefined ? 'login: your own Claude account' : `login: ${PROBLEM_WORDS[login]}`)

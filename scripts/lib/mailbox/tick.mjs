@@ -40,7 +40,7 @@ import { CLAIMS_STORE, claimExists, claimOrder, openStore, writeClaimFile } from
 import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
-import { buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude } from './claude.mjs'
+import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude } from './claude.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
@@ -157,7 +157,7 @@ async function locked(ctx, { orders, end, log }) {
     git: pinnedGit(ctx.git, hooks),
     originAccepted: ctx.originAccepted ?? ((url) => originMatches(url, allowed.allow.repo)),
     runnable: runnableJobs(allowed.allow, knownJobs()),
-    claudeReady: false, claudePath: null, permissionPrompts: false
+    claudeReady: false, claudePath: null, notReady: []
   }
 
   const checked = await dailyCheck(s, emptyCwd)
@@ -165,7 +165,7 @@ async function locked(ctx, { orders, end, log }) {
   if (checked.problems.includes('origin-mismatch')) return end('not-ready', 'origin-mismatch')
   s.claudeReady = checked.ok
   s.claudePath = checked.claudePath
-  s.permissionPrompts = checked.permissionPrompts
+  s.notReady = checked.problems
 
   // The clone's own config is written again before git is first run in it, then orders lost track of are settled by reading.
   const level = await resetWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, originAccepted: s.originAccepted })
@@ -213,10 +213,11 @@ async function dailyCheck(s, emptyCwd) {
   const path = join(ctx.places.stateDir, 'preflight.json')
   const today = dayOf(ctx.now())
   const cached = await readJson(path)
-  if (cached?.day === today && cached.ok === true && Array.isArray(cached.version) && typeof cached.permissionPrompts === 'boolean') {
+  // A good answer is believed only if it is still good by today's floor: the runner's code may have been moved to a newer one.
+  if (cached?.day === today && cached.ok === true && Array.isArray(cached.version) && atLeast(cached.version, MINIMUM_VERSION)) {
     const found = await ctx.find('claude')
     const problems = await localProblems({ env: ctx.env, origin: () => readOrigin(ctx.places.workDir), originAccepted: s.originAccepted })
-    if (found.state === 'found') return { ok: problems.length === 0, version: cached.version, permissionPrompts: cached.permissionPrompts, problems, claudePath: found.path }
+    if (found.state === 'found') return { ok: problems.length === 0, version: cached.version, problems, claudePath: found.path }
   }
   const result = await preflight({
     find: ctx.find,
@@ -227,7 +228,7 @@ async function dailyCheck(s, emptyCwd) {
     env: ctx.env,
     platform: ctx.platform
   })
-  if (result.ok) await keepJson(path, { day: today, ok: true, version: result.version, permissionPrompts: result.permissionPrompts })
+  if (result.ok) await keepJson(path, { day: today, ok: true, version: result.version })
   else await rm(path, { force: true })
   return { ...result, claudePath: (await ctx.find('claude')).path ?? null }
 }
@@ -277,7 +278,11 @@ async function handleOrder(s, entry) {
       const counts = await readCounts(stateDir, ctx.now(), ctx.fs)
       const decision = decide(allow, counts, action, fields, s.runnable)
       if (!decision.ok) refusal = decision.why
-      else if (action === 'run' && !s.claudeReady) refusal = 'not-ready'
+      else if (action === 'run' && !s.claudeReady) {
+        refusal = 'not-ready'
+        // The status file gives only the fixed word; the owner's own log says which check it was.
+        s.log(`mailbox: a run was refused as not ready (${s.notReady.join(', ') || 'unknown'})`)
+      }
       else minutes = decision.minutes
     }
   }
@@ -376,7 +381,7 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   const prompt = await runPrompt(plan, { codeDir })
   const ran = await runClaude({
     file: s.claudePath,
-    argv: buildArgv({ prompt, model: plan.model, codeDir, permissionPrompts: s.permissionPrompts }),
+    argv: buildArgv({ prompt, model: plan.model, codeDir }),
     cwd: workDir,
     env: claudeEnv(ctx.env, ctx.platform),
     timeoutMs: minutes * 60_000,

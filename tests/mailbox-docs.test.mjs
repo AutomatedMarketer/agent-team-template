@@ -9,7 +9,7 @@ import { ALLOWED_ORDERS, CEILINGS, readAllowedOrders } from '../scripts/lib/mail
 import { ACTIONS, KEY_SHAPE, SECRET_SHAPE } from '../scripts/lib/mailbox/contract.mjs'
 import { defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
 import { readMailboxEnv } from '../scripts/lib/mailbox/keys.mjs'
-import { TOOLS, buildArgv } from '../scripts/lib/mailbox/claude.mjs'
+import { MINIMUM_VERSION, TOOLS, buildArgv } from '../scripts/lib/mailbox/claude.mjs'
 import { knownJobs } from '../scripts/lib/mailbox/jobs.mjs'
 import { mailboxPath } from '../scripts/lib/status/mailbox-schema.mjs'
 
@@ -253,7 +253,7 @@ test('the files the guide says to look at are the files the code writes', async 
 
 test('the safety table names the flags the runner really passes, and the tools it really allows', async () => {
   const doc = await guide()
-  const argv = buildArgv({ prompt: 'p', model: 'sonnet', codeDir: '/code', permissionPrompts: true })
+  const argv = buildArgv({ prompt: 'p', model: 'sonnet', codeDir: '/code' })
   for (const flag of ['--setting-sources', '--permission-mode', '--disallowedTools', '--strict-mcp-config', '--disable-slash-commands', '--tools']) {
     assert.ok(doc.includes(flag), `the guide does not name ${flag}`)
     assert.ok(argv.includes(flag), `the runner does not pass ${flag}`)
@@ -295,9 +295,15 @@ test('the guide marks Windows as not tested and lists what a real Mac still has 
   assert.match(windows, /Not tested/)
   assert.match(windows, /Task Scheduler/)
   const open = doc.slice(doc.indexOf('## Not yet verified on a real Mac'))
-  for (const word of ['--permission-prompts none', '2.1.259', 'disableAllHooks', '--strict-mcp-config', 'connectors', 'Deployment Protection']) {
+  for (const word of ['disableAllHooks', '--strict-mcp-config', 'connectors', 'Deployment Protection']) {
     assert.ok(open.includes(word), `the not-yet-verified list leaves out ${word}`)
   }
+})
+
+test('the guide names the oldest Claude Code it will run, and that is the floor in the code', async () => {
+  const doc = await guide()
+  assert.ok(doc.includes(`The protections need Claude Code ${MINIMUM_VERSION.join('.')} or later`), 'the troubleshooting table does not give the floor')
+  assert.doesNotMatch(flat(doc), /the flag is left out/, 'the guide still says a too-old Claude is run without the prompts flag')
 })
 
 test('the guide says what the runner never does', async () => {

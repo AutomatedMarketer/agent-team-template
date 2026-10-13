@@ -89,7 +89,7 @@ export async function selftest(ctx) {
   try {
     const ran = await runClaude({
       file: claude.path,
-      argv: buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: places.codeDir, permissionPrompts: ready.permissionPrompts }),
+      argv: buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: places.codeDir }),
       cwd: repo,
       env: claudeEnv(ctx.env, ctx.platform),
       timeoutMs: 5 * 60_000,

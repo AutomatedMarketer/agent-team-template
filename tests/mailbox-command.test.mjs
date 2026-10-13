@@ -133,6 +133,7 @@ const PROBLEMS = [
   ['no secrets file', async (w) => rm(w.places.envFile), {}, /secrets.*missing|no secrets/i],
   ['Claude not found', async () => {}, { find: async () => ({ state: 'not found' }) }, /Claude Code was not found/],
   ['not logged in', async () => {}, { exec: async (file, args) => { if (args[0] === 'auth') throw Object.assign(new Error('x'), { code: 'EXIT' }); return { stdout: '2.1.290', code: 0 } } }, /not logged in/i],
+  ['a Claude Code that is too old', async () => {}, { exec: async (file, args) => (args[0] === 'auth' ? { stdout: JSON.stringify({ authMethod: 'claude.ai' }), code: 0 } : { stdout: '2.1.258 (Claude Code)', code: 0 }) }, /too old.*2\.1\.259/i],
   ['an API key in the environment', async () => {}, { env: { HOME: '/h', ANTHROPIC_API_KEY: FAKE_API_KEY } }, /API key/i],
   ['a different team repo', async () => {}, { originAccepted: () => false }, /team repo/i]
 ]

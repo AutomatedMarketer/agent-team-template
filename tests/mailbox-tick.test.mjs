@@ -877,10 +877,11 @@ test('the daily check is believed only when it was good and says everything; a f
   const today = dayOf(w.clock.now())
   const cache = join(w.places.stateDir, 'preflight.json')
   for (const record of [
-    { day: today, ok: false, version: [2, 1, 290], permissionPrompts: true },
-    { day: today, ok: true, permissionPrompts: true },
-    { day: today, ok: true, version: [2, 1, 290] },
-    { day: '2020-01-01', ok: true, version: [2, 1, 290], permissionPrompts: true }
+    { day: today, ok: false, version: [2, 1, 290] },
+    { day: today, ok: true },
+    { day: today, ok: true, version: 'two' },
+    { day: today, ok: true, version: [2, 1, 258] },
+    { day: '2020-01-01', ok: true, version: [2, 1, 290] }
   ]) {
     await writeFile(cache, JSON.stringify(record))
     asked = 0
@@ -902,7 +903,7 @@ test('a good daily check is forgotten when Claude cannot be found any more: the 
   assert.equal(asked, 4, 'asked again, not believed from the morning')
 }))
 
-test('the prompts flag is passed to a Claude Code new enough to know it, on the days the check is remembered too', () => withWorld(async (w) => {
+test('the prompts flag is always passed, on the days the check is remembered too', () => withWorld(async (w) => {
   w.claude.script = w.claude.good
   await runTick(w.ctx({ force: true }))
   w.send({ action: 'run', workflow: 'morning-intel' })
@@ -911,15 +912,23 @@ test('the prompts flag is passed to a Claude Code new enough to know it, on the 
   assert.ok(w.claude.calls[0].args.includes('--permission-prompts'), 'a new one')
 }))
 
-test('the prompts flag is left out for a Claude Code too old to know it, on the days the check is remembered too', () => withWorld(async (w) => {
+test('a Claude Code older than the protections need runs nothing: a run is refused as "not ready", a card still lands, and a newer one is believed at once', () => withWorld(async (w) => {
   w.claude.script = w.claude.good
-  const old = async (file, args) => (args[0] === '--version' ? { stdout: '2.1.200 (Claude Code)\n', code: 0 } : w.exec(file, args))
+  const old = async (file, args) => (args[0] === '--version' ? { stdout: '2.1.258 (Claude Code)\n', code: 0 } : w.exec(file, args))
+  const card = w.send({ action: 'task', title: 'Chase the invoice' })
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
   await runTick(w.ctx({ exec: old, force: true }))
-  w.send({ action: 'run', workflow: 'morning-intel' })
+  assert.equal(w.claude.calls.length, 0, 'Claude was not started')
+  const status = await statusIn(w)
+  assert.equal(entryFor(status, card.id).state, 'ok')
+  assert.deepEqual([entryFor(status, run.id).state, entryFor(status, run.id).why], ['refused', 'not-ready'])
+  assert.ok(w.logs.some((line) => line.includes('version-too-old')), 'the log says why')
+  // The same Claude Code, updated: the next order runs.
+  const again = w.send({ action: 'run', workflow: 'morning-intel' })
   w.clock.advance(MINUTE)
-  await runTick(w.ctx({ exec: old, force: true }))
+  await runTick(w.ctx({ force: true }))
   assert.equal(w.claude.calls.length, 1)
-  assert.ok(!w.claude.calls[0].args.includes('--permission-prompts'), 'an old one')
+  assert.equal(entryFor(await statusIn(w), again.id).state, 'ok')
 }))
 
 test('an order that is signed by the board but is not an order at all is not recorded - it has no id to record it under', () => withWorld(async (w) => {
@@ -1115,4 +1124,11 @@ test('a card whose name was taken meanwhile is made under the next name, and tha
   assert.equal(result.orders.ok, 1)
   assert.match(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), /Theirs\./, 'their card is untouched')
   assert.match(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice-2.md'), /# Chase the invoice/, 'ours is the next one')
+}))
+
+test('what the daily check remembers is the version Claude really said, so a later tick on the same day knows what it is running', () => withWorld(async (w) => {
+  const newer = async (file, args) => (args[0] === '--version' ? { stdout: '2.1.300 (Claude Code)\n', code: 0 } : w.exec(file, args))
+  await runTick(w.ctx({ exec: newer, force: true }))
+  const kept = JSON.parse(await readFile(join(w.places.stateDir, 'preflight.json'), 'utf8'))
+  assert.deepEqual(kept, { day: dayOf(w.clock.now()), ok: true, version: [2, 1, 300] })
 }))

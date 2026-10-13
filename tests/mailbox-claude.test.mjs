@@ -22,6 +22,8 @@ import {
   preflight,
   originMatches,
   localProblems,
+  MINIMUM_VERSION,
+  VERSION_NEEDS,
   killTree,
   LINE_MAX_CHARS
 } from '../scripts/lib/mailbox/claude.mjs'
@@ -46,7 +48,7 @@ test('the tools are seven built-in ones, none of them a shell', () => {
 })
 
 test('the argument list is exactly the documented flags that make a run safe', () => {
-  assert.deepEqual(buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, permissionPrompts: true }), [
+  assert.deepEqual(buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE }), [
     '-p', PROMPT,
     '--model', 'sonnet',
     '--permission-mode', 'dontAsk',
@@ -66,32 +68,32 @@ test('the argument list is exactly the documented flags that make a run safe', (
   assert.equal(MCP_FILE, '.agent-team/mailbox/empty-mcp.json')
 })
 
-test('on a Claude Code too old to know --permission-prompts the flag is left out, and nothing else changes', () => {
-  const with_ = buildArgv({ prompt: PROMPT, model: 'opus', codeDir: CODE, permissionPrompts: true })
-  const without = buildArgv({ prompt: PROMPT, model: 'opus', codeDir: CODE, permissionPrompts: false })
-  assert.deepEqual(without, with_.filter((arg, at) => arg !== '--permission-prompts' && with_[at - 1] !== '--permission-prompts'))
-  assert.ok(!without.includes('--permission-prompts'))
+test('nobody can answer a prompt, so Claude is always told so: --permission-prompts none is never left out', () => {
+  for (const model of ['opus', 'sonnet']) {
+    const argv = buildArgv({ prompt: PROMPT, model, codeDir: CODE })
+    assert.equal(argv[argv.indexOf('--permission-prompts') + 1], 'none')
+  }
 })
 
 test('the prompt is the first argument after -p, so no variadic flag can swallow it; it can never look like a flag', () => {
-  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, permissionPrompts: true })
+  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE })
   assert.deepEqual(argv.slice(0, 2), ['-p', PROMPT])
   for (const prompt of ['', '--bare', '-x', 7, null, undefined, ' ']) {
-    assert.throws(() => buildArgv({ prompt, model: 'sonnet', codeDir: CODE, permissionPrompts: true }), TypeError, String(prompt))
+    assert.throws(() => buildArgv({ prompt, model: 'sonnet', codeDir: CODE }), TypeError, String(prompt))
   }
 })
 
 test('only opus or sonnet can be asked for, and the code folder must be a full path', () => {
   for (const model of ['haiku', 'gpt-5', 'Opus', '', undefined, '--model', 'sonnet --bare']) {
-    assert.throws(() => buildArgv({ prompt: PROMPT, model, codeDir: CODE, permissionPrompts: true }), TypeError, String(model))
+    assert.throws(() => buildArgv({ prompt: PROMPT, model, codeDir: CODE }), TypeError, String(model))
   }
   for (const codeDir of ['', 'relative/code', '.', undefined, 7]) {
-    assert.throws(() => buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir, permissionPrompts: true }), TypeError, String(codeDir))
+    assert.throws(() => buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir }), TypeError, String(codeDir))
   }
 })
 
 test('nothing in the argument list gives Claude a shell, other settings, other servers, other folders or a way past the rules', () => {
-  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, permissionPrompts: true })
+  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE })
   const flags = argv.filter((arg, at) => at > 1 && arg.startsWith('-'))
   const documented = ['--model', '--permission-mode', '--permission-prompts', '--tools', '--allowedTools', '--disallowedTools', '--settings', '--setting-sources', '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '--output-format', '--verbose']
   assert.deepEqual(flags, documented)
@@ -849,7 +851,7 @@ function checks({ find = { state: 'found', path: '/usr/local/bin/claude' }, vers
 test('the daily check passes when Claude is found, new enough, logged in with the owner\'s own login, no key is set and origin is the team repo', async () => {
   const { deps, ran } = checks()
   const result = await preflight(deps)
-  assert.deepEqual(result, { ok: true, version: [2, 1, 290], permissionPrompts: true, problems: [] })
+  assert.deepEqual(result, { ok: true, version: [2, 1, 290], problems: [] })
   assert.deepEqual(ran.map((one) => one.args ?? 'origin'), [['--version'], ['auth', 'status'], 'origin'])
   for (const one of ran.filter((item) => item.file)) {
     assert.equal(one.file, '/usr/local/bin/claude')
@@ -858,13 +860,31 @@ test('the daily check passes when Claude is found, new enough, logged in with th
   }
 })
 
-test('an older Claude Code works, but without --permission-prompts - the first one that has the flag is 2.1.259', async () => {
-  const older = await preflight(checks({ version: '2.1.258 (Claude Code)' }).deps)
-  assert.equal(older.ok, true)
-  assert.equal(older.permissionPrompts, false)
-  assert.equal((await preflight(checks({ version: '2.1.259 (Claude Code)' }).deps)).permissionPrompts, true)
-  assert.equal((await preflight(checks({ version: '2.2.0' }).deps)).permissionPrompts, true)
-  assert.equal((await preflight(checks({ version: '2.0.999' }).deps)).permissionPrompts, false)
+test('a Claude Code older than every flag and protection needs is refused, and the first one that is new enough is 2.1.259', async () => {
+  assert.deepEqual([...MINIMUM_VERSION], [2, 1, 259])
+  for (const old of ['2.1.258 (Claude Code)', '2.1.0', '2.0.999', '1.99.99', '2.1.248 (Claude Code)']) {
+    const result = await preflight(checks({ version: old }).deps)
+    assert.equal(result.ok, false, old)
+    assert.deepEqual(result.problems, ['version-too-old'], old)
+  }
+  for (const fine of ['2.1.259 (Claude Code)', '2.1.260', '2.2.0', '3.0.0', '2.10.0', '2.1.1000']) {
+    const result = await preflight(checks({ version: fine }).deps)
+    assert.equal(result.ok, true, fine)
+    assert.deepEqual(result.problems, [], fine)
+  }
+})
+
+test('the version nobody may go below is the highest of the versions the Claude Code docs give for what the runner relies on', () => {
+  // Each protection's own version, as the docs state it (see VERSION_NEEDS in claude.mjs for the pages).
+  assert.deepEqual({ ...VERSION_NEEDS }, {
+    '--restricted': [2, 1, 248],
+    'permissions.blockReadsOutsideWorkingDirectories': [2, 1, 257],
+    '--permission-prompts none': [2, 1, 259],
+    'a Read deny rule blocks Edit': [2, 1, 208],
+    'a Read deny rule blocks Write': [2, 1, 228]
+  })
+  for (const [name, needed] of Object.entries(VERSION_NEEDS)) assert.equal(atLeast([...MINIMUM_VERSION], needed), true, `the minimum is not enough for ${name}`)
+  assert.ok(Object.values(VERSION_NEEDS).some((needed) => needed.join('.') === MINIMUM_VERSION.join('.')), 'the minimum is one of them, not above them all')
 })
 
 const PROBLEMS = [
@@ -872,6 +892,7 @@ const PROBLEMS = [
   ['claude is only found inside the team repo', { find: { state: 'refused' } }, 'claude-missing'],
   ['its version cannot be run', { versionFails: true }, 'version-unknown'],
   ['its version cannot be read', { version: 'hello' }, 'version-unknown'],
+  ['its version is older than the protections need', { version: '2.1.258 (Claude Code)' }, 'version-too-old'],
   ['it is not logged in', { authFails: true }, 'not-logged-in'],
   ['the login answer is not JSON', { auth: 'Logged in as someone' }, 'not-logged-in'],
   ['the login is an API key', { auth: { authMethod: 'api_key' } }, 'wrong-login'],

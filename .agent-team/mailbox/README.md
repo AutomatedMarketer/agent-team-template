@@ -229,6 +229,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | `unavailable (keys-mode)` | The secrets file can be read by someone else | `chmod 600 ~/.config/agent-mailbox/env` |
 | `unavailable (keys-...)` | The secrets file is missing, or a key is the wrong shape, or the board key equals a signing secret | Make it again (step 4) |
 | `not-ready (places-...)` | One of the four places sits inside another | Put them back where this guide puts them |
+| `Claude: Claude Code is too old` (in `--preflight`), or a run refused as `not ready (version-too-old)` | The protections need Claude Code 2.1.259 or later. Below that the runner does not run Claude at all | `claude update`, then `--preflight` again |
 | `not-ready (key-in-environment)` | An API key (or a Claude address) is set for the runner | Remove it. The runner runs on your plan, never a key |
 | `not-ready (origin-mismatch)` | The work copy's origin is not your team repo | Fix the clone's origin |
 | `board-failed (board-refused)` | The board does not accept the Mac's key | `MAILBOX_KEY` differs between Vercel and the env file |
@@ -273,8 +274,6 @@ as a tested setup until you have run `--preflight`, `--selftest` and one watched
 
 These are checked on the Mac at steps 6 and 7, and the guide will be corrected from what they show:
 
-- Whether this Mac's Claude Code is new enough for `--permission-prompts none` (2.1.259 or later). If not, the flag is
-  left out and a prompt is denied anyway.
 - That `--settings` with `disableAllHooks` also stops hooks from your own plugins in a `-p` run.
 - That an empty `--strict-mcp-config` also keeps out claude.ai connectors and plugin servers.
 - Which closing tool calls Claude Code makes on its own. Any call to a tool outside the list stops the run.
