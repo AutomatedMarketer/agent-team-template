@@ -379,3 +379,38 @@ test('the guide says how long a lock left by a cut-off check lasts, and that is 
   assert.equal(LOCK_STALE_MS, 3600_000)
   assert.match(flat(await guide()), /lock it left clears itself after an hour/)
 })
+
+// --- the clipboard and the proof ---------------------------------------------------------------------------------
+
+test('the secrets step empties the clipboard after the last secret is pasted, because a clipboard can sync to other devices', async () => {
+  const doc = await guide()
+  const step = section(doc, '### 4. ', '### 5. ')
+  const lastCopy = step.lastIndexOf('| pbcopy;')
+  const clear = step.indexOf('pbcopy < /dev/null')
+  assert.ok(lastCopy > 0 && clear > lastCopy, 'the clipboard is emptied after the last copy, not before')
+  assert.match(flat(step), /sync to your other Apple devices/)
+  const block = blocks(step).find((one) => one.body.includes('pbcopy < /dev/null'))
+  assert.match(block.body, /^# on the Mac Mini/)
+  assert.equal(step.split('pbcopy < /dev/null').length - 1, 1)
+})
+
+test('step 6 says what the self-test plants and proves, that no job runs until it passes, and when to run it again', async () => {
+  const doc = await guide()
+  const step = flat(section(doc, '### 6. ', '### 7. '))
+  for (const part of ['once as the task sweep runs and once as the morning intel runs', 'One is in your home folder', 'one is in `/tmp`', 'one is next to the throwaway folder', 'They are not your real files', 'No job runs until it passes', '`selftest-needed`', 'after every Claude Code update', 'moves? the runner\'s code']) {
+    assert.match(step, new RegExp(part), `step 6 leaves out "${part}"`)
+  }
+  assert.ok(doc.includes('Do this only when `--preflight` ends with "Everything is ready."'), 'step 8 does not wait for the preflight')
+})
+
+test('the guide shows the self-test word the tick logs and the line --preflight prints, and the safety table lists the proof', async () => {
+  const doc = await guide()
+  const tick = await read('scripts/lib/mailbox/tick.mjs')
+  const command = await read('scripts/lib/mailbox/command.mjs')
+  assert.ok(doc.includes('`not ready (selftest-needed)`'))
+  assert.ok(tick.includes("'selftest-needed'"), 'the tick does not make the word the guide shows')
+  assert.ok(doc.includes('`PROBLEM self-test`') && command.includes('self-test: '), '--preflight does not print the line the guide names')
+  assert.ok(flat(doc).includes('| The walls are proven on this Mac before any job runs |'))
+  assert.match(flat(section(doc, '## What it does and what it never does', '## Where things live')), /only after a self-test has proved the walls on this Mac/)
+  assert.match(flat(doc.slice(doc.indexOf('## Not yet verified on a real Mac'))), /`Read\(\/\*\*\)` and `Edit\(\/\*\*\)`/)
+})

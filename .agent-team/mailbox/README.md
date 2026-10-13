@@ -25,7 +25,7 @@ If you are not sure you need this, leave the board on cloud. Nothing here is nee
 | Asks your board for waiting orders every 5 minutes, with its own key | Open a port on your Mac, or let the board call in |
 | Refuses any order that is unsigned, edited, expired, meant for another repo or computer, or seen before | Run an order twice - not after a crash, not after a restart, not after a lost claim folder |
 | Does Add task, Start, Done, Pause and Approve with its own code - plain edits to your files, **no AI** | Let a card's words talk it into anything |
-| Runs a job (morning intel, the task sweep) with Claude Code on your own plan - **no shell, no connectors, no repo hooks** - only if your Mac's own list allows that job | Run a job your Mac's list does not name, whatever the board or the repo says |
+| Runs a job (morning intel, the task sweep) with Claude Code on your own plan - **no shell, no connectors, no repo hooks, nothing outside the work copy** - only if your Mac's own list allows that job, and only after a self-test has proved the walls on this Mac | Run a job your Mac's list does not name, whatever the board or the repo says |
 | Checks every file that changed in the work copy before it commits, then commits and pushes itself | Let Claude push, or commit a file that is not on the job's own list |
 | Turns **Arm**, **Add skill** and **Add agent** into a card for you to finish in a Claude session | Make a schedule, a skill or an agent on its own |
 | Writes what happened to `.agent-team/status/mailbox/<computer>.json`: ids, states and fixed reasons | Put anything you typed in that file, or in a commit message |
@@ -108,11 +108,18 @@ Then open `~/.local/state/agent-mailbox/allowed-orders.yml` and change the board
 It names the repo and the computer it works for. It lists the kinds of order it does, and the jobs Claude may run,
 with a time limit for each. It sets the most it will do in a day. The team repo can never widen it.
 
-Once the first secret is pasted into Vercel, copy the second:
+Once the first secret is pasted into Vercel, copy the second. It replaces the first on the clipboard.
 
 ```bash
 # on the Mac Mini
 grep '^MAILBOX_SECRET_k1=' ~/.config/agent-mailbox/env | cut -d= -f2- | pbcopy; echo "signing secret copied - paste it into Vercel now"
+```
+
+Once the second secret is pasted into Vercel, empty the clipboard. A clipboard can sync to your other Apple devices, so do not leave a secret on it.
+
+```bash
+# on the Mac Mini
+pbcopy < /dev/null
 ```
 
 ### 5. Vercel (in your browser)
@@ -122,7 +129,7 @@ In short, Production gets `FIRE_MODE=mailbox`, `MAILBOX_KEY` and `MAILBOX_SECRET
 `MAILBOX_SECRET_ID=k1`, `MAILBOX_RUNNER=mac-mini`, `MAILBOX_POLL_SECONDS=300` (on Pro) and a real `FIRE_KEY` of
 24 or more characters. Redeploy.
 
-### 6. Check it, then test the walls
+### 6. Check it, then prove the walls
 
 ```bash
 # on the Mac Mini
@@ -131,10 +138,12 @@ node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --selft
 ```
 
 - `--preflight` says, in plain words, what is ready and what is not. It changes nothing and asks nobody.
-- `--selftest` builds a throwaway folder and plants traps in it: a hook, a shell skill, a connector and a secret.
-  It runs the real Claude against that folder, with the same flags a real run uses.
-  It passes only if no trap ran and the secret never came out.
-  It uses a little of your plan. Run it again after every Claude Code update.
+- `--selftest` runs the real Claude with the same flags a real run uses. It does so twice, once as the task sweep runs and once as the morning intel runs. It uses a little of your plan.
+- It plants traps in a throwaway folder: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
+- It asks Claude to read each of the three. It asks it to write a new file in `/tmp` and next to the folder. Last, it asks it to read and write a file in its own folder.
+- It passes only if Claude is seen trying each of those five things and is refused every one. Its own folder must work, so a refusal means something. No trap may run and no secret may come out. If it cannot prove a wall, it says which.
+- A pass is saved for this Claude Code version and these settings. **No job runs until it passes.** Until then the runner refuses a run as "not ready" and its log says `selftest-needed`. Card orders are not held up.
+- Run it again after every Claude Code update, and after you move the runner's code to a newer commit. The runner notices a change by itself and stops jobs until you do. A changed setting is seen at once. A new Claude Code is seen at the runner's daily check.
 
 ### 7. One order, watched
 
@@ -156,7 +165,11 @@ ls -t ~/.local/state/agent-mailbox/claims/ | head -2
 
 The card should now be in your team repo and on the board. `--once` does one check now, whatever the pace.
 
+A card order does not need the self-test. A **Run** order does. If one is refused as "not ready", run `--selftest` (step 6).
+
 ### 8. Switch it on
+
+Do this only when `--preflight` ends with "Everything is ready." That includes the self-test line.
 
 ```bash
 # on the Mac Mini
@@ -230,6 +243,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | `unavailable (keys-...)` | The secrets file is missing, or a key is the wrong shape, or the board key equals a signing secret | Make it again (step 4) |
 | `not-ready (places-...)` | One of the four places sits inside another | Put them back where this guide puts them |
 | `Claude: Claude Code is too old` (in `--preflight`), or a run refused as `not ready (version-too-old)` | The protections need Claude Code 2.1.259 or later. Below that the runner does not run Claude at all | `claude update`, then `--preflight` again |
+| A run refused as `not ready (selftest-needed)`, or a `PROBLEM self-test` line in `--preflight` | No self-test has passed for this Claude Code and these settings. An update or a changed setting takes the proof away | Run `--selftest` (step 6). Jobs wait until it passes |
 | `not-ready (key-in-environment)` | An API key (or a Claude address) is set for the runner | Remove it. The runner runs on your plan, never a key |
 | `not-ready (origin-mismatch)` | The work copy's origin is not your team repo | Fix the clone's origin |
 | `board-failed (board-refused)` | The board does not accept the Mac's key | `MAILBOX_KEY` differs between Vercel and the env file |
@@ -252,6 +266,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | The Mac decides what is allowed, not the board and not the repo | `allowed-orders.yml` in the state folder. The team repo can never widen it |
 | Claude has no shell and no connectors | `--restricted` takes away the tools that run commands or code. `--tools` names only built-in tools and Bash is not one. `--disallowedTools "mcp__*"` and an empty `--strict-mcp-config` take away every connector. Any call to another tool stops the run on the spot |
 | Claude cannot read or write outside the work copy | Four layers. `--restricted` confines the built-in file tools to the folder Claude starts in. The settings file sets `blockReadsOutsideWorkingDirectories`, so a read outside it is refused in every mode. The only file permissions given are `Read(/**)` and `Edit(/**)`, which on the command line mean "inside this folder" (a tool name with no path would mean everywhere), and `--permission-mode dontAsk` denies everything else. Last, a deny list names the places a Mac keeps secrets: `~/.ssh`, `~/.aws`, `~/.config`, `~/.hermes`, `~/.codex`, `~/Library`, `~/.claude`, the state folder and the runner's own code |
+| The walls are proven on this Mac before any job runs | `--selftest` runs the real Claude in each job's exact setup and checks it cannot read or write outside the work copy. The proof is saved with the Claude Code version and a short code worked out from the settings. When either changes, jobs are refused until it passes again |
 | The web is for the morning intel only | The task sweep is never given a web tool. The morning intel is, because it needs the news |
 | Nothing in the team repo can run | `--setting-sources user` (the repo's settings, hooks and environment are never read), `disableAllHooks`, no skills or commands (`--disable-slash-commands`), no `.mcp.json`, and git's hooks switched off |
 | Every changed file is checked | Per action and per job, from a fixed list in the runner's code. Anything else - a deletion, a link, a file in `.claude/`, `.github/`, `scripts/`, a package file - fails the order and nothing is pushed |
@@ -279,6 +294,7 @@ as a tested setup until you have run `--preflight`, `--selftest` and one watched
 
 These are checked on the Mac at steps 6 and 7, and the guide will be corrected from what they show:
 
+- That `Read(/**)` and `Edit(/**)` on the command line mean the folder Claude starts in, and that the walls hold on a real Mac. The docs say so. `--selftest` is the first real proof, and no job runs without it.
 - That `--settings` with `disableAllHooks` also stops hooks from your own plugins in a `-p` run.
 - That an empty `--strict-mcp-config` also keeps out claude.ai connectors and plugin servers.
 - Which closing tool calls Claude Code makes on its own. Any call to a tool outside the list stops the run.
