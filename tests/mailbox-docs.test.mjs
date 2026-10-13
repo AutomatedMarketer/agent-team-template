@@ -265,6 +265,16 @@ test('the guide says what a stop by launchctl bootout does, and the entry file r
   assert.ok((await read('scripts/mailbox-runner.mjs')).includes('proc: process'))
 })
 
+test('the guide names the fixed list Claude Code is found by, and it is the list in the code, in the same order', async () => {
+  const doc = flat(await guide())
+  const { claudeFolders } = await import('../scripts/lib/mailbox/claude.mjs')
+  const list = claudeFolders('/Users/owner').map((folder) => unix(folder))
+  assert.deepEqual(list, ['/Users/owner/.local/bin', '/opt/homebrew/bin', '/usr/local/bin'])
+  assert.ok(doc.includes('The list is `~/.local/bin/claude` first, then `/opt/homebrew/bin/claude`, then `/usr/local/bin/claude`'))
+  assert.match(doc, /never by your `PATH`/)
+  assert.match(doc, /`--preflight` lists every copy it finds on that list and says which one the runner uses/)
+})
+
 test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
   const doc = flat(await guide())
   assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)

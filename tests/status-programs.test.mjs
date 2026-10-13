@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, dirname, sep } from 'node:path'
 import { spawn } from 'node:child_process'
-import { programFolders, findProgram, createRunner, emptyFolder, PROGRAM_OUTPUT_CAP } from '../scripts/lib/status/programs.mjs'
+import { programFolders, findProgram, findEveryProgram, createRunner, emptyFolder, PROGRAM_OUTPUT_CAP } from '../scripts/lib/status/programs.mjs'
 import { repoRoot } from './helpers/repo.mjs'
 
 /* The connections part runs other programs: `claude mcp list` and a handful of `--version`s. Each
@@ -269,5 +269,34 @@ test('the run hands every source the state folder and the --clone folder', async
     await rm(result.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()
+  }
+})
+
+test('find with an exact list of folders: PATH is not read at all, the first folder of the list that holds the program wins, and relative entries are skipped', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-status-programs-'))
+  try {
+    const first = join(root, 'first')
+    const second = join(root, 'second')
+    const onPath = join(root, 'on-path')
+    await fakeProgram(first, 'claude', process.platform)
+    await fakeProgram(second, 'claude', process.platform)
+    await fakeProgram(onPath, 'claude', process.platform)
+    const deps = { env: { PATH: onPath }, home: join(root, 'home'), platform: process.platform }
+    assert.equal((await findProgram('claude', deps)).path, join(onPath, `claude${exe(process.platform)}`), 'without a list, PATH comes first as before')
+    const listed = { ...deps, folders: ['relative/bin', first, second] }
+    assert.equal((await findProgram('claude', listed)).path, join(first, `claude${exe(process.platform)}`))
+    assert.deepEqual(programFolders(listed), [first, second])
+    assert.equal((await findProgram('claude', { ...deps, env: {}, folders: [second, first] })).path, join(second, `claude${exe(process.platform)}`), 'the order of the list is the order tried')
+    assert.deepEqual(await findProgram('codex', listed), { state: 'not found' })
+    // Every copy, in order.
+    const every = await findEveryProgram('claude', listed)
+    assert.deepEqual(every.paths, [join(first, `claude${exe(process.platform)}`), join(second, `claude${exe(process.platform)}`)])
+    // The same rules: one inside the clone is not listed, and is "refused" when it is the only one.
+    const clone = join(first, 'inside')
+    await fakeProgram(clone, 'tool', process.platform)
+    assert.deepEqual(await findEveryProgram('tool', { ...listed, folders: [clone], clone: first }), { paths: [], refused: true })
+    assert.deepEqual(await findProgram('tool', { ...listed, folders: [clone], clone: first }), { state: 'refused' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })

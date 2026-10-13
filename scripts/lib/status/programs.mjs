@@ -42,8 +42,11 @@ function knownFoldersFor({ home, platform }) {
 
 // Absolute PATH entries in order, then the known folders, each once. `knownFolders`, when a
 // caller hands it over, replaces the known folders - tests use it so a real Homebrew folder is
-// never looked in.
-export function programFolders({ env = {}, home, platform, knownFolders }) {
+// never looked in. `folders`, when a caller hands it over, is the whole list: PATH is not read at
+// all, so the answer is the same from a terminal and from a LaunchAgent (the Mac mailbox's runner
+// finds Claude Code this way). Relative entries are still skipped.
+export function programFolders({ env = {}, home, platform, knownFolders, folders }) {
+  if (Array.isArray(folders)) return [...new Set(folders.filter((entry) => typeof entry === 'string' && isAbsolute(entry)))]
   const fromPath = pathValue(env).split(delimiter).map((entry) => entry.trim()).filter((entry) => entry && isAbsolute(entry))
   const known = Array.isArray(knownFolders) ? knownFolders : knownFoldersFor({ home, platform })
   return [...new Set([...fromPath, ...known])]
@@ -63,8 +66,20 @@ async function isRunnableFile(path, platform) {
 // { state: 'refused' } when the only copies found were inside --clone or need a shell. A caller
 // shows "refused" as "could not check", never as "not found": the program is there.
 export async function findProgram(name, deps) {
+  const every = await scan(name, deps, false)
+  return every.paths.length ? { state: 'found', path: every.paths[0] } : { state: every.refused ? 'refused' : 'not found' }
+}
+
+// Every copy of the program in the folders, in the order they are looked in, with the same rules as findProgram (none inside --clone,
+// no shell scripts on Windows). { paths, refused }. The Mac mailbox's check lists them all and says which one the runner uses (the first).
+export async function findEveryProgram(name, deps) {
+  return scan(name, deps, true)
+}
+
+async function scan(name, deps, all) {
   if (typeof name !== 'string' || !PROGRAM_NAME.test(name)) throw new Error('not a program name')
   const windows = deps.platform === 'win32'
+  const paths = []
   let refused = false
   for (const folder of programFolders(deps)) {
     const candidates = windows ? [`${name}.exe`, `${name}.cmd`, `${name}.bat`] : [name]
@@ -79,10 +94,11 @@ export async function findProgram(name, deps) {
         refused = true
         continue
       }
-      return { state: 'found', path }
+      paths.push(path)
+      if (!all) return { paths, refused }
     }
   }
-  return { state: refused ? 'refused' : 'not found' }
+  return { paths, refused }
 }
 
 // An error that says what happened and nothing else: no path, no output, no argument.

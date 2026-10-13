@@ -16,7 +16,7 @@ import { join, resolve } from 'node:path'
 import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
-import { MINIMUM_VERSION, followToFile, killTree, preflight, originMatches } from './claude.mjs'
+import { MINIMUM_VERSION, claudeFolders, followToFile, killTree, preflight, originMatches } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
@@ -112,6 +112,13 @@ async function report(ctx, places, out) {
   const checks = await preflight({ find: ctx.find, exec: ctx.exec, origin: () => readOrigin(places.workDir), originAccepted: accepted, emptyDir: empty, env: ctx.env, platform: ctx.platform })
   const has = (problem) => checks.problems.includes(problem)
   say(!has('claude-missing'), has('claude-missing') ? 'Claude: Claude Code was not found.' : `Claude: found${checks.version ? `, version ${checks.version.join('.')}` : ''}`)
+  if (!has('claude-missing') && ctx.findAll) {
+    // Every copy on the list, and the one the runner uses. Paths are shown from the home folder, never with the user name.
+    const every = (await ctx.findAll('claude')).paths
+    const used = (await ctx.find('claude')).path
+    const shown = (path) => (typeof ctx.home === 'string' && path.startsWith(ctx.home) ? `~${path.slice(ctx.home.length).split(String.fromCharCode(92)).join('/')}` : path)
+    say(true, `Claude: ${every.length === 1 ? 'one copy' : `${every.length} copies`} on the fixed list - ${every.map((path) => `${shown(path)}${path === used ? ' (the runner uses this one)' : ' (not used)'}`).join('; ')}`)
+  }
   for (const problem of ['version-unknown', 'version-too-old']) if (has(problem)) say(false, `Claude: ${PROBLEM_WORDS[problem]}`)
   if (!has('claude-missing')) {
     const login = ['not-logged-in', 'wrong-login'].find(has)
@@ -141,10 +148,15 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
   const scriptRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
   const places = { ...(rest.places ?? { ...defaultPlaces(home), codeDir: codeDir ?? scriptRoot }), ...parsed.paths }
   // A program inside the work copy is never run: that is the folder other people push to.
-  const find = typeof rest.find === 'function' ? (name) => rest.find(name, { clone: places.workDir }) : undefined
+  // Claude Code is found by one fixed list of folders (claude.mjs, claudeFolders), the same in a terminal and under launchd. Any other program
+  // is found as before. `claudeFolders` in the arguments is for the tests, which cannot have a real /opt/homebrew/bin.
+  const folders = Array.isArray(rest.claudeFolders) ? rest.claudeFolders : claudeFolders(home)
+  const where = (name) => ({ clone: places.workDir, ...(name === 'claude' ? { folders } : {}) })
+  const find = typeof rest.find === 'function' ? (name) => rest.find(name, where(name)) : undefined
+  const findAll = typeof rest.findAll === 'function' ? (name) => rest.findAll(name, where(name)) : undefined
   // What is alive, so that a signal (launchctl bootout, Ctrl-C) kills Claude, releases the lock, and exits (signals.mjs). `proc` is the real process.
   const live = createLive()
-  const ctx = { ...rest, home, places, find, log: rest.log ?? out, force: parsed.force, live }
+  const ctx = { ...rest, home, places, find, findAll, log: rest.log ?? out, force: parsed.force, live }
   if (rest.proc) {
     const kill = rest.kill ?? ((pid, signal) => killTree(pid, signal, { platform: rest.platform, spawn: rest.spawn }))
     listenForSignals(rest.proc, signalHandler(live, { kill, release: releaseLock, exit: (code) => rest.proc.exit(code), log: out }))

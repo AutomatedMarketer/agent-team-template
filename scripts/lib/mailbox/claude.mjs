@@ -51,6 +51,12 @@ export const toolsFor = (web) => (web ? [...FILE_TOOLS, ...WEB_TOOLS] : [...FILE
 export const allowedFor = (web) => ['Read(/**)', 'Edit(/**)', ...(web ? WEB_TOOLS : [])]
 // The CLI reference says --tools cannot remove this one; calling it only ends the conversation.
 const TOLERATED = Object.freeze(['EndConversation'])
+// Where the runner looks for Claude Code: this list, in this order, and nowhere else - never PATH. A LaunchAgent's PATH and a Terminal's PATH
+// differ, and an older npm or Homebrew copy can sit ahead of the native one on either, so by PATH the self-test could prove one file and the runner
+// start another, and every run would be refused with no way to fix it by running the self-test again. The native installer puts a link at
+// ~/.local/bin/claude (https://code.claude.com/docs/en/setup#auto-updates, read 2026-10-13), so that comes first; the Homebrew cask and an
+// older npm install put theirs in the two folders after it.
+export const claudeFolders = (home) => [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
 export const SETTINGS_FILE = '.agent-team/mailbox/claude-settings.json'
 export const MCP_FILE = '.agent-team/mailbox/empty-mcp.json'
 export const MAX_TURNS = 80

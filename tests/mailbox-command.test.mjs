@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mailboxWorld, ALLOWLIST, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
@@ -9,6 +9,8 @@ import { repoRoot } from './helpers/repo.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
 import { keepProof } from '../scripts/lib/mailbox/proof.mjs'
+import { claudeFolders } from '../scripts/lib/mailbox/claude.mjs'
+import { findEveryProgram, findProgram } from '../scripts/lib/status/programs.mjs'
 
 /* The command a LaunchAgent runs every five minutes, and the few switches a person uses by hand: one tick, a check that
    says in plain words what is wrong, and a test of the walls around Claude. Output is plain lines for a person to read -
@@ -245,12 +247,12 @@ test('a program is looked for with the work copy named as a clone, so one inside
       asked.length = 0
       await run(w, switches, { find })
       assert.ok(asked.length > 0, `${switches[0]} did not look for Claude`)
-      for (const [name, extra] of asked) assert.deepEqual([name, extra], ['claude', { clone: w.places.workDir }], switches[0])
+      for (const [name, extra] of asked) assert.deepEqual([name, extra], ['claude', { clone: w.places.workDir, folders: claudeFolders(w.root) }], switches[0])
     }
     // The work copy named by a switch is the one named.
     asked.length = 0
     await run(w, ['--preflight', '--work-dir', join(w.root, 'elsewhere')], { find })
-    assert.deepEqual(asked[0][1], { clone: join(w.root, 'elsewhere') })
+    assert.deepEqual(asked[0][1], { clone: join(w.root, 'elsewhere'), folders: claudeFolders(w.root) })
   } finally {
     await w.cleanup()
   }
@@ -406,6 +408,91 @@ test('--preflight asks whether the self-test holds for the file the link leads t
     assert.equal(await kept(LINK), true)
     const forTheLink = await run(w, ['--preflight'], followed)
     assert.match(forTheLink.text, /PROBLEM self-test: .*--selftest/)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+/* ---------- one Claude, found the same way from a terminal and from launchd ------------------------------------------------ */
+
+// Two real files named claude, in two folders of a fixed list. The native one is first on the list; an older copy is second.
+async function twoClaudes(w) {
+  const suffix = process.platform === 'win32' ? '.exe' : ''
+  const native = join(w.root, 'native-bin')
+  const older = join(w.root, 'older-bin')
+  for (const folder of [native, older]) {
+    await mkdir(folder, { recursive: true })
+    await writeFile(join(folder, `claude${suffix}`), 'x')
+    await chmod(join(folder, `claude${suffix}`), 0o755)
+  }
+  return { native, older, nativeFile: join(native, `claude${suffix}`), olderFile: join(older, `claude${suffix}`) }
+}
+
+test('the file Claude is started from is the same from a terminal and from launchd: one fixed list of folders, never the PATH it was started with', async () => {
+  const w = await mailboxWorld()
+  try {
+    const two = await twoClaudes(w)
+    const delimiter = process.platform === 'win32' ? ';' : ':'
+    // A terminal's PATH puts the older copy first; launchd's puts it first too, in a different spot. Neither can change the answer.
+    const environments = {
+      terminal: { HOME: w.root, PATH: [two.older, '/usr/bin'].join(delimiter) },
+      launchd: { HOME: w.root, PATH: ['/usr/local/bin', two.older, '/usr/bin'].join(delimiter) },
+      nothing: { HOME: w.root }
+    }
+    const startedWith = []
+    for (const [name, env] of Object.entries(environments)) {
+      const asked = []
+      const exec = async (file, args, options) => {
+        if (args[0] === '--version') asked.push(file)
+        return w.exec(file, args, options)
+      }
+      const find = (program, extra = {}) => findProgram(program, { env, home: w.root, platform: process.platform, ...extra })
+      const findAll = (program, extra = {}) => findEveryProgram(program, { env, home: w.root, platform: process.platform, ...extra })
+      const result = await run(w, ['--preflight'], { find, findAll, exec, env, claudeFolders: [two.native, two.older] })
+      assert.match(result.text, /Claude: found/, name)
+      startedWith.push(asked[0])
+    }
+    assert.deepEqual(startedWith, [two.nativeFile, two.nativeFile, two.nativeFile])
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('--preflight lists every Claude it finds on the fixed list and says which one the runner uses, with no user name in the paths', async () => {
+  const w = await mailboxWorld()
+  try {
+    const two = await twoClaudes(w)
+    const find = (program, extra = {}) => findProgram(program, { env: { PATH: two.older }, home: w.root, platform: process.platform, ...extra })
+    const findAll = (program, extra = {}) => findEveryProgram(program, { env: { PATH: two.older }, home: w.root, platform: process.platform, ...extra })
+    const result = await run(w, ['--preflight'], { find, findAll, claudeFolders: [two.native, two.older] })
+    const line = result.lines.find((one) => one.includes('on the fixed list'))
+    assert.ok(line, result.text)
+    assert.match(line, /2 copies on the fixed list/)
+    assert.ok(line.includes('native-bin') && line.includes('older-bin'))
+    assert.ok(line.indexOf('native-bin') < line.indexOf('older-bin'), 'in the order they are tried')
+    assert.match(line, /native-bin[^;]*\(the runner uses this one\)/)
+    assert.match(line, /older-bin[^;]*\(not used\)/)
+    assert.ok(!line.includes(w.root), 'shown from the home folder, not with the whole path')
+    assert.ok(line.includes('~'))
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('with only one Claude on the list the line says so, and with none it is "not found" as before', async () => {
+  const w = await mailboxWorld()
+  try {
+    const two = await twoClaudes(w)
+    const make = (folders) => ({
+      find: (program, extra = {}) => findProgram(program, { env: {}, home: w.root, platform: process.platform, ...extra }),
+      findAll: (program, extra = {}) => findEveryProgram(program, { env: {}, home: w.root, platform: process.platform, ...extra }),
+      claudeFolders: folders
+    })
+    const one = await run(w, ['--preflight'], make([two.native]))
+    assert.match(one.lines.find((line) => line.includes('on the fixed list')), /one copy on the fixed list - .*\(the runner uses this one\)$/)
+    const none = await run(w, ['--preflight'], make([join(w.root, 'nowhere')]))
+    assert.match(none.text, /PROBLEM Claude: Claude Code was not found/)
+    assert.ok(!none.text.includes('on the fixed list'))
   } finally {
     await w.cleanup()
   }
