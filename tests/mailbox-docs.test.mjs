@@ -255,6 +255,16 @@ test('the guide says the runner guards .git itself, and the code has both halves
   assert.ok(tick.indexOf('gitUnchanged(workDir, before)') < tick.indexOf('await checkChanges({ root: workDir, git: s.git, action, fields, plan })'), 'the snapshot is compared before the first git command after Claude')
 })
 
+test('the guide says what a stop by launchctl bootout does, and the entry file really listens for the signals', async () => {
+  const doc = flat(await guide())
+  assert.match(doc, /Stopping the runner with `launchctl bootout`, a logout or Ctrl-C is treated the same way/)
+  assert.match(doc, /The runner ends Claude and everything Claude started, and it releases its lock/)
+  assert.match(doc, /left as outcome unknown/)
+  const { SIGNALS } = await import('../scripts/lib/mailbox/signals.mjs')
+  assert.deepEqual(Object.keys(SIGNALS).sort(), ['SIGINT', 'SIGTERM'])
+  assert.ok((await read('scripts/mailbox-runner.mjs')).includes('proc: process'))
+})
+
 test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
   const doc = flat(await guide())
   assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)

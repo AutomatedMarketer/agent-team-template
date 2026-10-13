@@ -16,11 +16,13 @@ import { join, resolve } from 'node:path'
 import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
-import { MINIMUM_VERSION, followToFile, preflight, originMatches } from './claude.mjs'
+import { MINIMUM_VERSION, followToFile, killTree, preflight, originMatches } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
 import { proofHolds } from './proof.mjs'
+import { createLive, listenForSignals, signalHandler } from './signals.mjs'
+import { releaseLock } from '../status/commit.mjs'
 
 export const USAGE = [
   'Usage: node scripts/mailbox-runner.mjs [switch]',
@@ -140,7 +142,13 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
   const places = { ...(rest.places ?? { ...defaultPlaces(home), codeDir: codeDir ?? scriptRoot }), ...parsed.paths }
   // A program inside the work copy is never run: that is the folder other people push to.
   const find = typeof rest.find === 'function' ? (name) => rest.find(name, { clone: places.workDir }) : undefined
-  const ctx = { ...rest, home, places, find, log: rest.log ?? out, force: parsed.force }
+  // What is alive, so that a signal (launchctl bootout, Ctrl-C) kills Claude, releases the lock, and exits (signals.mjs). `proc` is the real process.
+  const live = createLive()
+  const ctx = { ...rest, home, places, find, log: rest.log ?? out, force: parsed.force, live }
+  if (rest.proc) {
+    const kill = rest.kill ?? ((pid, signal) => killTree(pid, signal, { platform: rest.platform, spawn: rest.spawn }))
+    listenForSignals(rest.proc, signalHandler(live, { kill, release: releaseLock, exit: (code) => rest.proc.exit(code), log: out }))
+  }
 
   try {
     if (parsed.mode === 'preflight') return await report(ctx, places, out)

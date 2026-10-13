@@ -238,6 +238,10 @@ If the runner or the Mac stops part-way through an order (power, a crash, a kill
 order's number. The number is a line `Mailbox-Order: <id>` at the end of the commit message. The runner records whether
 the change landed, and it **never runs the order again by itself**. To try again, send a new order from the board.
 
+Stopping the runner with `launchctl bootout`, a logout or Ctrl-C is treated the same way.
+The runner ends Claude and everything Claude started, and it releases its lock.
+An order that was in progress is left as outcome unknown, and the next tick reads the team repo to settle it.
+
 ## Change the secret
 
 Do this once a year, and whenever you think a secret leaked.

@@ -128,9 +128,12 @@ export async function runTick(ctx) {
   if (await exists(join(places.stateDir, 'PAUSE'))) return end('paused')
   const lock = await takeLock(places.stateDir, ctx.now())
   if (lock === null) return { state: 'busy', orders }
+  // A signal that stops the runner releases this lock itself (signals.mjs), so it is told which one is held.
+  if (ctx.live) ctx.live.lock = lock
   try {
     return await locked(ctx, { orders, end, log })
   } finally {
+    if (ctx.live) ctx.live.lock = null
     await releaseLock(lock)
   }
 }
@@ -323,6 +326,9 @@ async function handleOrder(s, entry) {
 // The final word of an order, written to its claim and counted. `change` is { state, why?, commit?, startedAt?, files? }.
 async function settle(s, id, action, change) {
   const { ctx } = s
+  // Stopped by a signal: whatever happened to the order since, nobody knows how it ended, so no final word is written. The claim keeps its
+  // receipt and the next tick settles it by reading (signals.mjs).
+  if (ctx.live?.stopping) throw new Error('the runner was stopped by a signal')
   const now = isoSeconds(ctx.now())
   const record = {
     id,
@@ -428,7 +434,8 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
     stderrPath: join(claimDir, 'stderr.txt'),
     spawn: ctx.spawn,
     kill: ctx.kill,
-    platform: ctx.platform
+    platform: ctx.platform,
+    live: ctx.live
   })
   // Before anything else, and whether or not the run went well: git must not run in a folder where Claude changed what git reads. The order fails
   // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.

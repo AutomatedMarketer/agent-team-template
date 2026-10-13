@@ -35,5 +35,6 @@ process.exitCode = await main({
   exec: createRunner({ spawn, platform: process.platform, env: process.env }),
   // The runner names the work copy as `clone`, so a program that lives inside the team repo is never the one found.
   find: (name, extra = {}) => findProgram(name, { env: process.env, home, platform: process.platform, ...extra }),
-  spawn
+  spawn,
+  proc: process
 })

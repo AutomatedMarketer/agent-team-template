@@ -207,7 +207,8 @@ export function runClaude({
   transcriptPath, stderrPath, maxTranscriptBytes = TRANSCRIPT_MAX_BYTES,
   // The tools this run was started with (toolsFor): any other tool listed or called stops it.
   tools = TOOLS,
-  spawn, kill, platform = process.platform, openStream = createWriteStream
+  // `live` (signals.mjs) is told which process is alive, so a signal that stops the runner can kill it.
+  spawn, kill, platform = process.platform, openStream = createWriteStream, live = null
 }) {
   const allowedNames = new Set([...tools, ...TOLERATED])
   const stop = kill ?? ((pid, signal) => killTree(pid, signal, { platform, spawn }))
@@ -238,6 +239,7 @@ export function runClaude({
     const finalize = (code) => {
       if (settled) return
       settled = true
+      if (child?.pid) live?.children.delete(child.pid)
       clearTimeout(timer)
       clearTimeout(killTimer)
       clearTimeout(closeTimer)
@@ -296,6 +298,7 @@ export function runClaude({
       finalize(null)
       return
     }
+    if (child.pid) live?.children.add(child.pid)
     timer = setTimeout(() => {
       reason ??= 'timed-out'
       if (child.pid) stop(child.pid, 'SIGTERM')

@@ -141,7 +141,8 @@ async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }
     transcriptPath: transcript,
     spawn: ctx.spawn,
     kill: ctx.kill,
-    platform: ctx.platform
+    platform: ctx.platform,
+    live: ctx.live
   })
 
   const problems = []
