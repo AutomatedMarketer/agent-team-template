@@ -27,6 +27,11 @@ export const TIME_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 // 0 < expiresAt - issuedAt <= maxSeconds. (The board sets the life; the Mac only holds it to these.)
 export const LIFE = Object.freeze({ minSeconds: 900, pollsCovered: 3, plusSeconds: 120, maxSeconds: 3600, futureSkewSeconds: 120 })
 
+// What the Mac must do with its claims (the contract's `claims`). Each claim is kept at least this long after its
+// order's issuedAt - the longest an order can still pass every other check (it may be issued futureSkewSeconds ahead
+// and then lives up to maxSeconds). Keeping claims for ever is fine, and is what the runner does.
+export const CLAIMS = Object.freeze({ keepSeconds: LIFE.maxSeconds + LIFE.futureSkewSeconds })
+
 // GET /api/mailbox: the Mac's own key, and how fast the board asks it to poll.
 export const API_PATH = '/api/mailbox'
 export const KEY_SHAPE = /^[\x21-\x7e]{32,256}$/

@@ -15,7 +15,8 @@ const fixturePath = join(repoRoot, 'tests', 'fixtures', 'mailbox-parity.json')
 const raw = readFileSync(fixturePath)
 const fixture = JSON.parse(raw.toString('utf8'))
 const NOW = Date.parse(fixture.test.now)
-const expectation = { keys: fixture.test.keys, repo: fixture.test.repo, runner: fixture.test.runner, now: NOW }
+const CLAIMS_SINCE = Date.parse(fixture.test.claimsSince)
+const expectation = { keys: fixture.test.keys, repo: fixture.test.repo, runner: fixture.test.runner, now: NOW, claimsSince: CLAIMS_SINCE }
 
 // A shape as the fixture writes it, compiled, so a slash written plainly and an escaped one compare equal.
 const shape = (source) => new RegExp(source).source
@@ -54,6 +55,13 @@ test('mailbox parity: this side\'s numbers, shapes and lists are the contract\'s
   assert.deepEqual(contract.ANSWER_KEYS, fixture.api.responseKeys)
   assert.deepEqual(contract.ACTIONS, fixture.actions)
   assert.equal(contract.PAYLOAD_SOURCE, fixture.payload.source)
+})
+
+test('mailbox parity: a claim is kept at least as long as the same signed order could still pass every other check', () => {
+  assert.equal(contract.CLAIMS.keepSeconds, fixture.claims.keepSeconds)
+  // An order may be issued futureSkewSeconds ahead and then lives up to maxSeconds: that long after issuedAt it is gone.
+  assert.equal(fixture.claims.keepSeconds, fixture.life.maxSeconds + fixture.life.futureSkewSeconds)
+  assert.equal(contract.CLAIMS.keepSeconds, contract.LIFE.maxSeconds + contract.LIFE.futureSkewSeconds)
 })
 
 test('mailbox parity: the runner signs each good order\'s body to the exact signature in the contract', () => {

@@ -7,6 +7,7 @@
 //   exactly the contract's keys, real times, shaped repo and runner, a payload object -> malformed
 //   version, repo, runner, then the times, then the id          -> bad-version, wrong-repo, wrong-runner,
 //                                                                  issued-in-future, expired, bad-life, bad-id
+//   and last, for a side that keeps claims: issued before its claim store was made         -> before-claims
 //
 // A refusal is { ok: false, verdict, authentic }. `authentic` is true once the signature matched: before that
 // nothing can be trusted, not even the order's id, so the caller makes no record of it - someone who cannot
@@ -61,9 +62,13 @@ function secretFor(keys, kid) {
   return typeof secret === 'string' && SECRET_SHAPE.test(secret.trim()) ? secret : null
 }
 
-// entry: one element of the board's answer. ctx: { keys, now, repo, runner } - `keys` maps a key id to its
-// secret, `repo` is the repo of the work copy and `runner` this Mac's label.
-export function verifyEnvelope(entry, { keys, now, repo, runner }) {
+// entry: one element of the board's answer. ctx: { keys, now, repo, runner, claimsSince } - `keys` maps a key id to
+// its secret, `repo` is the repo of the work copy and `runner` this Mac's label. `claimsSince` is the moment this
+// Mac's claim store was first made (milliseconds): an order issued before it may be one the store once held a claim
+// for and has since lost, so it is never run. The board keeps no claims and passes none; the runner always does, and
+// a value that is not a time is a mistake in the caller and throws - it must not read as "no check".
+export function verifyEnvelope(entry, { keys, now, repo, runner, claimsSince }) {
+  if (claimsSince !== undefined && !Number.isFinite(claimsSince)) throw new TypeError('verifyEnvelope: claimsSince is not a time')
   const untrusted = (verdict) => ({ ok: false, verdict, authentic: false })
   if (!isPlainObject(entry) || !hasExactly(entry, ENVELOPE_KEYS)) return untrusted('malformed')
   const { kid, body, sig } = entry
@@ -102,5 +107,6 @@ export function verifyEnvelope(entry, { keys, now, repo, runner }) {
   const life = expires - issued
   if (life <= 0 || life > LIFE.maxSeconds * 1000) return authentic('bad-life', id)
   if (id === undefined) return authentic('bad-id')
+  if (claimsSince !== undefined && issued < claimsSince) return authentic('before-claims', id)
   return { ok: true, verdict: 'ok', authentic: true, order }
 }

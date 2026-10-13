@@ -259,3 +259,39 @@ test('the order is not changed by checking it, and the keys are not kept', () =>
   assert.equal(JSON.stringify(given), frozen)
   assert.deepEqual(keys, { k1: SECRET })
 })
+
+/* ---------- the claim store: an order older than the store is never run ---------- */
+
+test('an order issued before this Mac\'s claim store was made is refused even while it is alive - it may be one the lost claims had already run', () => {
+  const claimsSince = NOW - 30_000
+  const old = verifyEnvelope(entry(body({ issuedAt: iso(NOW - 60_000) })), ctx({ claimsSince }))
+  assert.deepEqual(old, { ok: false, verdict: 'before-claims', authentic: true, id: ID })
+  assert.equal(verdictOf(entry(body({ issuedAt: iso(claimsSince - 1) })), ctx({ claimsSince })), 'before-claims', 'a millisecond before')
+  assert.equal(verdictOf(entry(body({ issuedAt: iso(claimsSince) })), ctx({ claimsSince })), 'ok', 'exactly when the store was made')
+  assert.equal(verdictOf(entry(body({ issuedAt: iso(claimsSince + 1) })), ctx({ claimsSince })), 'ok', 'a millisecond after')
+})
+
+test('the claim store is checked after every other check, and the id only counts once it is a good one', () => {
+  const claimsSince = NOW + 3600_000
+  const early = { issuedAt: iso(NOW - 60_000), expiresAt: iso(NOW + 60_000) }
+  assert.equal(verdictOf(entry(body({ ...early, v: 2 })), ctx({ claimsSince })), 'bad-version')
+  assert.equal(verdictOf(entry(body({ ...early, repo: 'ExampleOwner/other-team' })), ctx({ claimsSince })), 'wrong-repo')
+  assert.equal(verdictOf(entry(body({ ...early, runner: 'old-imac' })), ctx({ claimsSince })), 'wrong-runner')
+  assert.equal(verdictOf(entry(body({ ...early, expiresAt: iso(NOW - 1) })), ctx({ claimsSince })), 'expired')
+  assert.equal(verdictOf(entry(body({ ...early, expiresAt: iso(NOW + 2 * 3600_000) })), ctx({ claimsSince })), 'bad-life')
+  assert.deepEqual(verifyEnvelope(entry(body({ ...early, id: 'nope' })), ctx({ claimsSince })), { ok: false, verdict: 'bad-id', authentic: true })
+  assert.equal(verdictOf(entry(body(early)), ctx({ claimsSince })), 'before-claims')
+})
+
+test('a side that keeps no claims (the board) passes no claim time and gets no such check; a time that is not a time is a mistake, not "no check"', () => {
+  assert.equal(verdictOf(entry(body({ issuedAt: iso(NOW - 2000_000) })), ctx()), 'ok')
+  assert.equal(verdictOf(entry(body({ issuedAt: iso(NOW - 2000_000) })), ctx({ claimsSince: undefined })), 'ok')
+  for (const bad of [Number.NaN, null, '2026-10-12T14:00:00.000Z', Infinity, {}]) {
+    assert.throws(() => verifyEnvelope(entry(), ctx({ claimsSince: bad })), TypeError, String(bad))
+  }
+})
+
+test('an order that fails before the signature is untrusted whatever the claim store says', () => {
+  const edited = { ...entry(), body: body().replace('Mailbox', 'Mailbax') }
+  assert.deepEqual(verifyEnvelope(edited, ctx({ claimsSince: NOW + 1 })), { ok: false, verdict: 'bad-signature', authentic: false })
+})
