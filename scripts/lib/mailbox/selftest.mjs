@@ -21,14 +21,14 @@
 // anything Claude said. It names what failed, never a path or a secret. The throwaway folder and every planted file are removed
 // afterwards, passed or failed.
 //
-// A pass is kept (proof.mjs) for this Claude version and these settings. Any older proof is dropped as the first thing done, so a
+// A pass is kept (proof.mjs) for this Claude version, the real file that was run, and these settings. Any older proof is dropped as the first thing done, so a
 // test that fails or is interrupted leaves none, and the tick refuses to run Claude without one.
 
-import { mkdir, readFile, rm, writeFile, access } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, writeFile, access } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { buildArgv, claudeEnv, preflight, runClaude, toolsFor } from './claude.mjs'
+import { buildArgv, claudeEnv, followToFile, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
 import { gaveBack, outcome, readEvidence } from './evidence.mjs'
 import { dropProof, keepProof } from './proof.mjs'
 import { readOrigin } from './workcopy.mjs'
@@ -97,7 +97,7 @@ const exists = async (path) => {
 
 // One run in the configuration of one kind of job. Returns the problems it found, as plain sentences. Every file it plants is
 // listed in `planted` so the caller can remove it whatever happens.
-async function proveOne({ ctx, claude, folder, home, tmp, configuration, planted }) {
+async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }) {
   const { places } = ctx
   const { label, web } = configuration
   const id = randomBytes(6).toString('hex')
@@ -122,7 +122,7 @@ async function proveOne({ ctx, claude, folder, home, tmp, configuration, planted
 
   const transcript = join(folder, 'transcript.jsonl')
   const ran = await runClaude({
-    file: claude.path,
+    file,
     argv: buildArgv({ prompt: promptFor(paths), model: 'sonnet', codeDir: places.codeDir, web }),
     tools: toolsFor(web),
     cwd: repo,
@@ -190,6 +190,13 @@ export async function selftest(ctx) {
   const blocking = ready.problems.filter((problem) => problem !== 'origin-mismatch')
   if (blocking.length || claude.state !== 'found') return { ok: false, problems: [`Claude is not ready (${blocking.join(', ') || 'not found'}); run --preflight first.`] }
   if (typeof home !== 'string') return { ok: false, problems: ['the home folder is not known, so the test cannot plant its file there.'] }
+  // The link Claude Code is found by is followed to its real file ONCE, here, the way the check before every run does it. That file is asked its
+  // version and is what every run below starts, and it is what the proof is kept for: a link moved during the minutes these runs take changes
+  // nothing about which program is being proven.
+  const file = await followToFile(claude.path, ctx.realpath ?? realpath)
+  if (file === null) return { ok: false, problems: ['the Claude Code program could not be found, so nothing was proven.'] }
+  const version = await versionOfFile(file, { exec: ctx.exec, emptyDir: empty, env: ctx.env, platform: ctx.platform })
+  if (version === null) return { ok: false, problems: ['Claude Code did not say which version it is, so nothing was proven.'] }
   if ((await exists(folder)) && !(await exists(join(folder, SELFTEST_MARKER)))) {
     return { ok: false, problems: ["a folder next to the work copy is named selftest and is not the self-test's own, so it was left alone. Move it away and run this again."] }
   }
@@ -201,10 +208,10 @@ export async function selftest(ctx) {
     await mkdir(tmp, { recursive: true })
     const problems = []
     for (const [index, configuration] of CONFIGURATIONS.entries()) {
-      problems.push(...await proveOne({ ctx, claude, folder: join(folder, String(index + 1)), home, tmp, configuration, planted }))
+      problems.push(...await proveOne({ ctx, file, folder: join(folder, String(index + 1)), home, tmp, configuration, planted }))
     }
     if (problems.length === 0) {
-      const kept = await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version: ready.version, now: ctx.now ?? Date.now })
+      const kept = await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version, file, now: ctx.now ?? Date.now })
       if (!kept) problems.push('the proof could not be kept (the settings could not be read, or the folder could not be written).')
     }
     return { ok: problems.length === 0, problems }

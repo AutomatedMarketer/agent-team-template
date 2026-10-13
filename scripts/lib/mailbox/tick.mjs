@@ -40,8 +40,8 @@ import { CLAIMS_STORE, claimExists, claimOrder, openStore, writeClaimFile } from
 import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
-import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, parseVersion, preflight, runClaude, toolsFor } from './claude.mjs'
-import { proofHolds } from './proof.mjs'
+import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
+import { proofHolds, proofKept } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
@@ -169,8 +169,9 @@ async function locked(ctx, { orders, end, log }) {
   s.notReady = checked.problems
   // No run until the walls around Claude were proven on this Mac (--selftest) for this Claude Code and these settings. This is a first look,
   // against the version the daily check remembered, so a tick with no proof does not even claim a run. It is not the last word: Claude Code
-  // can update itself after the daily check, so the version is asked again just before each run (versionToRun).
-  if (checked.ok && !(await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checked.version })).holds) {
+  // can update itself after the daily check, so the version is asked again just before each run (versionToRun), and the proof must be for the very file that
+  // would start; this first look cannot say which file that is, so it only asks for a proof of this version at all.
+  if (checked.ok && !(await proofKept({ stateDir: places.stateDir, codeDir: places.codeDir, version: checked.version })).holds) {
     s.claudeReady = false
     s.notReady = [...s.notReady, 'selftest-needed']
   }
@@ -377,26 +378,16 @@ async function execute(s, { id, action, fields, minutes }) {
 // and an update - by its own background check if it was ever started without the switch, or by the owner using it by hand - moves that link.
 // So the link is followed to the real file ONCE, here; the version is asked of that file, from an empty folder and with the small environment
 // (so it reads no team repo, and does not update itself); and that same file is what starts. The name is never looked up a second time, so a
-// link swapped between the check and the start changes nothing: the file that was checked is the file that runs.
+// link swapped between the check and the start changes nothing: the file that was checked is the file that runs. The self-test proof is for
+// that same file (its real path, and its version): a different file that happens to say the same version was never tested.
 // { ok: true, file } or { ok: false, why, words }.
 async function versionToRun(s) {
   const { ctx } = s
-  let file = null
-  try {
-    file = await (ctx.realpath ?? realpath)(s.claudePath)
-  } catch {
-    file = null
-  }
-  if (typeof file !== 'string' || file === '') return { ok: false, why: 'claude-missing', words: 'The Claude Code program could not be found, so no job was started.' }
-  let version = null
-  try {
-    const answer = await ctx.exec(file, ['--version'], { cwd: s.emptyCwd, env: claudeEnv(ctx.env, ctx.platform), timeout: 15_000 })
-    version = parseVersion(answer.stdout)
-  } catch {
-    version = null
-  }
+  const file = await followToFile(s.claudePath, ctx.realpath ?? realpath)
+  if (file === null) return { ok: false, why: 'claude-missing', words: 'The Claude Code program could not be found, so no job was started.' }
+  const version = await versionOfFile(file, { exec: ctx.exec, emptyDir: s.emptyCwd, env: ctx.env, platform: ctx.platform })
   if (version === null) return { ok: false, why: 'selftest-needed', words: 'Claude Code did not say which version it is, so it needs a new self-test.' }
-  const proof = await proofHolds({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, version })
+  const proof = await proofHolds({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, version, file })
   return proof.holds ? { ok: true, file } : { ok: false, why: 'selftest-needed', words: `Claude Code ${version.join('.')} is not the version the self-test passed for, so it needs a new self-test.` }
 }
 

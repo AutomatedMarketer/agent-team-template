@@ -11,12 +11,12 @@
 // switch that is not one.
 
 import { fileURLToPath } from 'node:url'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, realpath, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
-import { MINIMUM_VERSION, preflight, originMatches } from './claude.mjs'
+import { MINIMUM_VERSION, followToFile, preflight, originMatches } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
@@ -116,7 +116,9 @@ async function report(ctx, places, out) {
     say(login === undefined, login === undefined ? 'login: your own Claude account' : `login: ${PROBLEM_WORDS[login]}`)
   }
   if (checks.version) {
-    const proof = await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checks.version })
+    // The proof must be for the very file the link leads to now, so the link is followed here as a run would follow it.
+    const file = await followToFile((await ctx.find('claude')).path, ctx.realpath ?? realpath)
+    const proof = await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checks.version, file })
     say(proof.holds, proof.holds ? `self-test: passed on ${proof.at.slice(0, 10)} for this Claude and these settings` : `self-test: ${PROBLEM_WORDS['selftest-needed']}`)
   }
   say(!has('key-in-environment'), has('key-in-environment') ? `API key: ${PROBLEM_WORDS['key-in-environment']}` : 'API key: none set')

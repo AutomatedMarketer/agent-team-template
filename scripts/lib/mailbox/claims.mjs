@@ -5,12 +5,13 @@
 //      same signed order could still pass every other check. Keeping them for ever is fine, and that is what this
 //      does: nothing in this file removes a claim, a claim folder or the record below. (A claim older than that
 //      can be deleted by hand; the order it was for has long expired.)
-//   2. NEVER OLDER THAN THE STORE. When the store is first made, the moment is recorded inside it, once
+//   2. NEVER OLDER THAN THE STORE. When the store is first made, the moment (plus the contract's futureSkewSeconds, so a Mac clock
+//      that runs behind the board's cannot let an order issued just before it through) is recorded inside it, once
 //      (claims/store.json), and never changed. Every order issued before that moment is refused (verdict
 //      before-claims, envelope.mjs). So a claim folder that was wiped, lost, restored from before, or is brand new
 //      cannot run again an order that is still alive in the board's queue. The record is inside the folder on
 //      purpose: whatever empties the folder takes it too, and the store then begins again from now. A store with no
-//      usable record is not one to trust, so it is given a new record dated now - later than the truth, which only
+//      usable record is not one to trust, so it is given a new record dated now plus the skew - later than the truth, which only
 //      ever refuses more - and the claims already in it still count as seen.
 //   3. ON DISK BEFORE ANYTHING ELSE. A claim is made in one step that cannot half-happen (a new folder, which
 //      exists or does not), its files are written under a temporary name, flushed to disk, moved into place and the
@@ -25,7 +26,7 @@
 
 import * as realFs from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { ACTIONS, ID_SHAPE } from './contract.mjs'
+import { ACTIONS, ID_SHAPE, LIFE } from './contract.mjs'
 import { parseInstant } from './envelope.mjs'
 import { readSmallFile } from './small-file.mjs'
 
@@ -105,7 +106,10 @@ export async function openStore(stateDir, now, { fs = realFs, platform = process
     const found = await readSmallFile(join(folder, CLAIMS_STORE.record), RECORD_MAX_BYTES, fs)
     const since = found.state === 'ok' ? recordedSince(found.text) : null
     if (since !== null) return { ok: true, since, created: false }
-    const stamp = new Date(now).toISOString()
+    // The moment recorded is the Mac's clock plus the skew the contract already tolerates. An order's issuedAt is the BOARD's clock; a Mac that
+    // runs up to futureSkewSeconds behind it would otherwise stamp a moment earlier than an order issued just before the store was made, and
+    // that order would pass and could run again. The cost is that orders issued in the first two minutes are refused as before-claims and expire.
+    const stamp = new Date(now + LIFE.futureSkewSeconds * 1000).toISOString()
     await writeDurably(fs, join(folder, CLAIMS_STORE.record), asJson({ claimsSince: stamp }), platform)
     return { ok: true, since: Date.parse(stamp), created: true }
   } catch {

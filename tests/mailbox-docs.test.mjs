@@ -191,6 +191,18 @@ test('the guide has the runner run once with nothing waiting before the first or
   assert.ok(tick.includes('claimsSince: store.since'))
 })
 
+test('the guide tells the owner to wait two minutes after the first check, because a new claim store records its moment plus the clock skew the contract allows', async () => {
+  const doc = await guide()
+  const step = flat(section(doc, '### 7. One order, watched', '### 8.'))
+  assert.match(step, /Wait two minutes./)
+  assert.match(step, /refused as `before-claims`/)
+  assert.match(flat(doc), /| A test order refused as `before-claims` right after the runner's first check |/)
+  // The two minutes are the contract's own skew, which is what the store adds (claims.mjs).
+  const { LIFE } = await import('../scripts/lib/mailbox/contract.mjs')
+  assert.equal(LIFE.futureSkewSeconds, 120)
+  assert.ok((await read('scripts/lib/mailbox/claims.mjs')).includes('LIFE.futureSkewSeconds * 1000'))
+})
+
 test('the pause switch and the rollback are in the guide, and the pause file is the one the code reads', async () => {
   const doc = await guide()
   const tick = await read('scripts/lib/mailbox/tick.mjs')

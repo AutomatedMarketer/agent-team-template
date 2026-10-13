@@ -19,6 +19,8 @@ import { keepProof } from '../../scripts/lib/mailbox/proof.mjs'
 export const SECRET = ['signing', 'secret', 'one', 'made', 'for', 'this', 'test', '9876543210'].join('-')
 export const FAKE_API_KEY = ['sk', 'ant', 'test', 'not', 'real', '0123456789012345'].join('-')
 export const KEY = ['poll', 'key', 'made', 'for', 'this', 'test', 'only', '0123456789'].join('-')
+// The program the world's Claude is: its name and (the world follows no links) its real file are the same.
+export const CLAUDE_FILE = '/fake/bin/claude'
 export const REPO = 'ExampleOwner/example-team'
 export const T0 = Date.parse('2026-10-12T14:05:41.000Z')
 export const CARD = '---\nstatus: todo\nfor: sales\n---\n\n# Call the supplier\n\nAsk about the lead time.\n'
@@ -72,7 +74,7 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
   if (storeAgo !== null) await openStore(places.stateDir, clockAt - storeAgo)
   await writeFile(places.envFile, `MAILBOX_KEY=${KEY}\nMAILBOX_SECRET_k1=${SECRET}\n`)
   if (process.platform !== 'win32') await chmod(places.envFile, 0o600)
-  if (proof) await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version: [2, 1, 290], now: () => clockAt })
+  if (proof) await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version: [2, 1, 290], file: CLAUDE_FILE, now: () => clockAt })
 
   await git(['init', '-q', '--bare', '-b', 'main', originDir], root)
   await git(['clone', '-q', originDir, seedDir], root)
@@ -206,7 +208,7 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
     fetch,
     git,
     exec,
-    find: async () => ({ state: 'found', path: '/fake/bin/claude' }),
+    find: async () => ({ state: 'found', path: CLAUDE_FILE }),
     realpath: async (path) => path,
     spawn,
     kill,

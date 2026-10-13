@@ -92,6 +92,29 @@ export function atLeast(version, minimum) {
   return true
 }
 
+// The real file a program name leads to, followed ONCE: the name Claude Code is found by (~/.local/bin/claude) is a link into a folder of versions,
+// and an update moves the link. Whatever is checked or proven has to be this file, and this same file has to be what starts, so the name is never
+// looked up a second time. `follow` is realpath (a test hands in another). null when the answer is an error, empty, or not text.
+export async function followToFile(path, follow) {
+  try {
+    const file = await follow(path)
+    return typeof file === 'string' && file !== '' ? file : null
+  } catch {
+    return null
+  }
+}
+
+// The version a program says it is, asked of THAT file, from an empty folder and with the small environment (so it reads no team repo and does not
+// update itself). null when it does not answer or does not say. Used by the self-test and by the check before every run, so the two ask the same way.
+export async function versionOfFile(file, { exec, emptyDir, env, platform }) {
+  try {
+    const answer = await exec(file, ['--version'], { cwd: emptyDir, env: claudeEnv(env, platform), timeout: 15_000 })
+    return parseVersion(answer.stdout)
+  } catch {
+    return null
+  }
+}
+
 /* ---------- the argument list and the environment ------------------------------------------------------------------ */
 
 export function buildArgv({ prompt, model, codeDir, web }) {

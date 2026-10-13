@@ -4,13 +4,15 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { MCP_FILE, SETTINGS_FILE } from '../scripts/lib/mailbox/claude.mjs'
-import { CHECK_FILES, PROOF_FILE, configFingerprint, dropProof, keepProof, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
+import { CHECK_FILES, PROOF_FILE, configFingerprint, dropProof, keepProof, proofHolds, proofKept } from '../scripts/lib/mailbox/proof.mjs'
 import { repoRoot } from './helpers/repo.mjs'
 
 /* The self-test proves, on this Mac, that Claude cannot read or write outside the work copy. That proof is only worth
    something for the Claude Code and the settings it was made with, so it is kept with both, and a run is refused when
    either has changed since. */
 
+// The real file the self-test ran.
+const FILE = '/home/owner/.local/share/claude/versions/2.1.290'
 const at = (folder, relative) => join(folder, ...relative.split('/'))
 
 async function folders() {
@@ -93,7 +95,7 @@ test('with a file of the setup missing there is no fingerprint, so nothing can b
     await rm(at(f.code, MCP_FILE))
     assert.equal(await configFingerprint(f.code), null)
     assert.equal(await configFingerprint(join(f.root, 'nowhere')), null)
-    assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], now: () => Date.parse('2026-10-13T10:00:00Z') }), false)
+    assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') }), false)
     assert.equal(await stat(join(f.state, PROOF_FILE)).catch(() => null), null, 'nothing was kept')
   } finally {
     await f.done()
@@ -104,18 +106,18 @@ test('a proof that was kept holds for the same Claude and the same setup, and fo
   const f = await folders()
   try {
     const version = [2, 1, 290]
-    assert.deepEqual(await proofHolds({ stateDir: f.state, codeDir: f.code, version }), { holds: false, at: null }, 'none kept yet')
-    assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version, now: () => Date.parse('2026-10-13T10:00:00Z') }), true)
-    assert.deepEqual(await proofHolds({ stateDir: f.state, codeDir: f.code, version }), { holds: true, at: '2026-10-13T10:00:00Z' })
+    assert.deepEqual(await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE }), { holds: false, at: null }, 'none kept yet')
+    assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version, file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') }), true)
+    assert.deepEqual(await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE }), { holds: true, at: '2026-10-13T10:00:00Z' })
     for (const other of [[2, 1, 291], [2, 1, 289], [2, 2, 290], [3, 1, 290]]) {
-      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: other })).holds, false, `Claude ${other.join('.')}`)
+      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: other, file: FILE })).holds, false, `Claude ${other.join('.')}`)
     }
     for (const bad of [null, undefined, '2.1.290', [2, 1], []]) {
-      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: bad })).holds, false, String(bad))
+      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: bad, file: FILE })).holds, false, String(bad))
     }
     const settings = at(f.code, SETTINGS_FILE)
     await writeFile(settings, `${await readFile(settings, 'utf8')} `)
-    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version })).holds, false, 'the settings changed after the proof')
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, false, 'the settings changed after the proof')
   } finally {
     await f.done()
   }
@@ -124,9 +126,9 @@ test('a proof that was kept holds for the same Claude and the same setup, and fo
 test('a kept proof names only what it is a proof of - no path, no user name - and is for the owner alone', async () => {
   const f = await folders()
   try {
-    await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], now: () => Date.parse('2026-10-13T10:00:00Z') })
+    await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') })
     const text = await readFile(join(f.state, PROOF_FILE), 'utf8')
-    assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['at', 'fingerprint', 'ok', 'version'])
+    assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['at', 'file', 'fingerprint', 'ok', 'version'])
     assert.ok(!text.includes(f.root), 'no path')
     if (process.platform !== 'win32') assert.equal((await stat(join(f.state, PROOF_FILE))).mode & 0o777, 0o600)
   } finally {
@@ -139,7 +141,7 @@ test('a proof that is missing, broken, not a pass, or about something else holds
   try {
     const version = [2, 1, 290]
     const fingerprint = await configFingerprint(f.code)
-    const good = { ok: true, at: '2026-10-13T10:00:00Z', version, fingerprint }
+    const good = { ok: true, at: '2026-10-13T10:00:00Z', version, file: FILE, fingerprint }
     const cases = [
       ['broken JSON', '{ not json'],
       ['an array', '[]'],
@@ -147,6 +149,9 @@ test('a proof that is missing, broken, not a pass, or about something else holds
       ['not a pass', JSON.stringify({ ...good, ok: false })],
       ['a pass that is only a word', JSON.stringify({ ...good, ok: 'true' })],
       ['another fingerprint', JSON.stringify({ ...good, fingerprint: 'a'.repeat(64) })],
+      ['no file (a proof kept before the file was recorded)', JSON.stringify({ ok: true, at: good.at, version, fingerprint })],
+      ['a file that is not text', JSON.stringify({ ...good, file: 42 })],
+      ['an empty file', JSON.stringify({ ...good, file: '' })],
       ['no fingerprint', JSON.stringify({ ok: true, at: good.at, version })],
       ['a version as text', JSON.stringify({ ...good, version: '2.1.290' })],
       ['a version one short', JSON.stringify({ ...good, version: [2, 1] })],
@@ -154,10 +159,10 @@ test('a proof that is missing, broken, not a pass, or about something else holds
     ]
     for (const [name, text] of cases) {
       await writeFile(join(f.state, PROOF_FILE), text)
-      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version })).holds, false, name)
+      assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, false, name)
     }
     await writeFile(join(f.state, PROOF_FILE), JSON.stringify(good))
-    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version })).holds, true, 'the same file, well formed, holds')
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, true, 'the same file, well formed, holds')
   } finally {
     await f.done()
   }
@@ -178,11 +183,54 @@ test('a proof is kept only for a version that is three numbers', async () => {
 test('dropping a proof removes it, and dropping one that is not there is fine', async () => {
   const f = await folders()
   try {
-    await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], now: Date.now })
+    await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], file: FILE, now: Date.now })
     await dropProof(f.state)
-    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290] })).holds, false)
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], file: FILE })).holds, false)
     await dropProof(f.state)
     await dropProof(join(f.root, 'no-such-folder'))
+  } finally {
+    await f.done()
+  }
+})
+
+test('a proof kept for one file does not hold for another file that reports the same version: the program tested is the program that starts', async () => {
+  const f = await folders()
+  try {
+    const version = [2, 1, 290]
+    const other = '/home/owner/.local/share/claude/versions/2.1.290-copy'
+    await keepProof({ stateDir: f.state, codeDir: f.code, version, file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') })
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, true, 'the same file')
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: other })).holds, false, 'another file, the same version')
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE.toUpperCase() })).holds, false, 'the path must be the same exactly, not alike')
+    for (const none of [undefined, null, '', 42]) assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: none })).holds, false, `no file asked: ${none}`)
+  } finally {
+    await f.done()
+  }
+})
+
+test('a proof is kept only for a real file path: without one nothing is kept', async () => {
+  const f = await folders()
+  try {
+    for (const bad of [undefined, null, '', 42]) {
+      assert.equal(await keepProof({ stateDir: f.state, codeDir: f.code, version: [2, 1, 290], file: bad, now: Date.now }), false, String(bad))
+    }
+    assert.equal(await stat(join(f.state, PROOF_FILE)).catch(() => null), null)
+  } finally {
+    await f.done()
+  }
+})
+
+test('a proof kept in the old form, with a version and a fingerprint and no file, holds for nothing - not even for a first look at a tick', async () => {
+  const f = await folders()
+  try {
+    const version = [2, 1, 290]
+    const fingerprint = await configFingerprint(f.code)
+    await writeFile(join(f.state, PROOF_FILE), JSON.stringify({ ok: true, at: '2026-10-13T10:00:00Z', version, fingerprint }))
+    assert.equal((await proofHolds({ stateDir: f.state, codeDir: f.code, version, file: FILE })).holds, false)
+    assert.equal((await proofKept({ stateDir: f.state, codeDir: f.code, version })).holds, false)
+    await keepProof({ stateDir: f.state, codeDir: f.code, version, file: FILE, now: () => Date.parse('2026-10-13T10:00:00Z') })
+    assert.equal((await proofKept({ stateDir: f.state, codeDir: f.code, version })).holds, true, 'the first look: a proof of this version for some file')
+    assert.equal((await proofKept({ stateDir: f.state, codeDir: f.code, version: [2, 1, 291] })).holds, false, 'but not for another version')
   } finally {
     await f.done()
   }

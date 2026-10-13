@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { git } from './helpers/git.mjs'
 import { signBody } from '../scripts/lib/mailbox/envelope.mjs'
-import { mailboxWorld, ALLOWLIST, T0, CARD, PROPOSALS, KEY, SECRET, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
+import { mailboxWorld, CLAUDE_FILE, ALLOWLIST, T0, CARD, PROPOSALS, KEY, SECRET, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
 import { runTick } from '../scripts/lib/mailbox/tick.mjs'
 import { checkMailbox } from '../scripts/lib/status/safe.mjs'
 import { newCardText } from '../scripts/lib/mailbox/cards.mjs'
@@ -350,8 +350,10 @@ test('a claim store that was lost does not run an order that was already done: i
   assert.equal(result.orders.ok, 0)
   assert.equal((await w.inOrigin.log()).filter((subject) => subject.startsWith('Mailbox order')).length, 1, 'the card was not made twice')
   assert.equal(entryFor(await statusIn(w), sent.id).why, 'not-valid')
-  // An order issued after the new store began is fine (one issued a minute before it is not: the board's usual one is refused too).
+  // An order issued after the new store began is fine (one issued a minute before it is not: the board's usual one is refused too). The new store
+  // began the contract's two minutes of clock skew after the tick that made it, so the fresh order is issued from then on.
   const before = w.send({ action: 'task', title: 'Just before' })
+  w.clock.advance(2 * MINUTE)
   const after = w.send({ action: 'task', title: 'A new one' }, { body: { issuedAt: new Date(w.clock.now()).toISOString(), expiresAt: new Date(w.clock.now() + 15 * MINUTE).toISOString() } })
   w.clock.advance(MINUTE)
   const last = await runTick(w.ctx({ force: true }))
@@ -1198,7 +1200,7 @@ test('with no self-test passed, a run is refused as "not ready" and the log says
 
 test('a self-test passed for another Claude version, or for other settings, does not count: a run is refused until it is made again', () => withWorld({ proof: false }, async (w) => {
   w.claude.script = w.claude.good
-  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 289], now: w.clock.now })
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 289], file: CLAUDE_FILE, now: w.clock.now })
   const older = w.send({ action: 'run', workflow: 'morning-intel' })
   await runTick(w.ctx())
   assert.deepEqual(await refusedAsNotReady(w, older.id), ['refused', 'not-ready'], 'a proof for 2.1.289 is not a proof for 2.1.290')
@@ -1227,7 +1229,7 @@ test('the self-test is looked at on every tick and never remembered: once it is 
   await runTick(w.ctx())
   assert.deepEqual(await refusedAsNotReady(w, first.id), ['refused', 'not-ready'])
 
-  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], now: w.clock.now })
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: CLAUDE_FILE, now: w.clock.now })
   const second = w.send({ action: 'run', workflow: 'morning-intel' })
   w.clock.advance(MINUTE)
   await runTick(w.ctx({ force: true }))
@@ -1326,8 +1328,10 @@ test('the version is asked before every run, not once a day: a run after an upda
 // name is never looked up a second time.
 const VERSIONS = { '/fake/bin/claude': '2.1.290', '/fake/versions/2.1.290/claude': '2.1.290', '/fake/versions/2.1.291/claude': '2.1.291' }
 
-test('the launcher is followed to its real file once per run, that file is asked its version, and that file is what starts - even if the link is swapped in between', () => withWorld(async (w) => {
+test('the launcher is followed to its real file once per run, that file is asked its version, and that file is what starts - even if the link is swapped in between', () => withWorld({ proof: false }, async (w) => {
   w.claude.script = w.claude.good
+  // The self-test passed for the file the link leads to at the first look.
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: '/fake/versions/2.1.290/claude', now: w.clock.now })
   const followed = []
   // The first look finds version 2.1.290; any later look at the link finds that an update has swapped it for 2.1.291.
   const realpathOf = async (path) => {
@@ -1363,7 +1367,7 @@ test('a launcher that cannot be followed to a file is no run: refused as "not re
 }))
 
 test('on a real file system a link to the program is followed to the program itself: its real path is asked for the version and started', async (t) => {
-  await withWorld(async (w) => {
+  await withWorld({ proof: false }, async (w) => {
     const target = join(w.root, 'bin', 'versions', '2.1.290', 'claude')
     const link = join(w.root, 'bin', 'claude')
     await mkdir(join(w.root, 'bin', 'versions', '2.1.290'), { recursive: true })
@@ -1375,6 +1379,8 @@ test('on a real file system a link to the program is followed to the program its
       return
     }
     w.claude.script = w.claude.good
+    const real = await realpath(target)
+    await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: real, now: w.clock.now })
     const asked = []
     const exec = async (file, args, options) => {
       if (args[0] === '--version') asked.push(file)
@@ -1382,10 +1388,43 @@ test('on a real file system a link to the program is followed to the program its
     }
     w.send({ action: 'run', workflow: 'morning-intel' })
     await runTick(w.ctx({ exec, find: async () => ({ state: 'found', path: link }), realpath: undefined }))
-    const real = await realpath(target)
     assert.equal(w.claude.calls.length, 1)
     assert.equal(w.claude.calls[0].file, real, 'the program itself, not the link')
     assert.equal(asked.at(-1), real)
     assert.notEqual(real, link)
   })
 })
+
+/* ---------- the self-test proof is for the file that starts, not only for a version number ------------------------------- */
+
+test('a self-test passed for one file does not count for another file that says the same version: the run is refused as not ready, Claude is never started, and the log says a new self-test is needed', () => withWorld({ proof: false }, async (w) => {
+  w.claude.script = w.claude.good
+  // Two different programs, both saying 2.1.290: the self-test passed for the first, and the link now leads to the second.
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: '/fake/versions/first/claude', now: w.clock.now })
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  const logs = []
+  await runTick(w.ctx({ realpath: async () => '/fake/versions/second/claude', log: (line) => logs.push(line) }))
+  assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'])
+  assert.equal(w.claude.calls.length, 0, 'Claude was never started')
+  assert.ok(logs.some((line) => line.includes('selftest-needed')), 'the log says why')
+
+  // The same tick shape with the link leading to the file that was tested runs.
+  const again = w.send({ action: 'run', workflow: 'morning-intel' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ realpath: async () => '/fake/versions/first/claude', force: true }))
+  assert.equal(entryFor(await statusIn(w), again.id).state, 'ok')
+  assert.equal(w.claude.calls.length, 1)
+  assert.equal(w.claude.calls[0].file, '/fake/versions/first/claude')
+}))
+
+test('a self-test kept in the old form, with a version and settings but no file, does not count: it cannot say which program it tested, so a run is refused until a new self-test is made', () => withWorld({ proof: false }, async (w) => {
+  w.claude.script = w.claude.good
+  await keepProof({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: CLAUDE_FILE, now: w.clock.now })
+  const kept = JSON.parse(await readFile(join(w.places.stateDir, PROOF_FILE), 'utf8'))
+  delete kept.file
+  await writeFile(join(w.places.stateDir, PROOF_FILE), JSON.stringify(kept))
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'])
+  assert.equal(w.claude.calls.length, 0)
+}))

@@ -556,7 +556,7 @@
   },
   "claims": {
     "rule": "What the runner must do with its claims. These are rules of the contract, not advice: each one closes a way for one signed order to run twice.",
-    "since": "When the claim store is first made, the runner records that moment inside it, once (claimsSince, written as body.timeShape), and never changes it. A store without that record is not a store the runner may use: it makes a new one and records now. Every order issued before claimsSince is refused (verdict before-claims).",
+    "since": "When the claim store is first made, the runner records that moment PLUS life.futureSkewSeconds inside it, once (claimsSince, written as body.timeShape), and never changes it. The skew is added because issuedAt is the board's clock and claimsSince is the Mac's: a Mac clock up to futureSkewSeconds behind the board's must still refuse every order issued before the store was made, and without the addition such an order would pass and could run twice. Orders issued in those first seconds are refused as before-claims and simply expire. A store without that record is not a store the runner may use: it makes a new one and records the moment plus the skew. Every order issued before claimsSince is refused (verdict before-claims).",
     "keepSeconds": 3720,
     "keep": "Keep every claim at least keepSeconds (life.maxSeconds + life.futureSkewSeconds) after its order's issuedAt: until then the same signed order can still pass every other check. Keeping claims for ever is fine. Never remove one sooner.",
     "seen": "A claim that already exists for an id means the order was seen before: it is skipped, never run twice, whatever happened to it.",

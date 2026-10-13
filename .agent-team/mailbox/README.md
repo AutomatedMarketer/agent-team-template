@@ -143,7 +143,7 @@ node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --selft
 - It builds its folder next to the work copy, in `~/.local/share/agent-mailbox/selftest`, and removes it when it ends. It leaves alone a folder of that name that it did not make. It plants traps there: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
 - It asks Claude to read each of the three. It asks it to write a new file in `/tmp` and next to the folder. Last, it asks it to read and write a file in its own folder.
 - It passes only if Claude is seen trying each of those five things and is refused every one. Its own folder must work, so a refusal means something. No trap may run and no secret may come out. If it cannot prove a wall, it says which.
-- A pass is saved for this Claude Code version and these settings. **No job runs until it passes.** Until then the runner refuses a run as "not ready" and its log says `selftest-needed`. Card orders are not held up.
+- It follows the link that Claude Code is found by to its real program file once, at the start, and tests that file. A pass is saved for that file, its version and these settings, so a different program that says the same version needs its own pass. **No job runs until it passes.** Until then the runner refuses a run as "not ready" and its log says `selftest-needed`. Card orders are not held up.
 - Run it again after every Claude Code update, and after you move the runner's code to a newer commit. The runner notices a change by itself and stops jobs until you do. A changed setting is seen at once. The runner asks Claude Code which version it is just before every job.
 - The runner starts every Claude with `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`, so it does not update itself in the background. If you use Claude Code yourself and it updates, jobs wait until you run `--selftest` again.
 
@@ -157,7 +157,7 @@ So run it once with nothing waiting. Then send the test order.
 node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --once
 ```
 
-Wait a minute. Then, on the board, tap **Add task** with a card called "Mailbox test card". Then:
+Wait two minutes. The runner notes a moment two minutes after its first check, because your Mac's clock can run a little behind the board's. An order tapped before that moment is refused as `before-claims`. It just expires; tap a new one. Then, on the board, tap **Add task** with a card called "Mailbox test card". Then:
 
 ```bash
 # on the Mac Mini - the second check picks the order up
@@ -258,6 +258,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | An order shows **refused** on the board | The Mac turned it down for a fixed reason (not on its list, daily limit, expired...) | The board shows the reason in words |
 | An order shows **failed** | It started and nothing left the Mac | Look at the claim folder's transcript |
 | Everything refused as "not valid" after the claims folder was wiped | The runner records when its claims began and refuses any order issued before that, so a lost claims folder can never run an old order again | Wait for new orders; this is the safe behaviour |
+| A test order refused as `before-claims` right after the runner's first check | The runner's claims begin two minutes after its first check (your Mac's clock may run behind the board's), and an order tapped before then is refused | Wait two minutes after the first check, then tap a new order. The refused one expires by itself |
 
 ## How it keeps your Mac safe
 

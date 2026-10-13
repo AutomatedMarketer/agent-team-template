@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mailboxWorld } from './helpers/mailbox-world.mjs'
+import { CLAUDE_FILE, mailboxWorld } from './helpers/mailbox-world.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { main } from '../scripts/lib/mailbox/command.mjs'
 import { PROOF_FILE, keepProof, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
@@ -29,11 +29,11 @@ async function selftest(w, change = {}) {
 }
 
 const exists = (path) => access(path).then(() => true, () => false)
-const proofFor = (w) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290] })
+const proofFor = (w) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: CLAUDE_FILE })
 // A proof from an earlier self-test, in the state folder of the usual places.
 const oldProof = async (w) => {
   await mkdir(placesOf(w).stateDir, { recursive: true })
-  assert.equal(await keepProof({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], now: w.clock.now }), true)
+  assert.equal(await keepProof({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file: CLAUDE_FILE, now: w.clock.now }), true)
 }
 // Where the self-test builds its throwaway folders: next to the real work copy, which no rule of the settings file covers.
 const selfFolder = (w) => join(dirname(placesOf(w).workDir), 'selftest')
@@ -66,7 +66,7 @@ test('--selftest passes when Claude is refused everything outside its folder, in
     assert.ok(intel.includes('WebSearch') && intel.includes('WebFetch'), 'the web for the intel')
     assert.notEqual(w.claude.calls[0].options.cwd, w.claude.calls[1].options.cwd, 'each run has its own folder')
     assert.equal((await proofFor(w)).holds, true, 'kept')
-    assert.equal((await proofHolds({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 291] })).holds, false, 'and only for this version')
+    assert.equal((await proofHolds({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 291], file: CLAUDE_FILE })).holds, false, 'and only for this version')
   } finally {
     await w.cleanup()
   }
@@ -458,3 +458,96 @@ for (const [trap, weaken, how] of TRAP_CASES) {
     }
   })
 }
+
+/* ---------- the proof is for the file a job will start ---------------------------------------------------------------- */
+
+// The name Claude Code is found by is a link into a folder of versions. The self-test follows it to the real file once, and runs, asks and
+// proves that file; a job later starts the same real file, and a proof for any other file does not count.
+const LINK = CLAUDE_FILE
+const VERSION_ONE = '/fake/versions/2.1.290/claude'
+const VERSION_TWO = '/fake/versions/2.1.291/claude'
+const keptFile = async (w) => JSON.parse(await readFile(join(placesOf(w).stateDir, PROOF_FILE), 'utf8')).file
+
+test('--selftest starts the real file the link leads to, not the link, asks that file its version, and keeps the proof for that file', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w)
+    const asked = []
+    const exec = async (file, args, options) => {
+      if (args[0] === '--version') asked.push(file)
+      return w.exec(file, args, options)
+    }
+    const result = await selftest(w, { exec, realpath: async (path) => (path === LINK ? VERSION_ONE : path) })
+    assert.equal(result.code, 0, result.text)
+    assert.deepEqual(w.claude.calls.map((call) => call.file), [VERSION_ONE, VERSION_ONE], 'both kinds of run start the file, not the link')
+    assert.equal(asked.at(-1), VERSION_ONE, 'the version that is kept is that of the file')
+    assert.equal(await keptFile(w), VERSION_ONE)
+    const holds = (file) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], file })
+    assert.equal((await holds(VERSION_ONE)).holds, true)
+    assert.equal((await holds(LINK)).holds, false, 'the link is not what was tested')
+    assert.equal((await holds(VERSION_TWO)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a link that is moved to another version while the self-test runs changes nothing: the link is followed once, and the file it led to at the start is the one run and proven', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    let leadsTo = VERSION_ONE
+    const followed = []
+    const realpathOf = async (path) => {
+      followed.push(path)
+      return leadsTo
+    }
+    const confined = confinedClaude(w)
+    // An update moves the link while the first of the two runs is under way.
+    w.claude.script = async (cwd, args, call) => {
+      leadsTo = VERSION_TWO
+      return confined(cwd, args, call)
+    }
+    const result = await selftest(w, { realpath: realpathOf })
+    assert.equal(result.code, 0, result.text)
+    assert.deepEqual(followed, [LINK], 'followed once')
+    assert.deepEqual(w.claude.calls.map((call) => call.file), [VERSION_ONE, VERSION_ONE])
+    assert.equal(await keptFile(w), VERSION_ONE)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('--selftest fails in plain words when the link cannot be followed to a file, starts no Claude, and keeps no proof', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w)
+    await oldProof(w)
+    for (const [name, realpathOf] of [['an error', async () => { throw new Error('ENOENT: /Users/someone/.local/bin/claude') }], ['an empty answer', async () => ''], ['no text', async () => undefined]]) {
+      const result = await selftest(w, { realpath: realpathOf })
+      assert.equal(result.code, 1, name)
+      assert.match(result.text, /the Claude Code program could not be found, so nothing was proven/, name)
+      assert.ok(!result.text.includes('someone'), 'no path or user name')
+    }
+    assert.equal(w.claude.calls.length, 0)
+    assert.equal(await exists(join(placesOf(w).stateDir, PROOF_FILE)), false, 'and the older proof is gone too')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('--selftest fails in plain words when the file it follows to does not say which version it is, and starts no Claude', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w)
+    const exec = async (file, args, options) => {
+      // The link answers (the readiness check asks it); the real file it leads to does not.
+      if (args[0] === '--version' && file === VERSION_ONE) throw new Error('boom')
+      return w.exec(file, args, options)
+    }
+    const result = await selftest(w, { exec, realpath: async () => VERSION_ONE })
+    assert.equal(result.code, 1)
+    assert.match(result.text, /Claude Code did not say which version it is, so nothing was proven/)
+    assert.equal(w.claude.calls.length, 0)
+  } finally {
+    await w.cleanup()
+  }
+})

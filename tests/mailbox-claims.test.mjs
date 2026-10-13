@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import { CLAIMS_STORE, openStore, claimOrder, claimExists, listClaims, writeClaimFile, readClaimFile } from '../scripts/lib/mailbox/claims.mjs'
-import { verifyEnvelope } from '../scripts/lib/mailbox/envelope.mjs'
+import { LIFE } from '../scripts/lib/mailbox/contract.mjs'
+import { signBody, verifyEnvelope } from '../scripts/lib/mailbox/envelope.mjs'
 
 /* A claim is the Mac's record that it has seen an order. It is what stops one signed order running twice, so the
    contract (tests/fixtures/mailbox-parity.json, `claims`) makes three rules about it, and each is held here:
@@ -21,6 +22,8 @@ const fixture = JSON.parse(readFileSync(join(repoRoot, 'tests', 'fixtures', 'mai
 const ID = '0f1e2d3c4b5a69788796a5b4c3d2e1f0'
 const OTHER_ID = '11111111111111111111111111111111'
 const T0 = Date.parse('2026-10-12T14:04:00.000Z')
+// A new store records the Mac's moment plus the skew the contract tolerates between the two clocks.
+const SKEW = LIFE.futureSkewSeconds * 1000
 const ENVELOPE = { kid: 'k1', body: '{"v":1}', sig: 'x'.repeat(43) }
 
 async function folder() {
@@ -81,10 +84,61 @@ test('the first time the store is opened it is made, and the moment is recorded 
   const state = await folder()
   try {
     const first = await openStore(state.dir, T0)
-    assert.deepEqual(first, { ok: true, since: T0, created: true })
+    assert.deepEqual(first, { ok: true, since: T0 + SKEW, created: true })
     const record = JSON.parse(await readFile(join(state.dir, 'claims', CLAIMS_STORE.record), 'utf8'))
-    assert.deepEqual(record, { claimsSince: '2026-10-12T14:04:00.000Z' })
+    assert.deepEqual(record, { claimsSince: '2026-10-12T14:06:00.000Z' })
     assert.match(record.claimsSince, new RegExp(fixture.body.timeShape))
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('a new store records its moment plus futureSkewSeconds from the contract, and the number is the one both sides agree on', async () => {
+  const state = await folder()
+  try {
+    assert.equal(LIFE.futureSkewSeconds, fixture.life.futureSkewSeconds, 'the skew is the one both sides agree on')
+    const made = await openStore(state.dir, T0)
+    assert.equal(made.since, T0 + fixture.life.futureSkewSeconds * 1000)
+    const record = JSON.parse(await readFile(join(state.dir, 'claims', CLAIMS_STORE.record), 'utf8'))
+    assert.equal(Date.parse(record.claimsSince) - T0, 120_000)
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('an order issued a minute before the store was made is refused when the board clock runs ninety seconds ahead of the Mac clock', async () => {
+  const state = await folder()
+  const secret = 'test-only-secret-0123456789abcdef0123456789abcdef'
+  try {
+    // The Mac reads T0 when its store is made; the board's clock reads 90 seconds more. An order the board issued a minute before the store was
+    // made carries the board's clock, so on the Mac's clock it looks issued 30 seconds AFTER the store began - which a store stamped with the
+    // plain Mac clock would let through, to run a second time.
+    const issuedAt = new Date(T0 + 90_000 - 60_000).toISOString()
+    const text = JSON.stringify({
+      v: 1,
+      id: ID,
+      repo: fixture.test.repo,
+      runner: fixture.test.runner,
+      issuedAt,
+      expiresAt: new Date(T0 + 14 * 60_000).toISOString(),
+      payload: { source: 'agent-cockpit', action: 'task', title: 'Mailbox test card' }
+    })
+    const envelope = { kid: 'k1', body: text, sig: signBody(text, secret) }
+    const expectation = { keys: { k1: secret }, repo: fixture.test.repo, runner: fixture.test.runner, now: T0 + 1000 }
+    assert.equal(verifyEnvelope(envelope, { ...expectation, claimsSince: T0 }).verdict, 'ok', 'a store stamped with the plain Mac clock lets it through')
+    const made = await openStore(state.dir, T0)
+    assert.equal(verifyEnvelope(envelope, { ...expectation, claimsSince: made.since }).verdict, 'before-claims')
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('an existing store keeps the moment it recorded, however much later it is opened', async () => {
+  const state = await folder()
+  try {
+    const first = await openStore(state.dir, T0)
+    for (const later of [T0 + 1, T0 + SKEW, T0 + 10 * SKEW]) assert.deepEqual(await openStore(state.dir, later), { ok: true, since: first.since, created: false })
+    assert.equal(JSON.parse(await readFile(join(state.dir, 'claims', CLAIMS_STORE.record), 'utf8')).claimsSince, new Date(T0 + SKEW).toISOString())
   } finally {
     await state.cleanup()
   }
@@ -96,7 +150,7 @@ test('opened again - an hour, a day, a year later - it gives back the same momen
     await openStore(state.dir, T0)
     const { fs, log } = watched()
     for (const later of [T0 + 3600_000, T0 + 86400_000, T0 + 366 * 86400_000]) {
-      assert.deepEqual(await openStore(state.dir, later, { fs, platform: 'linux' }), { ok: true, since: T0, created: false })
+      assert.deepEqual(await openStore(state.dir, later, { fs, platform: 'linux' }), { ok: true, since: T0 + SKEW, created: false })
     }
     assert.deepEqual(log.filter(([op]) => ['open', 'rename', 'mkdir', 'write'].includes(op)), [])
   } finally {
@@ -110,7 +164,7 @@ test('a store that is wiped starts again from the moment it was found wiped - an
   const issued = Date.parse(JSON.parse(good.envelope.body).issuedAt)
   const expectation = { keys: fixture.test.keys, repo: fixture.test.repo, runner: fixture.test.runner, now: Date.parse(fixture.test.now) }
   try {
-    const first = await openStore(state.dir, Date.parse(fixture.test.claimsSince))
+    const first = await openStore(state.dir, Date.parse(fixture.test.claimsSince) - SKEW)
     assert.equal(verifyEnvelope(good.envelope, { ...expectation, claimsSince: first.since }).verdict, 'ok', 'with the store as it was, the order is good')
     const id = JSON.parse(good.envelope.body).id
     assert.equal((await claimOrder(state.dir, id, good.envelope, issued + 60_000)).state, 'claimed')
@@ -119,7 +173,7 @@ test('a store that is wiped starts again from the moment it was found wiped - an
     // The claims are lost (a new disk, a cleaned-up folder, a restore from before) while the order is still alive.
     await rm(join(state.dir, 'claims'), { recursive: true })
     const second = await openStore(state.dir, issued + 4 * 60_000)
-    assert.deepEqual(second, { ok: true, since: issued + 4 * 60_000, created: true })
+    assert.deepEqual(second, { ok: true, since: issued + 4 * 60_000 + SKEW, created: true })
     assert.equal(verifyEnvelope(good.envelope, { ...expectation, claimsSince: second.since }).verdict, 'before-claims')
   } finally {
     await state.cleanup()
@@ -133,26 +187,26 @@ test('the claims wiped but the record kept is not a case the record can help wit
     await claimOrder(state.dir, ID, ENVELOPE, T0)
     // Every way of emptying the folder with a glob leaves nothing the store could mistake for its past.
     for (const name of await readdir(join(state.dir, 'claims'))) await rm(join(state.dir, 'claims', name), { recursive: true })
-    assert.deepEqual(await openStore(state.dir, T0 + 5 * 60_000), { ok: true, since: T0 + 5 * 60_000, created: true })
+    assert.deepEqual(await openStore(state.dir, T0 + 5 * 60_000), { ok: true, since: T0 + 5 * 60_000 + SKEW, created: true })
   } finally {
     await state.cleanup()
   }
 })
 
-test('a store with claims in it but no record of when it began is not one to trust: it begins now, and the old claims still count as seen', async () => {
+test('a store with claims in it but no record of when it began is not one to trust: it begins now (plus the skew), and the old claims still count as seen', async () => {
   const state = await folder()
   try {
     await openStore(state.dir, T0)
     await claimOrder(state.dir, ID, ENVELOPE, T0)
     await rm(join(state.dir, 'claims', CLAIMS_STORE.record))
-    assert.deepEqual(await openStore(state.dir, T0 + 600_000), { ok: true, since: T0 + 600_000, created: true })
+    assert.deepEqual(await openStore(state.dir, T0 + 600_000), { ok: true, since: T0 + 600_000 + SKEW, created: true })
     assert.equal((await claimOrder(state.dir, ID, ENVELOPE, T0 + 600_000)).state, 'seen')
   } finally {
     await state.cleanup()
   }
 })
 
-test('a record that is not a record - damaged, another shape, not a real moment - is replaced by now, never believed', async () => {
+test('a record that is not a record - damaged, another shape, not a real moment - is replaced by now plus the skew, never believed', async () => {
   const state = await folder()
   try {
     await openStore(state.dir, T0)
@@ -176,8 +230,8 @@ test('a record that is not a record - damaged, another shape, not a real moment 
     for (const text of bad) {
       now += 60_000
       await writeFile(file, text)
-      assert.deepEqual(await openStore(state.dir, now), { ok: true, since: now, created: true }, text)
-      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { claimsSince: new Date(now).toISOString() }, text)
+      assert.deepEqual(await openStore(state.dir, now), { ok: true, since: now + SKEW, created: true }, text)
+      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { claimsSince: new Date(now + SKEW).toISOString() }, text)
     }
   } finally {
     await state.cleanup()
@@ -190,7 +244,7 @@ test('a record that is far bigger than a record can be is not read, however well
     await openStore(state.dir, T0)
     const file = join(state.dir, 'claims', CLAIMS_STORE.record)
     await writeFile(file, `{"claimsSince":"2026-10-12T14:04:00.000Z"}${' '.repeat(1000)}`)
-    assert.deepEqual(await openStore(state.dir, T0 + 60_000), { ok: true, since: T0 + 60_000, created: true })
+    assert.deepEqual(await openStore(state.dir, T0 + 60_000), { ok: true, since: T0 + 60_000 + SKEW, created: true })
   } finally {
     await state.cleanup()
   }
