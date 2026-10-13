@@ -7,10 +7,18 @@
 //
 //   -p "<prompt>"                    one run, no conversation. The prompt is first so no list flag can swallow it
 //   --model <opus|sonnet>            the owner agent's own model
+//   --restricted                     (v2.1.248) the built-in tools that run commands or code are removed, and so is WebFetch unless
+//                                    --tools names it; the built-in file tools are confined to the working directories; only managed
+//                                    settings and --settings are loaded; bypassPermissions is refused (cli-reference, the --restricted row)
 //   --permission-mode dontAsk        anything not allowed is denied, never asked: a reach outside the work copy fails
 //   --permission-prompts none        nobody can answer a prompt, so Claude is told not to retry
-//   --tools <list>                   the built-in tools that exist at all. Bash is not one: there is no shell
-//   --allowedTools <list>            the same list, pre-approved
+//   --tools <list>                   the built-in tools that exist at all. Bash is not one: there is no shell. The web tools only when the
+//                                    job needs them (the morning intel); the task sweep never has them
+//   --allowedTools <rules>           what is pre-approved. A tool name with no path in it is allowed EVERYWHERE and dontAsk runs anything
+//                                    allowed, so the file tools are pre-approved only as Read(/**) and Edit(/**) - on the command line a
+//                                    leading / is the folder Claude is started in, and Edit covers Write (permissions, "Read and Edit").
+//                                    Anything outside that folder is denied by dontAsk, and also refused by blockReadsOutsideWorkingDirectories
+//                                    in the settings file (v2.1.257)
 //   --disallowedTools "mcp__*"       removes every connector tool
 //   --settings <file>                our own settings: hooks off, inline shell in skills off, deny rules (claude-settings.json)
 //   --setting-sources user           the team repo's settings are NOT read - not its hooks, its env block or its helpers.
@@ -33,10 +41,16 @@ import { isAbsolute, join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { REPO_SHAPE } from './contract.mjs'
 
-export const TOOLS = Object.freeze(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+export const FILE_TOOLS = Object.freeze(['Read', 'Edit', 'Write', 'Glob', 'Grep'])
+export const WEB_TOOLS = Object.freeze(['WebSearch', 'WebFetch'])
+export const TOOLS = Object.freeze([...FILE_TOOLS, ...WEB_TOOLS])
+// The tools a run has: the file tools, and the web only for a job that needs the news. (A web tool is a way out: a tricked run can
+// put what it has read into a URL. That is accepted for the morning intel and never offered to the sweep.)
+export const toolsFor = (web) => (web ? [...FILE_TOOLS, ...WEB_TOOLS] : [...FILE_TOOLS])
+// What is pre-approved: the file tools only inside the work copy, the web tools only where the job has them.
+export const allowedFor = (web) => ['Read(/**)', 'Edit(/**)', ...(web ? WEB_TOOLS : [])]
 // The CLI reference says --tools cannot remove this one; calling it only ends the conversation.
 const TOLERATED = Object.freeze(['EndConversation'])
-const ALLOWED = new Set([...TOOLS, ...TOLERATED])
 export const SETTINGS_FILE = '.agent-team/mailbox/claude-settings.json'
 export const MCP_FILE = '.agent-team/mailbox/empty-mcp.json'
 export const MAX_TURNS = 80
@@ -80,18 +94,19 @@ export function atLeast(version, minimum) {
 
 /* ---------- the argument list and the environment ------------------------------------------------------------------ */
 
-export function buildArgv({ prompt, model, codeDir }) {
+export function buildArgv({ prompt, model, codeDir, web }) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.startsWith('-')) throw new TypeError('claude: the prompt is text that does not start like a flag')
   if (!RUN_MODELS.includes(model)) throw new TypeError('claude: the model is opus or sonnet')
   if (typeof codeDir !== 'string' || !isAbsolute(codeDir)) throw new TypeError('claude: the code folder is a full path')
-  const tools = TOOLS.join(',')
+  if (typeof web !== 'boolean') throw new TypeError('claude: whether the web is wanted is true or false')
   return [
     '-p', prompt,
     '--model', model,
+    '--restricted',
     '--permission-mode', 'dontAsk',
     '--permission-prompts', 'none',
-    '--tools', tools,
-    '--allowedTools', tools,
+    '--tools', toolsFor(web).join(','),
+    '--allowedTools', ...allowedFor(web),
     '--disallowedTools', 'mcp__*',
     '--settings', join(codeDir, ...SETTINGS_FILE.split('/')),
     '--setting-sources', 'user',
@@ -160,8 +175,11 @@ const TOOL_NAME = /^[A-Za-z0-9_*-]{1,64}$/
 export function runClaude({
   file, argv, cwd, env, timeoutMs, killAfterMs = KILL_AFTER_MS, closeWaitMs = CLOSE_WAIT_MS,
   transcriptPath, stderrPath, maxTranscriptBytes = TRANSCRIPT_MAX_BYTES,
+  // The tools this run was started with (toolsFor): any other tool listed or called stops it.
+  tools = TOOLS,
   spawn, kill, platform = process.platform, openStream = createWriteStream
 }) {
+  const allowedNames = new Set([...tools, ...TOLERATED])
   const stop = kill ?? ((pid, signal) => killTree(pid, signal, { platform, spawn }))
   return new Promise((resolve) => {
     const calls = new Map()
@@ -212,7 +230,7 @@ export function runClaude({
     }
 
     const audit = (name) => {
-      if (!ALLOWED.has(name)) return refuseTool(name)
+      if (!allowedNames.has(name)) return refuseTool(name)
       calls.set(name, (calls.get(name) ?? 0) + 1)
       return undefined
     }
@@ -228,7 +246,7 @@ export function runClaude({
       if (event?.type === 'system' && event.subtype === 'init') {
         if (!Array.isArray(event.tools)) return refuseTool('unknown')
         for (const name of event.tools) {
-          if (!ALLOWED.has(name)) return refuseTool(name)
+          if (!allowedNames.has(name)) return refuseTool(name)
         }
         if (Array.isArray(event.mcp_servers) && event.mcp_servers.length) return refuseTool('mcp')
       } else if (Array.isArray(event?.message?.content)) {

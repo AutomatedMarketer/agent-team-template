@@ -40,7 +40,7 @@ import { CLAIMS_STORE, claimExists, claimOrder, openStore, writeClaimFile } from
 import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
-import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude } from './claude.mjs'
+import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude, toolsFor } from './claude.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
@@ -381,9 +381,10 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   const prompt = await runPrompt(plan, { codeDir })
   const ran = await runClaude({
     file: s.claudePath,
-    argv: buildArgv({ prompt, model: plan.model, codeDir }),
+    argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
     cwd: workDir,
     env: claudeEnv(ctx.env, ctx.platform),
+    tools: toolsFor(plan.web),
     timeoutMs: minutes * 60_000,
     transcriptPath: join(claimDir, 'transcript.jsonl'),
     stderrPath: join(claimDir, 'stderr.txt'),

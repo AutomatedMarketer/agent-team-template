@@ -10,6 +10,10 @@ import { basename, join } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
 import {
   TOOLS,
+  FILE_TOOLS,
+  WEB_TOOLS,
+  toolsFor,
+  allowedFor,
   SETTINGS_FILE,
   MCP_FILE,
   MAX_TURNS,
@@ -42,67 +46,104 @@ const PROMPT = 'You are running one job of my agent team.'
 
 /* ---------- the argument list -------------------------------------------------------------------------------------- */
 
-test('the tools are seven built-in ones, none of them a shell', () => {
+test('the tools are seven built-in ones, none of them a shell - five for files, two for the web, and the web only for a job that needs it', () => {
   assert.deepEqual([...TOOLS], ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+  assert.deepEqual([...FILE_TOOLS], ['Read', 'Edit', 'Write', 'Glob', 'Grep'])
+  assert.deepEqual([...WEB_TOOLS], ['WebSearch', 'WebFetch'])
+  assert.deepEqual(toolsFor(false), ['Read', 'Edit', 'Write', 'Glob', 'Grep'])
+  assert.deepEqual(toolsFor(true), ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
   assert.equal(MAX_TURNS, 80)
 })
 
-test('the argument list is exactly the documented flags that make a run safe', () => {
-  assert.deepEqual(buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE }), [
-    '-p', PROMPT,
-    '--model', 'sonnet',
-    '--permission-mode', 'dontAsk',
-    '--permission-prompts', 'none',
-    '--tools', 'Read,Edit,Write,Glob,Grep,WebSearch,WebFetch',
-    '--allowedTools', 'Read,Edit,Write,Glob,Grep,WebSearch,WebFetch',
-    '--disallowedTools', 'mcp__*',
-    '--settings', join(CODE, '.agent-team', 'mailbox', 'claude-settings.json'),
-    '--setting-sources', 'user',
-    '--strict-mcp-config', '--mcp-config', join(CODE, '.agent-team', 'mailbox', 'empty-mcp.json'),
-    '--disable-slash-commands',
-    '--no-session-persistence',
-    '--max-turns', '80',
-    '--output-format', 'stream-json', '--verbose'
-  ])
+// What is pre-approved. A tool name with no path in it is allowed EVERYWHERE (https://code.claude.com/docs/en/permissions#read-and-edit
+// and the Warning under "Read and Edit"), so the file tools are allowed only inside the folder Claude is started in: a leading / in a rule
+// given on the command line is that folder (the same page's table of path patterns). Edit covers every tool that edits files, Write
+// included - a rule written for Write is accepted and never consulted (v2.1.210 or later), so there is none.
+test('the file tools are pre-approved only inside the work copy, and the web tools only when the job needs them', () => {
+  assert.deepEqual(allowedFor(false), ['Read(/**)', 'Edit(/**)'])
+  assert.deepEqual(allowedFor(true), ['Read(/**)', 'Edit(/**)', 'WebSearch', 'WebFetch'])
+  for (const web of [false, true]) {
+    for (const rule of allowedFor(web)) {
+      if (['Read', 'Edit', 'Write', 'Glob', 'Grep'].includes(rule)) assert.fail(`${rule} with no path is allowed everywhere`)
+      assert.ok(!rule.startsWith('Write(') && !rule.startsWith('Glob(') && !rule.startsWith('Grep('), `${rule}: Claude Code never consults a path rule for that tool`)
+      assert.ok(!/^(Read|Edit)\((~|\/\/|\.\.)/.test(rule), `${rule} reaches outside the work copy`)
+    }
+  }
+})
+
+// --restricted (v2.1.248 or later, https://code.claude.com/docs/en/cli-reference): it removes the tools that run commands or code and
+// WebFetch unless they are named in --tools, confines the built-in file tools to the working directory, loads only managed settings
+// and --settings, and refuses bypassPermissions.
+const ARGV = (tools, allowed) => [
+  '-p', PROMPT,
+  '--model', 'sonnet',
+  '--restricted',
+  '--permission-mode', 'dontAsk',
+  '--permission-prompts', 'none',
+  '--tools', tools,
+  '--allowedTools', ...allowed,
+  '--disallowedTools', 'mcp__*',
+  '--settings', join(CODE, '.agent-team', 'mailbox', 'claude-settings.json'),
+  '--setting-sources', 'user',
+  '--strict-mcp-config', '--mcp-config', join(CODE, '.agent-team', 'mailbox', 'empty-mcp.json'),
+  '--disable-slash-commands',
+  '--no-session-persistence',
+  '--max-turns', '80',
+  '--output-format', 'stream-json', '--verbose'
+]
+
+test('the argument list is exactly the documented flags that make a run safe - restricted, no shell, the file tools only inside the work copy', () => {
+  assert.deepEqual(buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, web: false }), ARGV('Read,Edit,Write,Glob,Grep', ['Read(/**)', 'Edit(/**)']))
+  assert.deepEqual(buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, web: true }), ARGV('Read,Edit,Write,Glob,Grep,WebSearch,WebFetch', ['Read(/**)', 'Edit(/**)', 'WebSearch', 'WebFetch']))
   assert.equal(SETTINGS_FILE, '.agent-team/mailbox/claude-settings.json')
   assert.equal(MCP_FILE, '.agent-team/mailbox/empty-mcp.json')
 })
 
 test('nobody can answer a prompt, so Claude is always told so: --permission-prompts none is never left out', () => {
   for (const model of ['opus', 'sonnet']) {
-    const argv = buildArgv({ prompt: PROMPT, model, codeDir: CODE })
-    assert.equal(argv[argv.indexOf('--permission-prompts') + 1], 'none')
+    for (const web of [false, true]) {
+      const argv = buildArgv({ prompt: PROMPT, model, codeDir: CODE, web })
+      assert.equal(argv[argv.indexOf('--permission-prompts') + 1], 'none')
+      assert.ok(argv.includes('--restricted'), 'and never started without --restricted')
+    }
   }
 })
 
 test('the prompt is the first argument after -p, so no variadic flag can swallow it; it can never look like a flag', () => {
-  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE })
+  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, web: false })
   assert.deepEqual(argv.slice(0, 2), ['-p', PROMPT])
   for (const prompt of ['', '--bare', '-x', 7, null, undefined, ' ']) {
-    assert.throws(() => buildArgv({ prompt, model: 'sonnet', codeDir: CODE }), TypeError, String(prompt))
+    assert.throws(() => buildArgv({ prompt, model: 'sonnet', codeDir: CODE, web: false }), TypeError, String(prompt))
   }
 })
 
 test('only opus or sonnet can be asked for, and the code folder must be a full path', () => {
   for (const model of ['haiku', 'gpt-5', 'Opus', '', undefined, '--model', 'sonnet --bare']) {
-    assert.throws(() => buildArgv({ prompt: PROMPT, model, codeDir: CODE }), TypeError, String(model))
+    assert.throws(() => buildArgv({ prompt: PROMPT, model, codeDir: CODE, web: false }), TypeError, String(model))
   }
   for (const codeDir of ['', 'relative/code', '.', undefined, 7]) {
-    assert.throws(() => buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir }), TypeError, String(codeDir))
+    assert.throws(() => buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir, web: false }), TypeError, String(codeDir))
+  }
+})
+
+test('whether the web is wanted must be said, as true or false: a missing or odd answer is a mistake, not a default', () => {
+  for (const web of [undefined, null, 'yes', 1, 0, [], {}]) {
+    assert.throws(() => buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, web }), TypeError, String(web))
   }
 })
 
 test('nothing in the argument list gives Claude a shell, other settings, other servers, other folders or a way past the rules', () => {
-  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE })
+  const argv = buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: CODE, web: false })
   const flags = argv.filter((arg, at) => at > 1 && arg.startsWith('-'))
-  const documented = ['--model', '--permission-mode', '--permission-prompts', '--tools', '--allowedTools', '--disallowedTools', '--settings', '--setting-sources', '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '--output-format', '--verbose']
+  const documented = ['--model', '--restricted', '--permission-mode', '--permission-prompts', '--tools', '--allowedTools', '--disallowedTools', '--settings', '--setting-sources', '--strict-mcp-config', '--mcp-config', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '--output-format', '--verbose']
   assert.deepEqual(flags, documented)
   for (const never of ['--bare', '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', '--add-dir', '--continue', '--resume', '--plugin-dir', '--plugin-url', '--agents', '--system-prompt', '--append-system-prompt', '--permission-prompt-tool', '--chrome', '--ide', '--debug', '--input-format']) {
     assert.ok(!argv.includes(never), never)
   }
   const toolArgs = argv.filter((arg) => arg.includes('Read'))
-  assert.equal(toolArgs.length, 2)
+  assert.equal(toolArgs.length, 2, 'the --tools list and the one path-scoped allow rule')
   for (const arg of toolArgs) assert.ok(!/Bash|PowerShell|Monitor|Agent|Task|Skill|NotebookEdit/.test(arg), arg)
+  assert.ok(!argv.includes('WebSearch') && !argv.some((arg) => arg.includes('WebFetch')), 'no web for a job that does not need it')
   assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'dontAsk')
   assert.equal(argv[argv.indexOf('--setting-sources') + 1], 'user', 'the team repo\'s own settings, hooks and env block are never read')
 })
@@ -127,7 +168,15 @@ test('the settings file turns hooks and inline shell off, asks for nothing, and 
   assert.ok(denied.includes('Read(~/.local/share/agent-mailbox/runner-code/**)'), 'the runner\'s own code')
   assert.ok(!denied.some((rule) => /^Read\(~\/\.local\/\*\*\)$|^Read\(~\/\*\*\)$/.test(rule)), 'the work copy lives under ~/.local/share, so it must not be denied')
   assert.deepEqual(Object.keys(settings).sort(), ['autoMemoryEnabled', 'disableAllHooks', 'disableSkillShellExecution', 'enableAllProjectMcpServers', 'permissions'])
-  assert.deepEqual(Object.keys(settings.permissions).sort(), ['defaultMode', 'deny'])
+  assert.deepEqual(Object.keys(settings.permissions).sort(), ['blockReadsOutsideWorkingDirectories', 'defaultMode', 'deny'])
+  // The file tools refuse reads outside the working directory in every permission mode (v2.1.257 or later,
+  // https://code.claude.com/docs/en/settings-reference): Read, Grep, Glob and LSP calls on any other path are denied.
+  assert.equal(settings.permissions.blockReadsOutsideWorkingDirectories, true)
+  for (const place of ['~/.hermes', '~/.codex', '~/.local/share/agent-status']) assert.ok(denied.includes(`Read(${place}/**)`), place)
+  // Code that runs later: what this Mac's other programs run is never written to, even though the file tools are already confined to the
+  // work copy - a second wall, in case the first is ever not there. (The work copy is under ~/.local/share/agent-mailbox, so that folder is not denied whole.)
+  for (const place of ['~/.local/share/agent-status', '~/.local/share/agent-mailbox/runner-code', '//opt/homebrew', '//usr/local']) assert.ok(denied.includes(`Edit(${place}/**)`), `${place} may not be written`)
+  assert.ok(!denied.some((rule) => /^Edit\(~\/\.local\/\*\*\)$|^Edit\(~\/\*\*\)$|^Edit\(~\/\.local\/share\/agent-mailbox\/\*\*\)$/.test(rule)), 'the work copy is written to, so it must not be denied')
 })
 
 test('the MCP file names no server at all', () => {
@@ -560,6 +609,26 @@ test('a transcript that cannot be written fails the run: an audit trail that is 
   } finally {
     await folder.cleanup()
   }
+})
+
+test('a run is checked against the tools it was started with: the web tools listed or called in a run that was not given them stop it at once', async () => {
+  const fileOnly = [...toolsFor(false)]
+  const cases = [
+    ['a web tool listed', [{ ...INIT, tools: [...toolsFor(true)] }, RESULT()], 'WebSearch'],
+    ['a web fetch called', [{ ...INIT, tools: fileOnly }, call('WebFetch'), RESULT()], 'WebFetch'],
+    ['a web search called', [{ ...INIT, tools: fileOnly }, call('WebSearch'), RESULT()], 'WebSearch']
+  ]
+  for (const [name, events, tool] of cases) {
+    const { result, fake } = await runStream(events, { tools: fileOnly })
+    assert.equal(result.why, 'tool-refused', name)
+    assert.equal(result.tool, tool, name)
+    assert.deepEqual(fake.kills, [[4242, 'SIGKILL']], name)
+  }
+  // The same events are fine in a run that was given the web, and a file-only run's own tools are fine.
+  const web = await runStream([{ ...INIT, tools: [...toolsFor(true)] }, call('WebFetch'), call('Read'), RESULT()], { tools: [...toolsFor(true)] })
+  assert.equal(web.result.ok, true)
+  const files = await runStream([{ ...INIT, tools: fileOnly }, call('Read'), call('Edit'), RESULT()], { tools: fileOnly })
+  assert.equal(files.result.ok, true)
 })
 
 /* ---------- time and size limits ----------------------------------------------------------------------------------- */

@@ -149,7 +149,7 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
     return child
   }
   const kill = () => {}
-  const INIT = { type: 'system', subtype: 'init', tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'], mcp_servers: [] }
+  const INIT = { type: 'system', subtype: 'init', tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'], mcp_servers: [] }
   const RESULT = { type: 'result', subtype: 'success', is_error: false, num_turns: 4, result: 'Wrote the files.', permission_denials: [] }
   const tool = (name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: {} }] } })
 

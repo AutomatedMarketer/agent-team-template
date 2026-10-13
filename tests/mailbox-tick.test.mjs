@@ -140,6 +140,7 @@ test('a run order starts Claude once with the pinned flags and prompt, and lands
   assert.equal(call.options.cwd, w.places.workDir)
   assert.deepEqual(Object.keys(call.options.env).sort(), ['HOME', 'PATH'])
   assert.ok(call.args.includes('--permission-prompts'), 'this Claude is new enough')
+  assert.ok(call.args.includes('--restricted'))
   assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
   assert.ok(call.args[1].includes('`inbox/2026-10-12/morning-intel.md`'))
 
@@ -1131,4 +1132,44 @@ test('what the daily check remembers is the version Claude really said, so a lat
   await runTick(w.ctx({ exec: newer, force: true }))
   const kept = JSON.parse(await readFile(join(w.places.stateDir, 'preflight.json'), 'utf8'))
   assert.deepEqual(kept, { day: dayOf(w.clock.now()), ok: true, version: [2, 1, 300] })
+}))
+
+test('the web is for the morning intel only: its run is given the web tools, the sweep never is, and each file tool is pre-approved only inside the work copy', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  const intel = w.claude.calls[0].args
+  assert.equal(intel[intel.indexOf('--tools') + 1], 'Read,Edit,Write,Glob,Grep,WebSearch,WebFetch')
+  const allowedFrom = (args) => args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'))
+  assert.deepEqual(allowedFrom(intel), ['Read(/**)', 'Edit(/**)', 'WebSearch', 'WebFetch'])
+
+  w.claude.script = sweeping(w)
+  w.send({ action: 'run', workflow: 'task-sweep' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.equal(w.claude.calls.length, 2)
+  const sweep = w.claude.calls[1].args
+  assert.equal(sweep[sweep.indexOf('--tools') + 1], 'Read,Edit,Write,Glob,Grep')
+  assert.deepEqual(allowedFrom(sweep), ['Read(/**)', 'Edit(/**)'])
+  assert.ok(sweep.includes('--restricted'))
+}))
+
+test('a run is held to the tools it was given: a sweep that reaches for the web fails with "tool-refused", and the morning intel may use it', () => withWorld(async (w) => {
+  w.claude.script = async (cwd, args, call) => {
+    const events = await sweeping(w)(cwd, args, call)
+    return [events[0], w.tool('WebSearch'), ...events.slice(1)]
+  }
+  const sweep = w.send({ action: 'run', workflow: 'task-sweep' })
+  await runTick(w.ctx())
+  assert.equal(entryFor(await statusIn(w), sweep.id).why, 'tool-refused')
+  assert.equal(await w.inOrigin.file('inbox/2026-10-12/task-sweep.md'), null, 'nothing is pushed')
+
+  w.claude.script = async (cwd, args, call) => {
+    await w.claude.good(cwd, args, call)
+    return [w.INIT, w.tool('WebSearch'), w.tool('WebFetch'), w.RESULT]
+  }
+  const intel = w.send({ action: 'run', workflow: 'morning-intel' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.equal(entryFor(await statusIn(w), intel.id).state, 'ok')
 }))

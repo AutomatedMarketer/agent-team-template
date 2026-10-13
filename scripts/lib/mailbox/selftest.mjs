@@ -15,7 +15,7 @@
 import { mkdir, readFile, rm, writeFile, access } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { buildArgv, claudeEnv, preflight, runClaude } from './claude.mjs'
+import { buildArgv, claudeEnv, preflight, runClaude, toolsFor } from './claude.mjs'
 import { readOrigin } from './workcopy.mjs'
 
 const PROMPT = [
@@ -89,7 +89,8 @@ export async function selftest(ctx) {
   try {
     const ran = await runClaude({
       file: claude.path,
-      argv: buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: places.codeDir }),
+      argv: buildArgv({ prompt: PROMPT, model: 'sonnet', codeDir: places.codeDir, web: false }),
+      tools: toolsFor(false),
       cwd: repo,
       env: claudeEnv(ctx.env, ctx.platform),
       timeoutMs: 5 * 60_000,

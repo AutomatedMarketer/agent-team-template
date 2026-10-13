@@ -29,12 +29,14 @@ export const JOBS = freeze({
   'morning-intel': freeze({
     output: (date) => `inbox/${date}/morning-intel.md`,
     logs: freeze({ min: 1, max: 1 }),
+    web: true,
     changes: 'You may create exactly two files: the output above and one run log. Change nothing else.',
     logsSentence: 'Write exactly one run log.'
   }),
   'task-sweep': freeze({
     output: (date) => `inbox/${date}/task-sweep.md`,
     logs: freeze({ min: 1, max: 3 }),
+    web: false,
     changes:
       'You may: create the digest above and up to three run logs; change task cards that already exist in `tasks/` - only their frontmatter `status` and `done_at`, ' +
       'and a `## Result` section added at the end of the card (never their other words); and create new files in `agents/<agent>/output/`. Change nothing else. ' +
@@ -84,7 +86,8 @@ export async function planRun({ root, slug, now, timeZone, git }) {
       startedAt: isoSeconds(now),
       stamps: Array.from({ length: job.logs.max }, (_, at) => stampOf(now + at * 60_000)),
       outputPath: job.output(date),
-      logs: { ...job.logs }
+      logs: { ...job.logs },
+      web: job.web
     }
   }
 }
@@ -110,7 +113,8 @@ function assertPlan(plan) {
     typeof plan.startedAt === 'string' && INSTANT.test(plan.startedAt) &&
     Array.isArray(plan.stamps) && plan.stamps.length === job.logs.max && plan.stamps.every((stamp) => typeof stamp === 'string' && STAMP.test(stamp)) &&
     plan.outputPath === job.output(plan.date) &&
-    plan.logs?.min === job.logs.min && plan.logs?.max === job.logs.max
+    plan.logs?.min === job.logs.min && plan.logs?.max === job.logs.max &&
+    plan.web === job.web
   if (!good) throw new TypeError('jobs: that is not a plan this code made')
 }
 

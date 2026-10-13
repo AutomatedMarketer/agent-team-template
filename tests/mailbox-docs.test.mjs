@@ -253,8 +253,8 @@ test('the files the guide says to look at are the files the code writes', async 
 
 test('the safety table names the flags the runner really passes, and the tools it really allows', async () => {
   const doc = await guide()
-  const argv = buildArgv({ prompt: 'p', model: 'sonnet', codeDir: '/code' })
-  for (const flag of ['--setting-sources', '--permission-mode', '--disallowedTools', '--strict-mcp-config', '--disable-slash-commands', '--tools']) {
+  const argv = buildArgv({ prompt: 'p', model: 'sonnet', codeDir: '/code', web: false })
+  for (const flag of ['--restricted', '--setting-sources', '--permission-mode', '--disallowedTools', '--strict-mcp-config', '--disable-slash-commands', '--tools']) {
     assert.ok(doc.includes(flag), `the guide does not name ${flag}`)
     assert.ok(argv.includes(flag), `the runner does not pass ${flag}`)
   }
@@ -263,7 +263,8 @@ test('the safety table names the flags the runner really passes, and the tools i
   assert.ok(doc.includes('--disallowedTools "mcp__*"') && argv.join(' ').includes('--disallowedTools mcp__*'))
   assert.equal(TOOLS.length, 7)
   assert.ok(!TOOLS.includes('Bash'))
-  assert.match(flat(doc), /names seven built-in tools and Bash is not one/)
+  assert.match(flat(doc), /names only built-in tools and Bash is not one/)
+  for (const rule of ['Read(/**)', 'Edit(/**)', 'blockReadsOutsideWorkingDirectories']) assert.ok(doc.includes(rule), `the guide does not name ${rule}`)
   assert.ok(!argv.includes('--bare'), 'a run on the subscription login cannot use --bare')
 })
 
@@ -282,7 +283,7 @@ test('the settings file the runner passes switches hooks off and denies the fold
 
 test('the guide links the Claude Code documents that the flags come from', async () => {
   const doc = await guide()
-  for (const page of ['cli-reference', 'headless', 'permissions']) {
+  for (const page of ['cli-reference', 'settings-reference', 'headless', 'permissions']) {
     assert.ok(doc.includes(`https://code.claude.com/docs/en/${page}`), `the guide does not link ${page}`)
   }
 })

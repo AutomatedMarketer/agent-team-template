@@ -26,7 +26,7 @@ If you are not sure you need this, leave the board on cloud. Nothing here is nee
 | Refuses any order that is unsigned, edited, expired, meant for another repo or computer, or seen before | Run an order twice - not after a crash, not after a restart, not after a lost claim folder |
 | Does Add task, Start, Done, Pause and Approve with its own code - plain edits to your files, **no AI** | Let a card's words talk it into anything |
 | Runs a job (morning intel, the task sweep) with Claude Code on your own plan - **no shell, no connectors, no repo hooks** - only if your Mac's own list allows that job | Run a job your Mac's list does not name, whatever the board or the repo says |
-| Checks every file that changed before it commits, then commits and pushes itself | Let Claude push, or change any file outside the job's own list |
+| Checks every file that changed in the work copy before it commits, then commits and pushes itself | Let Claude push, or commit a file that is not on the job's own list |
 | Turns **Arm**, **Add skill** and **Add agent** into a card for you to finish in a Claude session | Make a schedule, a skill or an agent on its own |
 | Writes what happened to `.agent-team/status/mailbox/<computer>.json`: ids, states and fixed reasons | Put anything you typed in that file, or in a commit message |
 
@@ -250,17 +250,22 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | Nobody else can give it orders | Every order is signed with a secret only Vercel and your Mac hold. The signature is checked before the order is even read |
 | An order cannot run twice | The claim is a new folder, saved to the disk **before anything is done**. It is kept for ever. The claims folder also records the day it began, and refuses any order made before that |
 | The Mac decides what is allowed, not the board and not the repo | `allowed-orders.yml` in the state folder. The team repo can never widen it |
-| Claude has no shell and no connectors | `--tools` names seven built-in tools and Bash is not one; `--disallowedTools "mcp__*"`; an empty `--strict-mcp-config`. Any call to another tool stops the run on the spot |
-| Claude cannot reach beyond the work copy | `--permission-mode dontAsk` denies anything not allowed, and reads of `~/.ssh`, `~/.config`, `~/Library`, `~/.claude`, the state folder and the runner's own code are denied as well |
+| Claude has no shell and no connectors | `--restricted` takes away the tools that run commands or code. `--tools` names only built-in tools and Bash is not one. `--disallowedTools "mcp__*"` and an empty `--strict-mcp-config` take away every connector. Any call to another tool stops the run on the spot |
+| Claude cannot read or write outside the work copy | Four layers. `--restricted` confines the built-in file tools to the folder Claude starts in. The settings file sets `blockReadsOutsideWorkingDirectories`, so a read outside it is refused in every mode. The only file permissions given are `Read(/**)` and `Edit(/**)`, which on the command line mean "inside this folder" (a tool name with no path would mean everywhere), and `--permission-mode dontAsk` denies everything else. Last, a deny list names the places a Mac keeps secrets: `~/.ssh`, `~/.aws`, `~/.config`, `~/.hermes`, `~/.codex`, `~/Library`, `~/.claude`, the state folder and the runner's own code |
+| The web is for the morning intel only | The task sweep is never given a web tool. The morning intel is, because it needs the news |
 | Nothing in the team repo can run | `--setting-sources user` (the repo's settings, hooks and environment are never read), `disableAllHooks`, no skills or commands (`--disable-slash-commands`), no `.mcp.json`, and git's hooks switched off |
 | Every changed file is checked | Per action and per job, from a fixed list in the runner's code. Anything else - a deletion, a link, a file in `.claude/`, `.github/`, `scripts/`, a package file - fails the order and nothing is pushed |
 | Only the runner pushes | One commit that names the order, and the push only goes through if the team repo is still exactly where the runner started. If it moved, a card edit is made again on top. A run's files are put back only if nothing they touch changed. Claude is never run again for it |
 | A runaway is stopped | A time limit per job (the allowlist's minutes), then everything Claude started is stopped. A limit on turns. Daily limits on orders and runs |
 
-The flags are the ones Claude Code documents. Read the [CLI reference](https://code.claude.com/docs/en/cli-reference),
+**What is accepted.** A tricked morning intel run could still send what it has read in the work copy out through a web address. A search or a fetch can carry text in the address. This is accepted for three reasons. The job cannot do its work without the web. The work copy holds only your team repo, which GitHub already holds. Nothing outside the work copy can be read. The task sweep has no web tool, so it has no such way out.
+
+The flags and settings are the ones Claude Code documents. Read the [CLI reference](https://code.claude.com/docs/en/cli-reference)
+(`--restricted` needs 2.1.248, `--permission-prompts` 2.1.259), the
+[settings reference](https://code.claude.com/docs/en/settings-reference) (`blockReadsOutsideWorkingDirectories`, 2.1.257),
 [running Claude Code programmatically](https://code.claude.com/docs/en/headless) and
 [permissions](https://code.claude.com/docs/en/permissions). The last one says what a `claude -p` run reads from a
-folder it was never asked to trust, and why `--setting-sources user` matters.
+folder it was never asked to trust. It also says why a tool name with no path is allowed everywhere, and what the path patterns mean.
 
 ## On a Windows computer
 

@@ -39,6 +39,9 @@ test('two jobs have rules in this code: morning intel and the task sweep - a job
   assert.equal(JOBS['task-sweep'].output('2026-10-12'), 'inbox/2026-10-12/task-sweep.md')
   assert.deepEqual({ ...JOBS['morning-intel'].logs }, { min: 1, max: 1 })
   assert.deepEqual({ ...JOBS['task-sweep'].logs }, { min: 1, max: 3 })
+  // The morning intel needs the news; the sweep works on the repo's own files and has no use for the web.
+  assert.equal(JOBS['morning-intel'].web, true)
+  assert.equal(JOBS['task-sweep'].web, false)
   assert.throws(() => {
     JOBS['evil'] = {}
   }, TypeError, 'the table cannot be added to')
@@ -58,7 +61,8 @@ test('the real morning-intel workflow of this template plans to a run by researc
     startedAt: '2026-10-12T14:05:41Z',
     stamps: ['2026-10-12T1405Z'],
     outputPath: 'inbox/2026-10-12/morning-intel.md',
-    logs: { min: 1, max: 1 }
+    logs: { min: 1, max: 1 },
+    web: true
   })
 })
 
@@ -68,6 +72,7 @@ test('the real task-sweep workflow plans to a run by the orchestrator on opus, w
   assert.equal(plan.model, 'opus')
   assert.deepEqual(plan.stamps, ['2026-10-12T1405Z', '2026-10-12T1406Z', '2026-10-12T1407Z'])
   assert.equal(plan.outputPath, 'inbox/2026-10-12/task-sweep.md')
+  assert.equal(plan.web, false)
   assert.deepEqual(plan.logs, { min: 1, max: 3 })
 })
 
@@ -236,7 +241,10 @@ test('the prompt is built only from a plan whose every value is of the shape thi
     { ...plan, stamps: [] },
     { ...plan, model: 'gpt-5' },
     { ...plan, steps: ['a b'] },
-    { ...plan, logs: { min: 5, max: 1 } }
+    { ...plan, logs: { min: 5, max: 1 } },
+    { ...plan, web: false },
+    { ...plan, web: 'yes' },
+    { ...plan, web: undefined }
   ]
   for (const damaged of bad) await assert.rejects(runPrompt(damaged, { codeDir: repoRoot }), TypeError, JSON.stringify(damaged).slice(0, 80))
 })
