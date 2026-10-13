@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile, readdir, symlink } from 'node:
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import { repoRoot } from './helpers/repo.mjs'
-import { CLAIMS_STORE, openStore, claimOrder, writeClaimFile, readClaimFile } from '../scripts/lib/mailbox/claims.mjs'
+import { CLAIMS_STORE, openStore, claimOrder, claimExists, listClaims, writeClaimFile, readClaimFile } from '../scripts/lib/mailbox/claims.mjs'
 import { verifyEnvelope } from '../scripts/lib/mailbox/envelope.mjs'
 
 /* A claim is the Mac's record that it has seen an order. It is what stops one signed order running twice, so the
@@ -508,4 +508,115 @@ test('KEPT: this code has no way to remove a claim, a claim folder or the record
   const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
   assert.ok(!/\b(?:rm|rmdir|unlink|rmSync|rmdirSync|unlinkSync|truncate)\s*\(/.test(code), 'something here deletes')
   assert.ok(!/\bforce\s*:/.test(code))
+})
+
+/* ---------- what the claims say about their orders ----------------------------------------------------------------- */
+
+test('a claim may be told what its order was for: the receipt keeps the action, and without one it has none', async () => {
+  const state = await folder()
+  try {
+    await openStore(state.dir, T0)
+    await claimOrder(state.dir, ID, ENVELOPE, T0, { action: 'run' })
+    await claimOrder(state.dir, OTHER_ID, ENVELOPE, T0)
+    assert.deepEqual((await readClaimFile(state.dir, ID, 'receipt.json')).value, { id: ID, state: 'claimed', at: '2026-10-12T14:04:00.000Z', action: 'run' })
+    assert.deepEqual((await readClaimFile(state.dir, OTHER_ID, 'receipt.json')).value, { id: OTHER_ID, state: 'claimed', at: '2026-10-12T14:04:00.000Z' })
+    assert.equal(JSON.parse(await readFile(join(state.dir, 'claims', `${ID}.claim`, 'order.json'), 'utf8')).action, 'run')
+    for (const action of ['shell', '', 7, null, {}, ['run']]) {
+      const fresh = '22222222222222222222222222222222'
+      await assert.rejects(claimOrder(state.dir, fresh, ENVELOPE, T0, { action }), TypeError, String(action))
+      assert.equal(await claimExists(state.dir, fresh), false, 'nothing was made for a mistake')
+    }
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('whether a claim exists is asked without making one; anything in its place counts, and a place that cannot be looked at counts too', async () => {
+  const state = await folder()
+  try {
+    assert.equal(await claimExists(state.dir, ID), false, 'no store yet')
+    await openStore(state.dir, T0)
+    assert.equal(await claimExists(state.dir, ID), false)
+    assert.equal(await claimExists(state.dir, ID), false, 'asking again still made nothing')
+    assert.deepEqual(await readdir(join(state.dir, 'claims')), [CLAIMS_STORE.record])
+    await claimOrder(state.dir, ID, ENVELOPE, T0)
+    assert.equal(await claimExists(state.dir, ID), true)
+    await writeFile(join(state.dir, 'claims', `${OTHER_ID}.claim`), 'in the way')
+    assert.equal(await claimExists(state.dir, OTHER_ID), true)
+    const refusing = { async lstat() { throw Object.assign(new Error('a message with a path in it'), { code: 'EACCES' }) } }
+    assert.equal(await claimExists(state.dir, '33333333333333333333333333333333', { fs: refusing }), true)
+    for (const bad of ['', 'abc', '../x', 7, undefined, [ID]]) await assert.rejects(claimExists(state.dir, bad), TypeError, String(bad))
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('the claims are listed newest first, as many as asked for, and only claims are listed - not the record, not stray files', async () => {
+  const state = await folder()
+  try {
+    await openStore(state.dir, T0)
+    const ids = ['a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32), 'd'.repeat(32)]
+    const { utimes } = await import('node:fs/promises')
+    for (const [at, id] of ids.entries()) {
+      await claimOrder(state.dir, id, ENVELOPE, T0 + at)
+      await utimes(join(state.dir, 'claims', `${id}.claim`), new Date(T0 + 1000 * at), new Date(T0 + 1000 * at))
+    }
+    await writeFile(join(state.dir, 'claims', 'stray.txt'), 'x')
+    await writeFile(join(state.dir, 'claims', `${'e'.repeat(32)}.tmp`), 'x')
+    await mkdir(join(state.dir, 'claims', 'not-an-id.claim'))
+    assert.deepEqual(await listClaims(state.dir, 10), [...ids].reverse())
+    assert.deepEqual(await listClaims(state.dir, 2), ['d'.repeat(32), 'c'.repeat(32)])
+    assert.deepEqual(await listClaims(state.dir, 0), [])
+    assert.deepEqual(await listClaims(join(state.dir, 'nowhere'), 10), [])
+    for (const bad of [-1, 1.5, '2', undefined, NaN]) await assert.rejects(listClaims(state.dir, bad), TypeError, String(bad))
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('two claims made at the same moment are listed in a fixed order', async () => {
+  const state = await folder()
+  try {
+    await openStore(state.dir, T0)
+    const { utimes } = await import('node:fs/promises')
+    for (const id of ['b'.repeat(32), 'a'.repeat(32)]) {
+      await claimOrder(state.dir, id, ENVELOPE, T0)
+      await utimes(join(state.dir, 'claims', `${id}.claim`), new Date(T0), new Date(T0))
+    }
+    assert.deepEqual(await listClaims(state.dir, 10), ['a'.repeat(32), 'b'.repeat(32)])
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('a claims folder that is a file is not "no claim": nothing is claimed in it, and the question is answered as free so the claim itself fails and says so', async () => {
+  const state = await folder()
+  try {
+    await openStore(state.dir, T0)
+    await rm(join(state.dir, 'claims'), { recursive: true, force: true })
+    await writeFile(join(state.dir, 'claims'), 'not a folder')
+    assert.equal(await claimExists(state.dir, ID), false)
+    assert.deepEqual(await claimOrder(state.dir, ID, ENVELOPE, T0), { state: 'failed' })
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('only folders named like a claim are listed: a file with a claim\'s name is not a claim', async () => {
+  const state = await folder()
+  try {
+    await openStore(state.dir, T0)
+    await claimOrder(state.dir, ID, ENVELOPE, T0)
+    await writeFile(join(state.dir, 'claims', `${OTHER_ID}.claim`), 'a file')
+    await mkdir(join(state.dir, 'claims', 'not-a-claim'))
+    assert.deepEqual(await listClaims(state.dir, 10), [ID])
+  } finally {
+    await state.cleanup()
+  }
+})
+
+test('a place that is not there is free, and a place that cannot be looked at is taken - whichever way this system says "not there"', async () => {
+  const saying = (code) => ({ lstat: async () => { throw Object.assign(new Error('a message with a path in it'), { code }) } })
+  for (const code of ['ENOENT', 'ENOTDIR']) assert.equal(await claimExists('/state', ID, { fs: saying(code) }), false, code)
+  for (const code of ['EACCES', 'EIO', 'ELOOP', undefined]) assert.equal(await claimExists('/state', ID, { fs: saying(code) }), true, String(code))
 })

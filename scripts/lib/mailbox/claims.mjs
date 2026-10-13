@@ -25,7 +25,7 @@
 
 import * as realFs from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { ID_SHAPE } from './contract.mjs'
+import { ACTIONS, ID_SHAPE } from './contract.mjs'
 import { parseInstant } from './envelope.mjs'
 import { readSmallFile } from './small-file.mjs'
 
@@ -117,8 +117,11 @@ export async function openStore(stateDir, now, { fs = realFs, platform = process
 // { state: 'seen' }        - there already is a claim (or something where one would go): do nothing, ever
 // { state: 'failed' }      - the claim could not be made whole: do nothing; the order counts as seen from now on
 // The store must have been opened (openStore) first. `envelope` is the order as it came, kept in the claim.
-export async function claimOrder(stateDir, id, envelope, now, { fs = realFs, platform = process.platform } = {}) {
+// `action`, when given, is what the order is for (one of the contract's actions): it is kept in the claim so the status
+// file can say it without anyone reading the order again.
+export async function claimOrder(stateDir, id, envelope, now, { action, fs = realFs, platform = process.platform } = {}) {
   assertId(id)
+  if (action !== undefined && !ACTIONS.includes(action)) throw new TypeError('claims: that is not an action')
   const claims = join(stateDir, CLAIMS_STORE.folder)
   const dir = join(claims, `${id}.claim`)
   try {
@@ -128,13 +131,52 @@ export async function claimOrder(stateDir, id, envelope, now, { fs = realFs, pla
   }
   try {
     const at = new Date(now).toISOString()
-    await writeDurably(fs, join(dir, 'order.json'), asJson({ id, claimedAt: at, envelope }), platform)
-    await writeDurably(fs, join(dir, 'receipt.json'), asJson({ id, state: 'claimed', at }), platform)
+    const kept = action === undefined ? {} : { action }
+    await writeDurably(fs, join(dir, 'order.json'), asJson({ id, claimedAt: at, ...kept, envelope }), platform)
+    await writeDurably(fs, join(dir, 'receipt.json'), asJson({ id, state: 'claimed', at, ...kept }), platform)
     await flushFolder(fs, claims, platform)
   } catch {
     return { state: 'failed' }
   }
   return { state: 'claimed', dir }
+}
+
+// Whether there already is a claim for this order, or anything where one would go - asked without making one. A place
+// that cannot be looked at counts as taken: nothing is done on an order whose claim cannot be ruled out.
+export async function claimExists(stateDir, id, { fs = realFs } = {}) {
+  assertId(id)
+  try {
+    await fs.lstat(join(stateDir, CLAIMS_STORE.folder, `${id}.claim`))
+    return true
+  } catch (error) {
+    return !(error?.code === 'ENOENT' || error?.code === 'ENOTDIR')
+  }
+}
+
+const CLAIM_NAME = /^([0-9a-f]{32})\.claim$/
+
+// The ids of the newest `limit` claims, newest first by when each claim's folder was last written to (two at the same
+// moment in order of id). Only claims are listed. None if there is no store.
+export async function listClaims(stateDir, limit, { fs = realFs } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new TypeError('claims: a limit is a whole number')
+  let names
+  try {
+    names = await fs.readdir(join(stateDir, CLAIMS_STORE.folder))
+  } catch {
+    return []
+  }
+  const found = []
+  for (const name of names) {
+    const id = CLAIM_NAME.exec(name)?.[1]
+    if (id === undefined) continue
+    try {
+      const info = await fs.lstat(join(stateDir, CLAIMS_STORE.folder, name))
+      if (info.isDirectory()) found.push({ id, when: info.mtimeMs })
+    } catch {
+      // Gone since it was listed.
+    }
+  }
+  return found.sort((a, b) => b.when - a.when || (a.id < b.id ? -1 : 1)).slice(0, limit).map((claim) => claim.id)
 }
 
 // Replace the receipt, or write the final word, of a claim that exists. { ok: true } or { ok: false }.

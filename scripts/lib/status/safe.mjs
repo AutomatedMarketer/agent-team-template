@@ -12,6 +12,7 @@ import { CONNECTIONS_SHAPE, CONNECTION_NAME, VERSION_PATTERN, MAX_VERSION_LENGTH
 import { HERMES_SHAPE, PROFILE_NAME } from './hermes-schema.mjs'
 import { JOBS_SHAPE, LABEL } from './jobs-schema.mjs'
 import { VAULTS_SHAPE, TITLE_RULE } from './vaults-schema.mjs'
+import { MAILBOX_SHAPE } from './mailbox-schema.mjs'
 
 export class GateError extends Error {
   constructor(problems) {
@@ -134,6 +135,28 @@ function walk(value, shape, path, identity, problems) {
       return
     case 'iso':
       if (!isRealIsoTime(value)) problems.push(`${path}: is not an ISO time in UTC`)
+      return
+    case 'second':
+      // Whole seconds and nothing finer, as every status file writes its times: no milliseconds, no offset.
+      if (!isRealIsoTime(value) || value.length !== 20) problems.push(`${path}: is not an ISO time in whole seconds, UTC`)
+      return
+    case 'slug': {
+      // A lower-case name made of letters, numbers and dashes - a runner label, a workflow's file name - held to its exact
+      // form. The key-start rules are not applied: "task-sweep" holds "sk-", and a name of this form cannot be a key. The
+      // owner's own username and computer name are still refused.
+      if (typeof value !== 'string' || !shape.pattern.test(value)) {
+        problems.push(`${path}: is not in the expected form`)
+        return
+      }
+      const lowered = value.toLowerCase()
+      for (const { needle, says } of needlesOf(identity)) {
+        if (lowered.includes(needle)) problems.push(`${path}: ${says}`)
+      }
+      return
+    }
+    case 'nullable':
+      // A key that is always there and says "none" with null: the value is null or it is checked as `of`.
+      if (value !== null) walk(value, shape.of, path, identity, problems)
       return
     case 'day':
       if (!isRealDay(value)) problems.push(`${path}: is not a calendar day`)
@@ -307,6 +330,12 @@ export function checkJobs(doc, identity) {
 export function checkVaults(doc, identity) {
   const problems = []
   walk(doc, VAULTS_SHAPE, '', identity, problems)
+  return problems
+}
+
+export function checkMailbox(doc, identity) {
+  const problems = []
+  walk(doc, MAILBOX_SHAPE, '', identity, problems)
   return problems
 }
 
