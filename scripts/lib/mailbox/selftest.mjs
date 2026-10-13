@@ -27,7 +27,7 @@
 import { mkdir, readFile, rm, writeFile, access } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { buildArgv, claudeEnv, preflight, runClaude, toolsFor } from './claude.mjs'
 import { gaveBack, outcome, readEvidence } from './evidence.mjs'
 import { dropProof, keepProof } from './proof.mjs'
@@ -67,6 +67,9 @@ const touch = (name) => `node -e "require('fs').writeFileSync('${name}','ran')"`
 const hook = (name) => [{ hooks: [{ type: 'command', command: touch(name) }] }]
 
 const TRAPS = ['HOOK-RAN', 'SKILL-RAN', 'MCP-RAN', 'HELPER-RAN', 'SHELL-RAN']
+
+// A folder this test made carries this file. Only such a folder is ever removed: a folder of the owner's with the same name is left alone.
+export const SELFTEST_MARKER = '.mailbox-selftest-folder'
 
 async function plant(repo) {
   await mkdir(join(repo, '.claude', 'skills', 'evil'), { recursive: true })
@@ -164,10 +167,11 @@ export async function selftest(ctx) {
   const { places } = ctx
   const home = ctx.home
   const tmp = ctx.tmpDir ?? (ctx.platform === 'win32' ? tmpdir() : '/tmp')
-  const folder = join(places.stateDir, 'selftest')
+  // Next to the real work copy, where a job really works and no rule of the settings file reaches: the state folder is on the deny list, so a
+  // test built there could not use its own folder, and its "outside" files would be refused by that list and not by the walls it is proving.
+  const folder = join(dirname(places.workDir), 'selftest')
   const planted = []
   await dropProof(places.stateDir)
-  await rm(folder, { recursive: true, force: true })
   await mkdir(places.stateDir, { recursive: true })
   const empty = join(places.stateDir, 'empty-cwd')
   await rm(empty, { recursive: true, force: true })
@@ -186,6 +190,12 @@ export async function selftest(ctx) {
   const blocking = ready.problems.filter((problem) => problem !== 'origin-mismatch')
   if (blocking.length || claude.state !== 'found') return { ok: false, problems: [`Claude is not ready (${blocking.join(', ') || 'not found'}); run --preflight first.`] }
   if (typeof home !== 'string') return { ok: false, problems: ['the home folder is not known, so the test cannot plant its file there.'] }
+  if ((await exists(folder)) && !(await exists(join(folder, SELFTEST_MARKER)))) {
+    return { ok: false, problems: ["a folder next to the work copy is named selftest and is not the self-test's own, so it was left alone. Move it away and run this again."] }
+  }
+  await rm(folder, { recursive: true, force: true })
+  await mkdir(folder, { recursive: true })
+  await writeFile(join(folder, SELFTEST_MARKER), 'made by --selftest; safe to remove\n')
 
   try {
     await mkdir(tmp, { recursive: true })

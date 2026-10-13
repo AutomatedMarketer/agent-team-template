@@ -40,7 +40,7 @@ import { CLAIMS_STORE, claimExists, claimOrder, openStore, writeClaimFile } from
 import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
-import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, preflight, runClaude, toolsFor } from './claude.mjs'
+import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, localProblems, originMatches, parseVersion, preflight, runClaude, toolsFor } from './claude.mjs'
 import { proofHolds } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
@@ -158,7 +158,7 @@ async function locked(ctx, { orders, end, log }) {
     git: pinnedGit(ctx.git, hooks),
     originAccepted: ctx.originAccepted ?? ((url) => originMatches(url, allowed.allow.repo)),
     runnable: runnableJobs(allowed.allow, knownJobs()),
-    claudeReady: false, claudePath: null, notReady: []
+    claudeReady: false, claudePath: null, notReady: [], emptyCwd
   }
 
   const checked = await dailyCheck(s, emptyCwd)
@@ -167,8 +167,9 @@ async function locked(ctx, { orders, end, log }) {
   s.claudeReady = checked.ok
   s.claudePath = checked.claudePath
   s.notReady = checked.problems
-  // No run until the walls around Claude were proven on this Mac (--selftest) for this Claude Code and these settings. It is a file
-  // read and two small files hashed, so it is checked on every tick: an update or a change of settings stops the runs at once.
+  // No run until the walls around Claude were proven on this Mac (--selftest) for this Claude Code and these settings. This is a first look,
+  // against the version the daily check remembered, so a tick with no proof does not even claim a run. It is not the last word: Claude Code
+  // can update itself after the daily check, so the version is asked again just before each run (versionToRun).
   if (checked.ok && !(await proofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checked.version })).holds) {
     s.claudeReady = false
     s.notReady = [...s.notReady, 'selftest-needed']
@@ -370,6 +371,24 @@ async function execute(s, { id, action, fields, minutes }) {
   return publish(s, { id, action, head: reset.head, files: first.files, redo, level, fail, startedAt: null })
 }
 
+// Whether the Claude Code that would start now is the one the self-test passed for, with the settings it passed for. The version is asked of
+// the program itself, from an empty folder and with the small environment (so it reads no team repo, and does not update itself), because
+// a Claude Code on this Mac can be updated between the daily check and a run - by its own background check if it was ever started without
+// the switch, or by the owner using it by hand. { ok: true } or { ok: false, words }.
+async function versionToRun(s) {
+  const { ctx } = s
+  let version = null
+  try {
+    const answer = await ctx.exec(s.claudePath, ['--version'], { cwd: s.emptyCwd, env: claudeEnv(ctx.env, ctx.platform), timeout: 15_000 })
+    version = parseVersion(answer.stdout)
+  } catch {
+    version = null
+  }
+  if (version === null) return { ok: false, words: 'Claude Code did not say which version it is, so it needs a new self-test.' }
+  const proof = await proofHolds({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, version })
+  return proof.holds ? { ok: true } : { ok: false, words: `Claude Code ${version.join('.')} is not the version the self-test passed for, so it needs a new self-test.` }
+}
+
 async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level }) {
   const { ctx } = s
   const { workDir, stateDir, codeDir } = ctx.places
@@ -386,6 +405,12 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
 
   const claimDir = join(stateDir, CLAIMS_STORE.folder, `${id}.claim`)
   const prompt = await runPrompt(plan, { codeDir })
+  // The last thing before Claude starts: which version is it now? Not the one the daily check saw.
+  const fit = await versionToRun(s)
+  if (!fit.ok) {
+    s.log(`mailbox: a run was refused as not ready (selftest-needed): ${fit.words}`)
+    return settle(s, id, action, { state: 'refused', why: 'not-ready' })
+  }
   const ran = await runClaude({
     file: s.claudePath,
     argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),

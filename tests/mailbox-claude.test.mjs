@@ -185,23 +185,29 @@ test('the MCP file names no server at all', () => {
 
 /* ---------- the environment Claude gets ---------------------------------------------------------------------------- */
 
-test('Claude gets five variables and nothing else - no key of any kind, no token, none of the Mac\'s secrets', () => {
+// Claude Code updates itself in the background and the new version runs from the next start (https://code.claude.com/docs/en/setup#auto-updates).
+// DISABLE_AUTOUPDATER=1 stops the background check and DISABLE_UPDATES=1 stops every update, a manual one included
+// (https://code.claude.com/docs/en/env-vars). A version the self-test never saw must not start running between two runs.
+const NO_UPDATES = { DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' }
+
+test('Claude gets five variables of the Mac\'s and the two switches that stop it updating itself - no key of any kind, no token, none of the Mac\'s secrets', () => {
   const env = {
     HOME: '/Users/someone', PATH: '/usr/bin:/bin', USER: 'someone', LANG: 'en_US.UTF-8', TMPDIR: '/var/folders/x/',
     ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 't', ANTHROPIC_BASE_URL: 'https://evil.example', CLAUDE_CONFIG_DIR: '/tmp/x', CLAUDE_CODE_USE_BEDROCK: '1',
     MAILBOX_KEY: 'm', MAILBOX_SECRET_k1: 's', GITHUB_TOKEN: 'g', GH_TOKEN: 'g', AWS_SECRET_ACCESS_KEY: 'a', SSH_AUTH_SOCK: '/tmp/agent', NODE_OPTIONS: '--require /tmp/x.js', HTTPS_PROXY: 'http://evil.example', LD_PRELOAD: '/tmp/x.so', DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', BASH_ENV: '/tmp/x'
   }
   Object.assign(env, { USERPROFILE: 'C:\\Users\\x', APPDATA: 'C:\\a', LOCALAPPDATA: 'C:\\l', SystemRoot: 'C:\\Windows', TEMP: 'C:\\t', TMP: 'C:\\t', Path: 'C:\\p' })
-  assert.deepEqual(claudeEnv(env, 'darwin'), { HOME: '/Users/someone', PATH: '/usr/bin:/bin', USER: 'someone', LANG: 'en_US.UTF-8', TMPDIR: '/var/folders/x/' }, 'the Windows names are left behind on a Mac')
-  assert.deepEqual(claudeEnv({ HOME: '/h' }, 'darwin'), { HOME: '/h' }, 'a variable that is not set is not made up')
-  assert.deepEqual(claudeEnv({ HOME: 7, PATH: null, USER: undefined }, 'darwin'), {}, 'only text is passed on')
-  assert.deepEqual(claudeEnv({}, 'darwin'), {})
+  assert.deepEqual(claudeEnv(env, 'darwin'), { HOME: '/Users/someone', PATH: '/usr/bin:/bin', USER: 'someone', LANG: 'en_US.UTF-8', TMPDIR: '/var/folders/x/', ...NO_UPDATES }, 'the Windows names are left behind on a Mac')
+  assert.deepEqual(claudeEnv({ HOME: '/h' }, 'darwin'), { HOME: '/h', ...NO_UPDATES }, 'a variable that is not set is not made up')
+  assert.deepEqual(claudeEnv({ HOME: 7, PATH: null, USER: undefined }, 'darwin'), NO_UPDATES, 'only text is passed on')
+  assert.deepEqual(claudeEnv({}, 'darwin'), NO_UPDATES, 'the switches are there whatever the runner was started with')
+  assert.deepEqual(claudeEnv({ DISABLE_AUTOUPDATER: '0', DISABLE_UPDATES: '0' }, 'darwin'), NO_UPDATES, 'and nothing the runner was started with can turn them off')
 })
 
 test('on Windows the few variables a program there cannot start without are added (not tested on a Windows computer)', () => {
   const env = { HOME: 'C:\\Users\\s', USERPROFILE: 'C:\\Users\\s', APPDATA: 'C:\\Users\\s\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\s\\AppData\\Local', SystemRoot: 'C:\\Windows', TEMP: 'C:\\t', TMP: 'C:\\t', Path: 'C:\\Windows', GITHUB_TOKEN: 'g' }
   const found = claudeEnv(env, 'win32')
-  assert.deepEqual(Object.keys(found).sort(), ['APPDATA', 'HOME', 'LOCALAPPDATA', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'USERPROFILE'])
+  assert.deepEqual(Object.keys(found).sort(), ['APPDATA', 'DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'LOCALAPPDATA', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'USERPROFILE'])
 })
 
 test('a runner started with a key of its own in its environment is refused, naming the variable and never its value', () => {
@@ -925,7 +931,7 @@ test('the daily check passes when Claude is found, new enough, logged in with th
   for (const one of ran.filter((item) => item.file)) {
     assert.equal(one.file, '/usr/local/bin/claude')
     assert.equal(one.options.cwd, '/empty', 'run from an empty folder, never the team repo')
-    assert.deepEqual(one.options.env, { HOME: '/h' }, 'with the small environment')
+    assert.deepEqual(one.options.env, { HOME: '/h', ...NO_UPDATES }, 'with the small environment, and Claude told not to update itself')
   }
 })
 

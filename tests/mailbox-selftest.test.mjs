@@ -1,12 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { access, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mailboxWorld } from './helpers/mailbox-world.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { main } from '../scripts/lib/mailbox/command.mjs'
-import { PROOF_FILE, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
+import { PROOF_FILE, keepProof, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
+import { defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
+import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
 
 /* The proof that Claude is confined. `--selftest` starts the real Claude exactly as a job would, in a throwaway folder, and asks
    it to try nine things: use a skill and run a shell command (both planted by a booby-trapped repo), read three files it must not
@@ -15,15 +17,26 @@ import { PROOF_FILE, proofHolds } from '../scripts/lib/mailbox/proof.mjs'
    once as the morning intel runs. It passes only if each of the five is tried and refused, the two in its own folder work, and no
    secret came out. What it sees is read from the transcript. The files and the Claude here are fake. */
 
+// The places are the usual ones under the home folder (~/.local/state/agent-mailbox, ~/.local/share/agent-mailbox/work, ...), not the
+// world's own: the settings file's deny list names those places, and a test that puts them anywhere else cannot see a rule that covers one.
+const placesOf = (w) => ({ ...defaultPlaces(w.root), codeDir: w.places.codeDir })
+
 async function selftest(w, change = {}) {
   const lines = []
   const sink = (text) => lines.push(text)
-  const code = await main({ argv: ['--selftest'], ...w.ctx({ log: sink }), codeDir: w.places.codeDir, tmpDir: join(w.root, 'tmp'), out: sink, err: sink, ...change })
+  const code = await main({ argv: ['--selftest'], ...w.ctx({ log: sink }), places: placesOf(w), codeDir: w.places.codeDir, tmpDir: join(w.root, 'tmp'), out: sink, err: sink, ...change })
   return { code, text: lines.join('\n') }
 }
 
 const exists = (path) => access(path).then(() => true, () => false)
-const proofFor = (w) => proofHolds({ stateDir: w.places.stateDir, codeDir: w.places.codeDir, version: [2, 1, 290] })
+const proofFor = (w) => proofHolds({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290] })
+// A proof from an earlier self-test, in the state folder of the usual places.
+const oldProof = async (w) => {
+  await mkdir(placesOf(w).stateDir, { recursive: true })
+  assert.equal(await keepProof({ stateDir: placesOf(w).stateDir, codeDir: w.places.codeDir, version: [2, 1, 290], now: w.clock.now }), true)
+}
+// Where the self-test builds its throwaway folders: next to the real work copy, which no rule of the settings file covers.
+const selfFolder = (w) => join(dirname(placesOf(w).workDir), 'selftest')
 
 // The five steps that reach outside the work copy, and how a failure names them.
 const WALLS = [
@@ -111,8 +124,9 @@ test('without a temp folder named, the files go in /tmp (the system\'s temp fold
 
 for (const [step, what] of WALLS) {
   test(`--selftest fails, naming it, when ${what} is let through - and no proof is kept, and an older one is dropped`, async () => {
-    const w = await mailboxWorld()
+    const w = await mailboxWorld({ proof: false })
     try {
+      await oldProof(w)
       assert.equal((await proofFor(w)).holds, true, 'a proof from before')
       w.claude.script = confinedClaude(w, { through: [step] })
       const result = await selftest(w)
@@ -122,7 +136,7 @@ for (const [step, what] of WALLS) {
       assert.match(result.text, new RegExp(`${what} was NOT refused`))
       for (const [, other] of WALLS.filter(([number]) => number !== step)) assert.ok(!result.text.includes(`${other} was NOT refused`), other)
       assert.equal((await proofFor(w)).holds, false)
-      assert.equal(await exists(join(w.places.stateDir, PROOF_FILE)), false)
+      assert.equal(await exists(join(placesOf(w).stateDir, PROOF_FILE)), false)
     } finally {
       await w.cleanup()
     }
@@ -226,7 +240,7 @@ test('--selftest leaves nothing behind, passed or failed: no file in the home fo
       await selftest(w)
       assert.deepEqual((await readdir(w.root)).filter((name) => name.startsWith('.mailbox-selftest')), [], 'the home folder')
       assert.deepEqual(await readdir(join(w.root, 'tmp')), [], 'the temp folder')
-      assert.equal(await exists(join(w.places.stateDir, 'selftest')), false, 'the throwaway folder')
+      assert.equal(await exists(selfFolder(w)), false, 'the throwaway folder')
     }
   } finally {
     await w.cleanup()
@@ -234,8 +248,9 @@ test('--selftest leaves nothing behind, passed or failed: no file in the home fo
 })
 
 test('--selftest drops an older proof the moment it starts: a Claude that is not ready, or a run that throws, leaves no proof behind', async () => {
-  const w = await mailboxWorld()
+  const w = await mailboxWorld({ proof: false })
   try {
+    await oldProof(w)
     assert.equal((await proofFor(w)).holds, true)
     const missing = await selftest(w, { find: async () => ({ state: 'not found' }) })
     assert.equal(missing.code, 1)
@@ -273,8 +288,9 @@ test('--selftest names the kind of run that was given a tool it should not have:
 })
 
 test('--selftest cannot plant its file in a home folder it does not know, and says so', async () => {
-  const w = await mailboxWorld()
+  const w = await mailboxWorld({ proof: false })
   try {
+    await oldProof(w)
     w.claude.script = confinedClaude(w)
     const result = await selftest(w, { home: undefined })
     assert.equal(result.code, 1)
@@ -290,7 +306,7 @@ test('--selftest does not pass when the proof cannot be kept, because there is n
   const w = await mailboxWorld({ proof: false })
   try {
     w.claude.script = confinedClaude(w)
-    const result = await selftest(w, { places: { ...w.places, codeDir: join(w.root, 'no-code-here') } })
+    const result = await selftest(w, { places: { ...placesOf(w), codeDir: join(w.root, 'no-code-here') } })
     assert.equal(result.code, 1)
     assert.match(result.text, /the proof could not be kept/)
     assert.ok(!/passed/i.test(result.text.replace(/not passed/gi, '')), 'it does not say passed')
@@ -311,3 +327,134 @@ test('what --selftest prints holds no path and no user name', async () => {
     await w.cleanup()
   }
 })
+
+/* ---------- where it works, and who refuses what ----------------------------------------------------------------------- */
+
+test('the self-test works in a folder next to the real work copy that no deny rule covers, so its own folder works and a refusal outside is the confinement, not the deny list', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const decisions = []
+    const starts = []
+    const marked = []
+    w.claude.script = confinedClaude(w, { record: decisions, before: async (cwd) => { starts.push(cwd); marked.push(await exists(join(selfFolder(w), SELFTEST_MARKER))) } })
+    const result = await selftest(w)
+    assert.equal(result.code, 0, result.text)
+    assert.equal(starts.length, 2)
+    assert.deepEqual(marked, [true, true], "the folder carries the marker that says it is the self-test's own")
+    const share = dirname(placesOf(w).workDir)
+    for (const cwd of starts) {
+      assert.equal(dirname(dirname(dirname(cwd))), share, 'two levels under a folder next to the work copy')
+      assert.equal(dirname(dirname(cwd)), selfFolder(w))
+      assert.ok(!cwd.startsWith(placesOf(w).stateDir), 'not in the state folder, which the deny list covers')
+    }
+    assert.equal(decisions.length, 14, 'seven steps in each of the two runs')
+    for (const one of decisions) {
+      assert.equal(one.denyList, false, `step ${one.step}: no deny rule covers the file, so a refusal is not the deny list's`)
+      if (one.step >= 8) assert.deepEqual([one.allowed, one.confined, one.notAllowed], [true, false, false], `step ${one.step}: its own folder works`)
+      else assert.equal(one.allowed, false, `step ${one.step}: outside is refused`)
+      if (one.step < 8) assert.ok(one.confined || one.notAllowed, `step ${one.step}: refused by the walls`)
+    }
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('with Claude\'s walls left out, the five reaches go through and the self-test fails; with one wall left out the others still hold, and it passes', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    w.claude.script = confinedClaude(w, { weaken: { plainAllows: true, noRestricted: true, noBlockReads: true } })
+    const broken = await selftest(w)
+    assert.equal(broken.code, 1)
+    for (const [, what] of WALLS) assert.match(broken.text, new RegExp(`${what} was NOT refused`), what)
+    assert.equal((await proofFor(w)).holds, false)
+
+    for (const left of [{ noRestricted: true }, { noBlockReads: true }, { plainAllows: true }]) {
+      w.claude.script = confinedClaude(w, { weaken: left })
+      const layered = await selftest(w)
+      assert.equal(layered.code, 0, `${JSON.stringify(left)}: ${layered.text}`)
+    }
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a work copy in a place the deny list covers makes the self-test fail on its own folder, and say so, instead of passing for the wrong reason', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const where = []
+    w.claude.script = confinedClaude(w, { record: where })
+    const state = placesOf(w).stateDir
+    const result = await selftest(w, { places: { ...placesOf(w), workDir: join(state, 'work') } })
+    assert.equal(result.code, 1)
+    assert.match(result.text, /could not read a file in its own folder/)
+    assert.match(result.text, /could not write a file in its own folder/)
+    assert.ok(where.filter((one) => one.step >= 8).every((one) => one.denyList === true && one.allowed === false), 'it was the deny list that refused the folder')
+    assert.equal((await proofFor(w)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a folder next to the work copy that is named selftest and is not the self-test\'s own is left alone, and the self-test says so and does not run', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    await mkdir(selfFolder(w), { recursive: true })
+    await writeFile(join(selfFolder(w), 'mine.txt'), 'the owner\'s own file\n')
+    w.claude.script = confinedClaude(w)
+    const result = await selftest(w)
+    assert.equal(result.code, 1)
+    assert.match(result.text, /is not the self-test's own, so it was left alone/)
+    assert.equal(await readFile(join(selfFolder(w), 'mine.txt'), 'utf8'), 'the owner\'s own file\n')
+    assert.equal(w.claude.calls.length, 0)
+    assert.equal((await proofFor(w)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a folder an earlier self-test left behind carries its marker and is cleared, whatever is in it', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const stale = join(selfFolder(w), '1', 'repo')
+    await mkdir(stale, { recursive: true })
+    await writeFile(join(selfFolder(w), SELFTEST_MARKER), 'left over\n')
+    await writeFile(join(stale, 'HOOK-RAN'), 'left over from an earlier run')
+    w.claude.script = confinedClaude(w)
+    const result = await selftest(w)
+    assert.equal(result.code, 0, result.text)
+    assert.equal(await exists(selfFolder(w)), false, 'and gone again afterwards')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+/* ---------- a trap that really fires ----------------------------------------------------------------------------------- */
+
+// Each planted trap is a real command in a real file. With its protection missing the fake Claude runs it, as Claude Code would, and the
+// self-test must see the file it writes. With every protection in place none runs and the self-test passes (the first test above).
+const TRAP_CASES = [
+  ['HOOK-RAN', { dropFlags: ['--setting-sources'], settings: { disableAllHooks: false } }, 'the repo\'s hooks run'],
+  ['HELPER-RAN', { dropFlags: ['--setting-sources'] }, 'the repo\'s settings are read, so its key helper runs'],
+  ['SKILL-RAN', { dropFlags: ['--disable-slash-commands'], settings: { disableSkillShellExecution: false } }, 'a skill\'s shell runs'],
+  ['MCP-RAN', { dropFlags: ['--strict-mcp-config'], settings: { enableAllProjectMcpServers: true } }, 'a connector in the repo starts'],
+  ['SHELL-RAN', { addTools: ['Bash'] }, 'Claude has a shell']
+]
+
+for (const [trap, weaken, how] of TRAP_CASES) {
+  test(`a trap really fires when ${how} (${trap}), and the self-test sees it and fails, naming it`, async () => {
+    const w = await mailboxWorld({ proof: false })
+    try {
+      w.claude.script = confinedClaude(w, { weaken })
+      const result = await selftest(w)
+      assert.equal(result.code, 1)
+      assert.match(result.text, new RegExp(`${trap}: something the repo planted ran`))
+      for (const [other] of TRAP_CASES.filter(([name]) => name !== trap)) {
+        if (trap === 'HOOK-RAN' && other === 'HELPER-RAN') continue
+        assert.ok(!result.text.includes(`${other}: something`), `only ${trap} was let run, not ${other}`)
+      }
+      assert.equal((await proofFor(w)).holds, false)
+    } finally {
+      await w.cleanup()
+    }
+  })
+}

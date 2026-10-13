@@ -122,11 +122,18 @@ const ENV_BASE = ['HOME', 'PATH', 'USER', 'LANG', 'TMPDIR']
 // What a program on Windows cannot start without. (That setup is not tested on a Windows computer.)
 const ENV_WINDOWS = ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'Path']
 
-// The environment Claude is started with: these variables and no others - no key, no token, none of this Mac's secrets,
-// and nothing that changes where a program is loaded from or where it connects.
+// WHY: Claude Code "checks for updates on startup and periodically while running. Updates download and install in the background, then
+// take effect the next time you start Claude Code" (https://code.claude.com/docs/en/setup#auto-updates). A version the self-test never
+// saw would then start running between two runs. DISABLE_AUTOUPDATER=1 stops the background check and DISABLE_UPDATES=1 stops every
+// update, a manual one included (https://code.claude.com/docs/en/env-vars). Both are set for every program the runner starts. They
+// cannot stop an update made by a Claude Code the owner uses by hand, so the version is also asked just before each run (tick.mjs).
+export const UPDATE_SWITCHES = Object.freeze({ DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
+
+// The environment Claude is started with: these variables and the two switches above, and no others - no key, no token, none of this
+// Mac's secrets, and nothing that changes where a program is loaded from or where it connects.
 export function claudeEnv(env, platform = process.platform) {
   const wanted = platform === 'win32' ? [...ENV_BASE, ...ENV_WINDOWS] : ENV_BASE
-  return Object.fromEntries(wanted.filter((name) => typeof env?.[name] === 'string').map((name) => [name, env[name]]))
+  return { ...Object.fromEntries(wanted.filter((name) => typeof env?.[name] === 'string').map((name) => [name, env[name]])), ...UPDATE_SWITCHES }
 }
 
 // Keys and addresses that would send a run to a different account, a different server or a per-token bill. The runner

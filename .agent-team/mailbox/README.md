@@ -38,6 +38,7 @@ If you are not sure you need this, leave the board on cloud. Nothing here is nee
 | The work copy | `~/.local/share/agent-mailbox/work` | The runner's own clone of your team repo. It is wiped back to the team repo's `main` before every order, so never work in it |
 | The state folder | `~/.local/state/agent-mailbox` | What the runner remembers: the allowlist, the claims, the day's counts, the pause switch, its log |
 | The secrets | `~/.config/agent-mailbox/env` | Only you can read it. The runner reads it itself; no shell ever loads it |
+| The self-test folder | `~/.local/share/agent-mailbox/selftest` | Made by `--selftest` next to the work copy, where a real job works, and removed when the test ends |
 
 The runner refuses to start if any of these is inside another one.
 
@@ -139,11 +140,12 @@ node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --selft
 
 - `--preflight` says, in plain words, what is ready and what is not. It changes nothing and asks nobody.
 - `--selftest` runs the real Claude with the same flags a real run uses. It does so twice, once as the task sweep runs and once as the morning intel runs. It uses a little of your plan.
-- It plants traps in a throwaway folder: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
+- It builds its folder next to the work copy, in `~/.local/share/agent-mailbox/selftest`, and removes it when it ends. It leaves alone a folder of that name that it did not make. It plants traps there: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
 - It asks Claude to read each of the three. It asks it to write a new file in `/tmp` and next to the folder. Last, it asks it to read and write a file in its own folder.
 - It passes only if Claude is seen trying each of those five things and is refused every one. Its own folder must work, so a refusal means something. No trap may run and no secret may come out. If it cannot prove a wall, it says which.
 - A pass is saved for this Claude Code version and these settings. **No job runs until it passes.** Until then the runner refuses a run as "not ready" and its log says `selftest-needed`. Card orders are not held up.
-- Run it again after every Claude Code update, and after you move the runner's code to a newer commit. The runner notices a change by itself and stops jobs until you do. A changed setting is seen at once. A new Claude Code is seen at the runner's daily check.
+- Run it again after every Claude Code update, and after you move the runner's code to a newer commit. The runner notices a change by itself and stops jobs until you do. A changed setting is seen at once. The runner asks Claude Code which version it is just before every job.
+- The runner starts every Claude with `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`, so it does not update itself in the background. If you use Claude Code yourself and it updates, jobs wait until you run `--selftest` again.
 
 ### 7. One order, watched
 
@@ -243,7 +245,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | `unavailable (keys-...)` | The secrets file is missing, or a key is the wrong shape, or the board key equals a signing secret | Make it again (step 4) |
 | `not-ready (places-...)` | One of the four places sits inside another | Put them back where this guide puts them |
 | `Claude: Claude Code is too old` (in `--preflight`), or a run refused as `not ready (version-too-old)` | The protections need Claude Code 2.1.259 or later. Below that the runner does not run Claude at all | `claude update`, then `--preflight` again |
-| A run refused as `not ready (selftest-needed)`, or a `PROBLEM self-test` line in `--preflight` | No self-test has passed for this Claude Code and these settings. An update or a changed setting takes the proof away | Run `--selftest` (step 6). Jobs wait until it passes |
+| A run refused as `not ready (selftest-needed)`, or a `PROBLEM self-test` line in `--preflight` | No self-test has passed for this Claude Code and these settings. An update, even one you made by hand, or a changed setting takes the proof away | Run `--selftest` (step 6). Jobs wait until it passes |
 | `not-ready (key-in-environment)` | An API key (or a Claude address) is set for the runner | Remove it. The runner runs on your plan, never a key |
 | `not-ready (origin-mismatch)` | The work copy's origin is not your team repo | Fix the clone's origin |
 | `board-failed (board-refused)` | The board does not accept the Mac's key | `MAILBOX_KEY` differs between Vercel and the env file |
@@ -267,6 +269,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | Claude has no shell and no connectors | `--restricted` takes away the tools that run commands or code. `--tools` names only built-in tools and Bash is not one. `--disallowedTools "mcp__*"` and an empty `--strict-mcp-config` take away every connector. Any call to another tool stops the run on the spot |
 | Claude cannot read or write outside the work copy | Four layers. `--restricted` confines the built-in file tools to the folder Claude starts in. The settings file sets `blockReadsOutsideWorkingDirectories`, so a read outside it is refused in every mode. The only file permissions given are `Read(/**)` and `Edit(/**)`, which on the command line mean "inside this folder" (a tool name with no path would mean everywhere), and `--permission-mode dontAsk` denies everything else. Last, a deny list names the places a Mac keeps secrets: `~/.ssh`, `~/.aws`, `~/.config`, `~/.hermes`, `~/.codex`, `~/Library`, `~/.claude`, the state folder and the runner's own code |
 | The walls are proven on this Mac before any job runs | `--selftest` runs the real Claude in each job's exact setup and checks it cannot read or write outside the work copy. The proof is saved with the Claude Code version and a short code worked out from the settings. When either changes, jobs are refused until it passes again |
+| Claude cannot update itself between the test and a job | Every program the runner starts gets `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`. The runner also asks Claude Code which version it is just before each job. It refuses the job if that is not the version the self-test passed for |
 | The web is for the morning intel only | The task sweep is never given a web tool. The morning intel is, because it needs the news |
 | Nothing in the team repo can run | `--setting-sources user` (the repo's settings, hooks and environment are never read), `disableAllHooks`, no skills or commands (`--disable-slash-commands`), no `.mcp.json`, and git's hooks switched off |
 | Every changed file is checked | Per action and per job, from a fixed list in the runner's code. Anything else - a deletion, a link, a file in `.claude/`, `.github/`, `scripts/`, a package file - fails the order and nothing is pushed |
@@ -278,6 +281,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 The flags and settings are the ones Claude Code documents. Read the [CLI reference](https://code.claude.com/docs/en/cli-reference)
 (`--restricted` needs 2.1.248, `--permission-prompts` 2.1.259), the
 [settings reference](https://code.claude.com/docs/en/settings-reference) (`blockReadsOutsideWorkingDirectories`, 2.1.257),
+[environment variables](https://code.claude.com/docs/en/env-vars) and [advanced setup](https://code.claude.com/docs/en/setup) (the update switches),
 [running Claude Code programmatically](https://code.claude.com/docs/en/headless) and
 [permissions](https://code.claude.com/docs/en/permissions). The last one says what a `claude -p` run reads from a
 folder it was never asked to trust. It also says why a tool name with no path is allowed everywhere, and what the path patterns mean.

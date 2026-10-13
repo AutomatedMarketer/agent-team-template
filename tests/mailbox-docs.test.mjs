@@ -3,13 +3,13 @@ import assert from 'node:assert/strict'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join, posix } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { read, exists } from './helpers/repo.mjs'
 import { ALLOWED_ORDERS, CEILINGS, readAllowedOrders } from '../scripts/lib/mailbox/allow.mjs'
 import { ACTIONS, KEY_SHAPE, SECRET_SHAPE } from '../scripts/lib/mailbox/contract.mjs'
 import { defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
 import { readMailboxEnv } from '../scripts/lib/mailbox/keys.mjs'
-import { MINIMUM_VERSION, TOOLS, buildArgv } from '../scripts/lib/mailbox/claude.mjs'
+import { MINIMUM_VERSION, TOOLS, buildArgv, claudeEnv } from '../scripts/lib/mailbox/claude.mjs'
 import { knownJobs } from '../scripts/lib/mailbox/jobs.mjs'
 import { mailboxPath } from '../scripts/lib/status/mailbox-schema.mjs'
 
@@ -413,4 +413,34 @@ test('the guide shows the self-test word the tick logs and the line --preflight 
   assert.ok(flat(doc).includes('| The walls are proven on this Mac before any job runs |'))
   assert.match(flat(section(doc, '## What it does and what it never does', '## Where things live')), /only after a self-test has proved the walls on this Mac/)
   assert.match(flat(doc.slice(doc.indexOf('## Not yet verified on a real Mac'))), /`Read\(\/\*\*\)` and `Edit\(\/\*\*\)`/)
+})
+
+// --- where the self-test works, and updates ------------------------------------------------------------------------
+
+test('the guide says the self-test works next to the work copy - the folder the code uses - and removes it afterwards', async () => {
+  const doc = await guide()
+  const places = defaultPlaces('/HOME')
+  const shown = `${unix(dirname(places.workDir)).replace('/HOME', '~')}/selftest`
+  assert.ok(doc.includes(`\`${shown}\``), `the guide does not name the self-test folder as ${shown}`)
+  const flatDoc = flat(doc)
+  assert.match(flatDoc, /\| The self-test folder \| `~\/\.local\/share\/agent-mailbox\/selftest` \| Made by `--selftest` next to the work copy/)
+  assert.match(flat(section(doc, '### 6. ', '### 7. ')), /builds its folder next to the work copy/)
+  assert.match(flat(section(doc, '### 6. ', '### 7. ')), /It leaves alone a folder of that name that it did not make/)
+})
+
+test('the guide says Claude is started with its updates switched off, and that the version is asked just before every job', async () => {
+  const doc = await guide()
+  const flatDoc = flat(doc)
+  const env = claudeEnv({}, 'darwin')
+  for (const name of ['DISABLE_AUTOUPDATER', 'DISABLE_UPDATES']) {
+    assert.ok(doc.includes(`\`${name}=1\``), `the guide does not name ${name}=1`)
+    assert.ok(section(doc, '### 6. ', '### 7. ').includes(`\`${name}=1\``), `step 6 does not name ${name}=1`)
+    assert.ok(section(doc, '## How it keeps your Mac safe', '## On a Windows').includes(`\`${name}=1\``), `the safety table does not name ${name}=1`)
+    assert.equal(env[name], '1', `the runner does not set ${name}`)
+  }
+  assert.match(flatDoc, /asks Claude Code which version it is just before every job/)
+  assert.doesNotMatch(flatDoc, /seen at the runner's daily check/, 'the guide still says an update is seen only at the daily check')
+  const step = flat(section(doc, '### 6. ', '### 7. '))
+  assert.match(step, /if you use Claude Code yourself and it updates/i)
+  assert.ok(doc.includes('https://code.claude.com/docs/en/env-vars') && doc.includes('https://code.claude.com/docs/en/setup'), 'the pages the switches come from')
 })

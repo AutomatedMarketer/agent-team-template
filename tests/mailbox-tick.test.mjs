@@ -139,7 +139,7 @@ test('a run order starts Claude once with the pinned flags and prompt, and lands
   const call = w.claude.calls[0]
   assert.equal(call.file, '/fake/bin/claude')
   assert.equal(call.options.cwd, w.places.workDir)
-  assert.deepEqual(Object.keys(call.options.env).sort(), ['HOME', 'PATH'])
+  assert.deepEqual(Object.keys(call.options.env).sort(), ['DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'PATH'])
   assert.ok(call.args.includes('--permission-prompts'), 'this Claude is new enough')
   assert.ok(call.args.includes('--restricted'))
   assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
@@ -1048,7 +1048,7 @@ test('Claude is started with a few variables of its own and none of the Mac\'s: 
   const env = { HOME: w.root, PATH: '/usr/bin', GITHUB_TOKEN: 'a-github-token', AWS_SECRET_ACCESS_KEY: 'an-aws-secret', MAILBOX_KEY: 'a-mailbox-key', NODE_OPTIONS: '--require /tmp/x.js', SSH_AUTH_SOCK: '/tmp/agent' }
   await runTick(w.ctx({ env }))
   assert.equal(w.claude.calls.length, 1)
-  assert.deepEqual(w.claude.calls[0].options.env, { HOME: w.root, PATH: '/usr/bin' })
+  assert.deepEqual(w.claude.calls[0].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
 }))
 
 // A good task sweep: the digest, one card worked (status, day, a Result section) and a log for the orchestrator.
@@ -1240,4 +1240,81 @@ test('the self-test is looked at on every tick and never remembered: once it is 
   await runTick(w.ctx({ force: true }))
   assert.deepEqual(await refusedAsNotReady(w, third.id), ['refused', 'not-ready'], 'the same day, with the daily check remembered')
   assert.equal(w.claude.calls.length, 1)
+}))
+
+/* ---------- the version about to run ------------------------------------------------------------------------------------ */
+
+// Claude Code updates itself in the background (https://code.claude.com/docs/en/setup#auto-updates), so the version the daily check
+// remembered is not the version that will start. The runner asks for it just before each run, and a run whose version is not the one the
+// self-test passed for is refused as "not ready" - never started - with the owner's log saying a new self-test is needed.
+const versions = (w, said, events = []) => {
+  const asked = []
+  const exec = async (file, args, options) => {
+    if (args[0] === '--version') {
+      events.push('version')
+      asked.push({ file, options })
+      const next = said.shift()
+      if (next instanceof Error) throw next
+      return { stdout: `${next} (Claude Code)`, code: 0 }
+    }
+    return w.exec(file, args, options)
+  }
+  return { exec, asked }
+}
+
+test('Claude Code updated itself after the daily check: the run is refused as "not ready" and never started, and the log says a new self-test is needed', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const { exec } = versions(w, ['2.1.290', '2.1.291'])
+  const run = w.send({ action: 'run', workflow: 'morning-intel' })
+  const logs = []
+  await runTick(w.ctx({ exec, log: (line) => logs.push(line) }))
+  assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'])
+  assert.equal(w.claude.calls.length, 0, 'Claude is never started')
+  assert.ok(logs.some((line) => line.includes('needs a new self-test') && line.includes('2.1.291')), 'the log says which version it found')
+  assert.equal(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'nothing is pushed')
+}))
+
+test('the version is asked immediately before Claude starts - from an empty folder, with the small environment, and nothing else between the two', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const events = []
+  const { exec, asked } = versions(w, ['2.1.290', '2.1.290'], events)
+  const spawn = (...given) => {
+    events.push('spawn')
+    return w.claudeSpawn(...given)
+  }
+  w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx({ exec, spawn }))
+  assert.equal(w.claude.calls.length, 1)
+  assert.deepEqual(events, ['version', 'version', 'spawn'], 'the daily check, then the one just before the run')
+  assert.equal(asked[1].file, '/fake/bin/claude')
+  assert.equal(asked[1].options.cwd, join(w.places.stateDir, 'empty-cwd'), 'never the team repo')
+  assert.deepEqual(asked[1].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
+}))
+
+test('a version that cannot be read just before a run, or one the self-test never saw, is the same as a changed one: no run', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  for (const [name, second] of [['an error', new Error('could not start')], ['nothing like a version', 'banana'], ['an older one', '2.1.258'], ['a newer one', '2.2.0']]) {
+    const { exec } = versions(w, ['2.1.290', second])
+    const run = w.send({ action: 'run', workflow: 'morning-intel' })
+    w.clock.advance(MINUTE)
+    await rm(join(w.places.stateDir, 'preflight.json'), { force: true })
+    await runTick(w.ctx({ exec, force: true }))
+    assert.deepEqual(await refusedAsNotReady(w, run.id), ['refused', 'not-ready'], name)
+  }
+  assert.equal(w.claude.calls.length, 0)
+}))
+
+test('the version is asked before every run, not once a day: a run after an update that came between two runs is refused', () => withWorld(async (w) => {
+  w.claude.script = async (cwd, args, call) => (args.includes('WebSearch') ? w.claude.good(cwd, args, call) : sweeping(w)(cwd, args, call))
+  // The daily check is made once, for the first tick; the second tick runs on its answer, and asks again only just before its run.
+  const { exec } = versions(w, ['2.1.290', '2.1.290', '2.1.291'])
+  const first = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx({ exec }))
+  assert.equal(entryFor(await statusIn(w), first.id).state, 'ok')
+  const second = w.send({ action: 'run', workflow: 'task-sweep' })
+  w.clock.advance(MINUTE)
+  await runTick(w.ctx({ exec, force: true }))
+  const status = await statusIn(w)
+  assert.deepEqual([entryFor(status, second.id).state, entryFor(status, second.id).why], ['refused', 'not-ready'])
+  assert.equal(w.claude.calls.length, 1, 'only the first run started Claude')
 }))

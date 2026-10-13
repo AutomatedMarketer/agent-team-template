@@ -2,11 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { mailboxWorld, ALLOWLIST, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
 import { main, parseArgs, USAGE } from '../scripts/lib/mailbox/command.mjs'
 import { repoRoot } from './helpers/repo.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
+import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
 
 /* The command a LaunchAgent runs every five minutes, and the few switches a person uses by hand: one tick, a check that
    says in plain words what is wrong, and a test of the walls around Claude. Output is plain lines for a person to read -
@@ -221,7 +222,7 @@ test('--selftest cleans up after itself, and refuses to run when Claude is not r
   try {
     w.claude.script = confinedClaude(w)
     await run(w, ['--selftest'])
-    await mkdir(join(w.places.stateDir, 'selftest'), { recursive: true })
+    await mkdir(join(dirname(w.places.workDir), 'selftest'), { recursive: true })
     const left = await run(w, ['--selftest'], { find: async () => ({ state: 'not found' }) })
     assert.equal(left.code, 1)
     assert.match(left.text, /not ready|was not found/i)
@@ -358,12 +359,13 @@ test('--selftest leaves nothing behind, and a throwaway folder left by an earlie
   const w = await mailboxWorld()
   try {
     w.claude.script = confinedClaude(w)
-    const stale = join(w.places.stateDir, 'selftest', 'repo')
+    const stale = join(dirname(w.places.workDir), 'selftest', 'repo')
     await mkdir(stale, { recursive: true })
+    await writeFile(join(dirname(w.places.workDir), 'selftest', SELFTEST_MARKER), 'left over\n')
     await writeFile(join(stale, 'HOOK-RAN'), 'left over from an earlier run')
     const result = await run(w, ['--selftest'])
     assert.equal(result.code, 0, result.text)
-    await assert.rejects(access(join(w.places.stateDir, 'selftest')), 'the throwaway folder is gone')
+    await assert.rejects(access(join(dirname(w.places.workDir), 'selftest')), 'the throwaway folder is gone')
   } finally {
     await w.cleanup()
   }
@@ -377,7 +379,7 @@ test('--selftest runs the real kind of run: the cheaper model, and the small env
     await run(w, ['--selftest'], { env })
     for (const call of w.claude.calls) {
       assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
-      assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin' })
+      assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
     }
   } finally {
     await w.cleanup()
