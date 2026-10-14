@@ -57,14 +57,21 @@ Nothing here changes anything, and nothing here prints a secret.
 
 ```bash
 # on the Mac Mini
-claude --version; node --version; git --version
-claude auth status >/dev/null 2>&1 && echo "Claude is logged in" || echo "Claude is NOT logged in"
+use=""
+for place in "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
+  if [ -x "$place" ]; then echo "found: $place ($("$place" --version))"; [ -z "$use" ] && use="$place"; fi
+done
+[ -z "$use" ] && echo "NO Claude Code in the three places the runner looks: install it"
+node --version; git --version
+[ -n "$use" ] && { "$use" auth status >/dev/null 2>&1 && echo "Claude is logged in" || echo "Claude is NOT logged in"; }
 [ -n "$ANTHROPIC_API_KEY" ] && echo "an API key is set in this terminal - remove it" || echo "no API key in this terminal: good"
 [ -n "$(launchctl getenv ANTHROPIC_API_KEY)" ] && echo "an API key is set for apps - remove it" || echo "no API key for apps: good"
 git ls-remote https://github.com/YOUR-GITHUB-NAME/YOUR-TEAM-REPO.git HEAD | cut -c1-12
 ```
 
 - Each line should say what you want it to. The last one prints the start of your team repo's latest commit.
+- The runner looks for Claude Code in three places only, in this order: `~/.local/bin/claude`, `/opt/homebrew/bin/claude` and `/usr/local/bin/claude`. It never looks at your `PATH`. The first block lists each one it finds. It uses the first one listed.
+- A Claude Code from `nvm`, or an old `~/.claude/local` install, is not on that list. Install the native one. The steps are on https://code.claude.com/docs/en/setup.
 - If an API key is set anywhere, remove it first. The runner refuses to start with one set, because a key bills
   every call instead of using your plan.
 

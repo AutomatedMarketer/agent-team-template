@@ -553,3 +553,39 @@ test('the guide says Claude is started with its updates switched off, and that t
   assert.match(step, /if you use Claude Code yourself and it updates/i)
   assert.ok(doc.includes('https://code.claude.com/docs/en/env-vars') && doc.includes('https://code.claude.com/docs/en/setup'), 'the pages the switches come from')
 })
+
+test('step 1 checks the places the runner will really use for Claude Code, in the runner\'s order, and points to the native installer for anyone with none', async () => {
+  const doc = await guide()
+  const step = section(doc, '### 1. A read-only look first', '### 2.')
+  const { claudeFolders } = await import('../scripts/lib/mailbox/claude.mjs')
+  const places = claudeFolders('/HOME').map((folder) => `${unix(folder).replace('/HOME', '$HOME')}/claude`)
+  assert.deepEqual(places, ['$HOME/.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'])
+  // The one loop in the block names exactly these places, in this order, with quotes only where a variable is.
+  const loop = /for place in (.+); do/.exec(step)[1]
+  assert.equal(loop, `"${places[0]}" ${places[1]} ${places[2]}`)
+  // It does not ask the Terminal's PATH for claude any more: no bare `claude ...` command.
+  const block = blocks(step).find((one) => one.language === 'bash').body
+  assert.ok(!/^\s*claude\s/m.test(block), 'a bare claude command looks at the PATH')
+  assert.ok(/--version/.test(block) && /auth status/.test(block))
+  assert.match(flat(step), /It never looks at your \`PATH\`/)
+  assert.match(flat(step), /A Claude Code from \`nvm\`, or an old \`~\/.claude\/local\` install, is not on that list/)
+  assert.ok(step.includes('https://code.claude.com/docs/en/setup'))
+})
+
+test('every place in the code that points to a step of the guide names a step that exists with that title', async () => {
+  const doc = await guide()
+  const titles = new Map([...doc.matchAll(/^### (\d+)\. (.+)$/gm)].map((match) => [Number(match[1]), match[2]]))
+  const { readdir } = await import('node:fs/promises')
+  const files = (await readdir(new URL('../scripts/lib/mailbox/', import.meta.url))).filter((name) => name.endsWith('.mjs'))
+  let found = 0
+  for (const name of files) {
+    const source = await read(`scripts/lib/mailbox/${name}`)
+    for (const match of source.matchAll(/the guide's step (\d+)(?:, "([^"]+)")?/g)) {
+      found += 1
+      assert.ok(titles.has(Number(match[1])), `${name} points to step ${match[1]}, which the guide does not have`)
+      if (match[2]) assert.equal(titles.get(Number(match[1])), match[2], `${name}: step ${match[1]} is not called that`)
+    }
+  }
+  assert.ok(found >= 1, 'the work copy comment in gitguard.mjs is found')
+  assert.equal(titles.get(3), 'The work copy')
+})

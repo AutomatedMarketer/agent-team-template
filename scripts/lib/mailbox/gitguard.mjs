@@ -67,7 +67,7 @@ export async function gitUnchanged(work, before) {
 
 // Throw the work copy away and clone the team repo again into the same place, with the address the runner itself wrote into .git/config
 // before Claude started (never the one in the folder now). No git command is run in the old folder. { ok: true } or { ok: false }; when it
-// is false the folder is simply not there, and the next tick says "not a clone" until the owner makes one (the guide's step 4).
+// is false the folder is simply not there, and the next tick says "not a clone" until the owner makes one (the guide's step 3, "The work copy").
 export async function remakeWorkCopy({ git, work, emptyHooks, before }) {
   await rm(work, { recursive: true, force: true })
   if (typeof before?.address !== 'string' || before.address === '') return { ok: false }
