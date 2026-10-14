@@ -9,10 +9,12 @@
 //      that runs behind the board's cannot let an order issued just before it through) is recorded inside it, once
 //      (claims/store.json), and never changed. Every order issued before that moment is refused (verdict
 //      before-claims, envelope.mjs). So a claim folder that was wiped, deleted, lost or is brand new cannot run again an
-//      order that is still alive in the board's queue. What this does NOT protect is a folder put back from an OLDER copy:
-//      its store.json keeps its old start, so an order issued after that start whose claim was made after the copy is
-//      no longer remembered, and if it is still alive (an order lives up to an hour) it would be claimed and done again. The
-//      guide therefore tells the owner to keep the runner paused for an hour after restoring or deleting the folder. The record is inside the folder on
+//      order that is still alive in the board's queue. A folder put back from an OLDER copy is
+//      covered only in part: its store.json keeps its old start, so an order whose claim was made after the copy is forgotten. If it
+//      had LANDED it is still never done again, because tick.mjs (execute) looks for its Mailbox-Order trailer on main before the first
+//      effect and settles it ok. An order that was only REFUSED or FAILED before the restore may be claimed and tried again while it is
+//      alive (up to an hour). The guide therefore tells the owner to stop the background job for an hour after a restore, and not to use
+//      the pause file, which lives in the folder being restored. The record is inside the folder on
 //      purpose: whatever empties the folder takes it too, and the store then begins again from now. A store with no
 //      usable record is not one to trust, so it is given a new record dated now plus the skew - later than the truth, which only
 //      ever refuses more - and the claims already in it still count as seen.

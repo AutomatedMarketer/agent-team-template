@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { appendFile, access, mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { git } from './helpers/git.mjs'
 import { signBody } from '../scripts/lib/mailbox/envelope.mjs'
 import { mailboxWorld, CLAUDE_FILE, ALLOWLIST, T0, CARD, PROPOSALS, KEY, SECRET, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
@@ -1718,4 +1719,68 @@ test('the clone is brought level on the way out of an unsure push: nothing of th
   await runTick(w.ctx({ git: refusing }))
   assert.equal((await git(['status', '--porcelain'], w.places.workDir)).stdout.trim(), '')
   assert.equal((await git(['rev-parse', 'HEAD'], w.places.workDir)).stdout.trim(), await w.inOrigin.head().then(async (head) => head), 'level with the team repo')
+}))
+
+/* ---------- a claims folder put back from an older copy forgets what has landed ----------------------------------------------- */
+
+test('an order that already landed is not done again when its claim was lost and the store record kept: no second card, one commit with the trailer, and it is settled ok', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  await runTick(w.ctx())
+  assert.ok(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'))
+  const landed = (await commitsWithTrailer(w, sent.id))[0]
+  // Put back from a copy made before the claim: the order's claim folder is gone, the store record (the old start) is there.
+  await rm(join(w.places.stateDir, 'claims', `${sent.id}.claim`), { recursive: true })
+  assert.deepEqual(await readdir(join(w.places.stateDir, 'claims')), ['store.json'])
+  w.clock.advance(5 * MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice-2.md'), null, 'not done a second time')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.why, final.commit], ['ok', null, landed.slice(0, 12)])
+}))
+
+test('a run that already landed is not run again when its claim was lost: Claude is started once', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  assert.equal(w.claude.calls.length, 1)
+  await rm(join(w.places.stateDir, 'claims', `${sent.id}.claim`), { recursive: true })
+  w.clock.advance(5 * MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.equal(w.claude.calls.length, 1, 'Claude was not started again')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+  assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
+}))
+
+test('an order that did not land is still done after its claim is lost: only a commit with its trailer on main stops it', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  const refusing = async (args, cwd) => {
+    if (args.includes('push') && (await git(['log', '-1', '--format=%s', args.at(-1).split(':')[0]], cwd)).stdout.startsWith('Mailbox order')) throw new Error('declined')
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: refusing }))
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), null)
+  await rm(join(w.places.stateDir, 'claims', `${sent.id}.claim`), { recursive: true })
+  w.clock.advance(5 * MINUTE)
+  await runTick(w.ctx({ force: true }))
+  assert.ok(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), 'it had not landed, so it is done now')
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+}))
+
+test('when the team repo cannot be read for the look before the first effect, nothing is done: the order fails as push-failed and no card is made', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  let afterClaim = 0
+  const blind = async (args, cwd) => {
+    if (existsSync(join(w.places.stateDir, 'claims', `${sent.id}.claim`)) && args.includes('fetch')) {
+      afterClaim += 1
+      // The first fetch after the claim brings the clone level; the second is the look for the order's trailer.
+      if (afterClaim === 2) throw new Error('unreachable')
+    }
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: blind }))
+  assert.equal(afterClaim >= 2, true)
+  const final = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([final.state, final.why], ['failed', 'push-failed'])
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), null)
 }))

@@ -364,6 +364,14 @@ async function execute(s, { id, action, fields, minutes }) {
     return settle(s, id, action, { state: 'refused', why: 'not-ready' })
   }
 
+  // Before the order's FIRST effect: is it already on main? A claims folder put back from an older copy forgets an order that has landed, and
+  // the order is still alive for up to an hour, so without this it would be done a second time (a second card, two commits with one trailer).
+  // The clone has just been fetched. Found: it is done, so say so and do nothing. Unreadable: nothing was done, so it fails the way an
+  // unreachable team repo does at the start of any order (push-failed); no new word. Only "not found" goes on.
+  const earlier = await landedCommit({ git: ctx.git, work: workDir, emptyHooks: s.hooks, id })
+  if (earlier.state === 'found') return settle(s, id, action, { state: 'ok', commit: earlier.commit.slice(0, 12), startedAt: null })
+  if (earlier.state === 'unknown') return fail('push-failed')
+
   if (action === 'run') return executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level })
 
   // A card action: the runner's own code, with no model - and it can be done again exactly, on top of a newer main.

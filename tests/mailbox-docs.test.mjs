@@ -233,7 +233,9 @@ test('no one paste block in the guide both pauses and un-pauses, or both pauses 
   // The three exist, each as its own block.
   assert.equal(bash.filter((body) => runs(body, /^touch .*PAUSE/)).length, 1)
   assert.equal(bash.filter((body) => runs(body, /^rm .*PAUSE/)).length, 1)
-  assert.equal(bash.filter((body) => runs(body, /^launchctl bootout/)).length, 1)
+  // Two blocks stop the background job: removing it for good (which also moves the plist) and stopping it for a restore (which does not).
+  assert.equal(bash.filter((body) => runs(body, /^launchctl bootout/)).length, 2)
+  assert.equal(bash.filter((body) => runs(body, /^launchctl bootout/) && runs(body, /^mv /)).length, 1)
 })
 
 test('the guide says a change to any file of the runner code needs a new self-test, and the fingerprint really covers those folders', async () => {
@@ -275,11 +277,25 @@ test('the guide names the fixed list Claude Code is found by, and it is the list
   assert.match(doc, /`--preflight` lists every copy it finds on that list and says which one the runner uses/)
 })
 
-test('the guide says to keep the runner paused for an hour after restoring or deleting its state folder, because every order expires within an hour', async () => {
-  const doc = flat(await guide())
-  assert.match(doc, /restore or delete the runner's state folder.{0,60}keep the runner paused for an hour/)
+test('the guide tells the owner to stop the background job for an hour when the state folder is restored or deleted - not to rely on the pause file that lives in that folder - in separate blocks, and says exactly what is protected', async () => {
+  const doc = await guide()
+  const text = flat(section(doc, '### If you restore or delete the state folder', '## What you can look at'))
+  assert.match(text, /An order that already landed in your team repo is never done again/)
+  assert.match(text, /An order that was refused or failed before the restore can be tried again/)
+  assert.match(text, /Every order expires within an hour. So keep the runner stopped for an hour/)
+  assert.match(text, /Do not use the pause file for this. It lives in the folder you are restoring/)
+  // The blocks: stop (no PAUSE involved), and start again; each does one thing.
+  const bash = blocks(section(doc, '### If you restore or delete the state folder', '## What you can look at')).filter((one) => one.language === 'bash').map((one) => one.body)
+  assert.equal(bash.length, 2)
+  assert.match(bash[0], /^launchctl bootout/m)
+  assert.ok(!/PAUSE/.test(bash.join('\n')), 'the pause file is not used')
+  assert.match(bash[1], /^launchctl bootstrap/m)
+  assert.ok(!/bootout/.test(bash[1]))
   const { LIFE } = await import('../scripts/lib/mailbox/contract.mjs')
   assert.equal(LIFE.maxSeconds, 3600)
+  // And the code does what the guide says it does: the look at main comes before the first effect, in execute.
+  const tick = await read('scripts/lib/mailbox/tick.mjs')
+  assert.ok(tick.indexOf('const earlier = await landedCommit') < tick.indexOf("if (action === 'run') return executeRun"))
 })
 
 test('the pause switch and the rollback are in the guide, and the pause file is the one the code reads', async () => {

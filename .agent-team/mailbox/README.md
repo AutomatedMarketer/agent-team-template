@@ -214,10 +214,31 @@ launchctl bootout gui/$(id -u)/local.donna.cockpit-mailbox
 mv ~/Library/LaunchAgents/local.donna.cockpit-mailbox.plist ~/Desktop/
 ```
 
-If you ever restore or delete the runner's state folder (`~/.local/state/agent-mailbox`), keep the runner paused for an hour before you resume it.
-The folder holds the record of which orders were already done.
-Every order expires within an hour.
-So after an hour no live order can be done a second time.
+### If you restore or delete the state folder
+
+The state folder is `~/.local/state/agent-mailbox`. It holds the record of which orders the runner has seen.
+An order that already landed in your team repo is never done again, even if its record is lost. The runner looks for it in the repo first.
+An order that was refused or failed before the restore can be tried again. That can only happen while the order is alive.
+Every order expires within an hour. So keep the runner stopped for an hour.
+Do not use the pause file for this. It lives in the folder you are restoring.
+Stop the background job instead, and paste one block at a time.
+
+First, stop the background job. The plist stays where it is.
+
+```bash
+# on the Mac Mini - stop the background job before you touch the state folder
+launchctl bootout gui/$(id -u)/local.donna.cockpit-mailbox
+```
+
+Now restore or delete the folder. Then wait one hour.
+
+After the hour, start the background job again.
+
+```bash
+# on the Mac Mini - start the background job again, an hour after the restore
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.donna.cockpit-mailbox.plist
+launchctl kickstart gui/$(id -u)/local.donna.cockpit-mailbox
+```
 
 To send orders back to cloud routines, set `FIRE_MODE=cloud` in Vercel (or remove it) and redeploy. Orders still
 waiting expire by themselves.
