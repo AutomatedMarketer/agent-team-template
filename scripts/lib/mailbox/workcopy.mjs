@@ -166,7 +166,10 @@ export async function commitPaths({ git, work, emptyHooks, paths, maybe = [], me
 //   moved             the team repo's main is no longer `expected`, and `commit` is not in it: someone else pushed
 //   unreachable       the team repo could not be reached to say whether the push landed - the push may have, so the
 //                     caller must treat the outcome as unknown, never as "nothing was sent"
-//   refused           main is still `expected` and the push was refused anyway
+//   unsure            git reported a failure and main is still `expected` - but that does not say the push was refused: git may have been
+//                     killed (its 120 s limit) while the server was still applying it, and main moves a moment later. The caller must treat the
+//                     outcome as unknown, never as "nothing was sent". (A server that really refuses - branch protection, push protection - reads
+//                     the same: unknown now, and "not landed" when the next tick reads the team repo. That is true, and it is all that is known.)
 // { ok: true, landed: true } is a push that reported a failure (git's own 120 s limit, or a connection dropped after the
 // server had already moved main) and yet is on main: `commit` is the team repo's tip or an ancestor of it. It is a success,
 // because doing the work again would apply it twice.
@@ -199,7 +202,7 @@ export async function pushCommits({ git, work, emptyHooks, commit, expected, cou
     } catch {
       return { ok: false, why: 'unreachable' }
     }
-    if (tip === expected) return { ok: false, why: 'refused' }
+    if (tip === expected) return { ok: false, why: 'unsure' }
     try {
       await run(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', BRANCH], work)
     } catch {

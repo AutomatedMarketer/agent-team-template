@@ -501,7 +501,14 @@ async function publish(s, o) {
     // The team repo could not be asked whether the push landed after git said it failed. It may have: a dropped connection or
     // git's own time limit can come after the server moved main. Doing the order again could apply it twice, so it is neither
     // failed (which invites a resend) nor redone: it is left as outcome unknown, and a later tick settles it by reading.
-    if (pushed.why === 'unreachable') return settle(s, o.id, o.action, { state: 'unknown', startedAt: o.startedAt })
+    // Neither "the team repo cannot be asked" nor "main is still where it was" proves the push did not land: git may have been killed by its time
+    // limit while the server was still applying it. So both are outcome unknown (the claim says so durably first), and the clone is brought level
+    // before anything else is done in it.
+    if (pushed.why === 'unreachable' || pushed.why === 'unsure') {
+      await settle(s, o.id, o.action, { state: 'unknown', startedAt: o.startedAt })
+      await o.level()
+      return
+    }
     if (pushed.why !== 'moved') break
     // Before anything is done a second time, ask the team repo whether this very order is already on main.
     const there = await landedCommit({ git: ctx.git, work: workDir, emptyHooks: s.hooks, id: o.id })

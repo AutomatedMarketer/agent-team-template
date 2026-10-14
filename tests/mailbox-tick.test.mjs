@@ -1652,3 +1652,70 @@ test('Claude plants a hook and the run also failed: git still does not run in th
 }))
 
 const exists = (path) => access(path).then(() => true, () => false)
+
+/* ---------- a push that was killed while the server was still applying it ---------------------------------------------------- */
+
+test('a push that git gave up on (its time limit) and the server applied a moment after the runner looked: the order is outcome unknown, not failed, and the next tick records that it landed - Claude started once', () => withWorld(async (w) => {
+  w.claude.script = w.claude.good
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  let pending = null
+  const late = async (args, cwd) => {
+    if (args.includes('push') && pending === null && await isRunPush(args, cwd)) {
+      pending = { args, cwd, applied: false }
+      throw new Error('git was killed by its time limit')
+    }
+    const out = await git(args, cwd)
+    // The server finishes the push now: after the runner's look at main, before anything else.
+    if (args.includes('ls-remote') && pending && !pending.applied) {
+      pending.applied = true
+      await git(pending.args, pending.cwd)
+    }
+    return out
+  }
+  const first = await runTick(w.ctx({ git: late }))
+  assert.equal(first.orders.failed, 0)
+  const unchecked = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([unchecked.state, unchecked.landed, unchecked.why], ['unknown', null, null])
+  w.clock.advance(6 * MINUTE)
+  await runTick(w.ctx({ force: true }))
+  const settled = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([settled.state, settled.landed], ['unknown', true])
+  assert.match(settled.commit, /^[0-9a-f]{12}$/)
+  assert.equal(entryFor(await statusIn(w), sent.id).landed, true)
+  assert.equal(w.claude.calls.length, 1)
+  assert.equal((await commitsWithTrailer(w, sent.id)).length, 1)
+}))
+
+test('a push the server refuses for good (main stays where it was): the order is outcome unknown, nothing is redone, and the next tick records that it did not land', () => withWorld(async (w) => {
+  const sent = w.send({ action: 'task', title: 'Chase the invoice' })
+  let refusals = 0
+  const refusing = async (args, cwd) => {
+    if (args.includes('push') && (await git(['log', '-1', '--format=%s', args.at(-1).split(':')[0]], cwd)).stdout.startsWith('Mailbox order')) {
+      refusals += 1
+      throw new Error('remote: protected branch hook declined')
+    }
+    return git(args, cwd)
+  }
+  const first = await runTick(w.ctx({ git: refusing }))
+  assert.equal(first.orders.failed, 0)
+  assert.equal(refusals, 1, 'tried once, not three times')
+  const unchecked = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([unchecked.state, unchecked.landed], ['unknown', null])
+  w.clock.advance(6 * MINUTE)
+  await runTick(w.ctx({ git: refusing, force: true }))
+  const settled = await w.claimFile(sent.id, 'final.json')
+  assert.deepEqual([settled.state, settled.landed, settled.commit], ['unknown', false, null])
+  assert.equal(await w.inOrigin.file('tasks/2026-10-12-chase-the-invoice.md'), null)
+  assert.equal(refusals, 1, 'never pushed again')
+}))
+
+test('the clone is brought level on the way out of an unsure push: nothing of the order is left in the work copy', () => withWorld(async (w) => {
+  w.send({ action: 'task', title: 'Chase the invoice' })
+  const refusing = async (args, cwd) => {
+    if (args.includes('push') && (await git(['log', '-1', '--format=%s', args.at(-1).split(':')[0]], cwd)).stdout.startsWith('Mailbox order')) throw new Error('declined')
+    return git(args, cwd)
+  }
+  await runTick(w.ctx({ git: refusing }))
+  assert.equal((await git(['status', '--porcelain'], w.places.workDir)).stdout.trim(), '')
+  assert.equal((await git(['rev-parse', 'HEAD'], w.places.workDir)).stdout.trim(), await w.inOrigin.head().then(async (head) => head), 'level with the team repo')
+}))

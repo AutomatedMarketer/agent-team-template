@@ -563,7 +563,7 @@ test('a tag on the commit is not pushed with it, whatever the clone\'s settings 
   }
 })
 
-test('a team repo that cannot be asked why the push was refused is "unreachable", not "refused"', async () => {
+test('a team repo that cannot be asked why the push failed is "unreachable", not "unsure"', async () => {
   const w = await world()
   try {
     const expected = (await reset(w)).head
@@ -635,7 +635,7 @@ test('a push that lands but whose git reports a failure is "landed", even with a
   }
 })
 
-test('a push that failed after main moved to something without our commit is "moved", and a push that failed with main untouched is "refused"', async () => {
+test('a push that failed after main moved to something without our commit is "moved", and a push that failed with main untouched is "unsure"', async () => {
   const w = await world()
   try {
     const expected = (await reset(w)).head
@@ -645,7 +645,7 @@ test('a push that failed after main moved to something without our commit is "mo
       if (args.includes('push')) throw new Error('refused')
       return git(args, cwd)
     }
-    assert.deepEqual(await pushCommits({ git: refusing, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'refused' })
+    assert.deepEqual(await pushCommits({ git: refusing, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'unsure' })
     await w.push('theirs.md')
     assert.deepEqual(await pushCommits({ git: refusing, work: w.work, emptyHooks: w.empty, commit, expected, count: 1 }), { ok: false, why: 'moved' })
   } finally {
