@@ -567,6 +567,8 @@ test('step 1 checks the places the runner will really use for Claude Code, in th
   const block = blocks(step).find((one) => one.language === 'bash').body
   assert.ok(!/^\s*claude\s/m.test(block), 'a bare claude command looks at the PATH')
   assert.ok(/--version/.test(block) && /auth status/.test(block))
+  // What the runner accepts is a file that can be run (findProgram: a file, executable), not a folder named claude.
+  assert.ok(block.includes('if [ -f "$place" ] && [ -x "$place" ]; then'), 'a folder named claude must not count')
   assert.match(flat(step), /It never looks at your \`PATH\`/)
   assert.match(flat(step), /A Claude Code from \`nvm\`, or an old \`~\/.claude\/local\` install, is not on that list/)
   assert.ok(step.includes('https://code.claude.com/docs/en/setup'))

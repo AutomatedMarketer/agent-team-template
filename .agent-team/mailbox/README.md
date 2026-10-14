@@ -59,7 +59,7 @@ Nothing here changes anything, and nothing here prints a secret.
 # on the Mac Mini
 use=""
 for place in "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
-  if [ -x "$place" ]; then echo "found: $place ($("$place" --version))"; [ -z "$use" ] && use="$place"; fi
+  if [ -f "$place" ] && [ -x "$place" ]; then echo "found: $place ($("$place" --version))"; [ -z "$use" ] && use="$place"; fi
 done
 [ -z "$use" ] && echo "NO Claude Code in the three places the runner looks: install it"
 node --version; git --version

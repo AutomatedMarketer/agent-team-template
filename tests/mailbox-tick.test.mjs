@@ -1710,7 +1710,7 @@ test('a push the server refuses for good (main stays where it was): the order is
   assert.equal(refusals, 1, 'never pushed again')
 }))
 
-test('the clone is brought level on the way out of an unsure push: nothing of the order is left in the work copy', () => withWorld(async (w) => {
+test('after an unsure push the work copy ends the tick level with the team repo and clean (the status sync at the end of the tick resets it; the reset in publish is redundant by design)', () => withWorld(async (w) => {
   w.send({ action: 'task', title: 'Chase the invoice' })
   const refusing = async (args, cwd) => {
     if (args.includes('push') && (await git(['log', '-1', '--format=%s', args.at(-1).split(':')[0]], cwd)).stdout.startsWith('Mailbox order')) throw new Error('declined')

@@ -36,6 +36,8 @@ import { gaveBack, outcome, readEvidence } from './evidence.mjs'
 import { dropProof, keepProof } from './proof.mjs'
 import { readOrigin } from './workcopy.mjs'
 
+const WAIT_FOR_RUN_MS = 10_000
+
 // The two kinds of run a job can be, as jobs.mjs defines them.
 const CONFIGURATIONS = [
   { label: 'the task sweep', web: false },
@@ -106,6 +108,9 @@ const exists = async (path) => {
 // One run in the configuration of one kind of job. Returns the problems it found, as plain sentences. Every file it plants is
 // listed in `planted` so the caller can remove it whatever happens.
 async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }) {
+  // Stopped by a signal: nothing more is planted, not even the first thing. (The signal's cleanup waits for this function to end before it removes
+  // what has been planted, so nothing can be made after it has looked.)
+  if (ctx.live?.stopping) return []
   const { places } = ctx
   const { label, web } = configuration
   const id = randomBytes(6).toString('hex')
@@ -217,7 +222,16 @@ export async function selftest(ctx) {
   await writeFile(join(folder, SELFTEST_MARKER), 'made by --selftest; safe to remove\n')
 
   // A signal ends the process from its handler, so the `finally` below would never run: the same cleanup is registered with it (signals.mjs).
-  const cleanup = async () => {
+  // When it comes from the handler, the configuration under way is still finishing (the killed Claude ends, and proveOne plants nothing more once
+  // the runner is stopping), so the cleanup first waits for it, a few seconds at most, and only then removes everything planted so far. Without the
+  // wait the handler would exit while a configuration was still planting, and its trapped repo would stay behind with no marker.
+  let running = Promise.resolve()
+  // It is run once however many times it is asked for (the handler and the `finally` can both ask, at the same moment): two removals of the
+  // same folder at once can fail on some systems.
+  let cleaning = null
+  const cleanup = () => (cleaning ??= removeEverything())
+  const removeEverything = async () => {
+    await Promise.race([running.catch(() => {}), new Promise((resolve) => setTimeout(resolve, WAIT_FOR_RUN_MS).unref())])
     for (const path of planted) await rm(path, { force: true }).catch(() => {})
     await rm(folder, { recursive: true, force: true })
   }
@@ -225,9 +239,15 @@ export async function selftest(ctx) {
   try {
     await mkdir(tmp, { recursive: true })
     const problems = []
-    for (const [index, configuration] of CONFIGURATIONS.entries()) {
-      problems.push(...await proveOne({ ctx, file, folder: join(folder, String(index + 1)), home, tmp, configuration, planted }))
-    }
+    running = (async () => {
+      for (const [index, configuration] of CONFIGURATIONS.entries()) {
+        if (ctx.live?.stopping) break
+        problems.push(...await proveOne({ ctx, file, folder: join(folder, String(index + 1)), home, tmp, configuration, planted }))
+      }
+    })()
+    await running
+    // A self-test that was stopped proves nothing and keeps nothing.
+    if (ctx.live?.stopping) return { ok: false, problems: ['the self-test was stopped before it finished, so nothing was proven.'] }
     if (problems.length === 0) {
       const kept = await keepProof({ stateDir: places.stateDir, codeDir: places.codeDir, version, file, now: ctx.now ?? Date.now })
       if (!kept) problems.push('the proof could not be kept (the settings could not be read, or the folder could not be written).')

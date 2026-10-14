@@ -514,6 +514,9 @@ async function publish(s, o) {
     // before anything else is done in it.
     if (pushed.why === 'unreachable' || pushed.why === 'unsure') {
       await settle(s, o.id, o.action, { state: 'unknown', startedAt: o.startedAt })
+      // Redundant by design, and kept on purpose: every later use of the clone starts with its own reset (the next order's execute, and the status
+      // sync that ends every tick), so nothing depends on this call. It only means the clone is not left on the order's unpushed commit between
+      // here and there. No test can tell it is missing, and none claims to.
       await o.level()
       return
     }

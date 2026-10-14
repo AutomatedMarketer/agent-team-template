@@ -11,6 +11,7 @@ import { runTick } from '../scripts/lib/mailbox/tick.mjs'
 import { createLive, listenForSignals, signalHandler } from '../scripts/lib/mailbox/signals.mjs'
 import { releaseLock } from '../scripts/lib/status/commit.mjs'
 import { read } from './helpers/repo.mjs'
+import { confinedClaude } from './helpers/mailbox-selftest-claude.mjs'
 
 /* launchctl bootout, a logout or Ctrl-C ends the runner with a signal. Claude is in its own process group, so it would run on with no time
    limit, and the lock would stay for an hour. On a signal the runner kills Claude's group, releases the lock, leaves the order as it is for the
@@ -213,33 +214,38 @@ test('closing the Terminal (SIGHUP) is handled like SIGTERM, exit 129, and the c
   }
 })
 
-test('a --selftest stopped by Ctrl-C removes the made-up secret files in the home and temp folders and the throwaway folder, as it does when it ends', async () => {
+test('what is on disk at the moment a --selftest stopped by Ctrl-C exits: no further configuration is started, nothing is left in the home, temp or throwaway folders, and the next --selftest is not refused', async () => {
   const w = await mailboxWorld({ proof: false })
   try {
-    const places = defaultPlaces(w.root)
+    const places = { ...defaultPlaces(w.root), codeDir: w.places.codeDir }
     const tmp = join(w.root, 'tmp')
-    const proc = Object.assign(new EventEmitter(), { exit: (code) => { proc.exited = code } })
+    const selfFolder = join(dirname(places.workDir), 'selftest')
     const leftovers = async () => ({
       home: (await readdir(w.root)).filter((name) => name.startsWith('.mailbox-selftest-')),
       tmp: (await readdir(tmp).catch(() => [])).filter((name) => name.startsWith('mailbox-selftest-')),
-      folder: await exists(join(dirname(places.workDir), 'selftest'))
+      folder: await exists(selfFolder),
+      inside: await readdir(selfFolder, { recursive: true }).catch(() => null)
     })
-    let during = null
-    let after = null
+    // The real process ends AT exit(): what is on disk then is what stays behind. So the disk is read there, not while the first Claude still runs.
+    let atExit = null
+    const proc = Object.assign(new EventEmitter(), { exit: async (code) => { proc.exited = code; atExit = await leftovers() } })
     w.claude.script = async () => {
-      during = await leftovers()
+      // The signal arrives while the first Claude runs; the killed Claude ends at once and the first run finishes.
       proc.emit('SIGINT')
-      // The handler is asynchronous: give it the moment it needs.
-      await new Promise((resolve) => setTimeout(resolve, 200))
-      after = await leftovers()
       return []
     }
     const lines = []
     await main({ argv: ['--selftest'], ...w.ctx({ log: (text) => lines.push(text) }), places, codeDir: w.places.codeDir, tmpDir: tmp, out: (text) => lines.push(text), err: (text) => lines.push(text), proc })
-    assert.equal(during.home.length, 1, 'the planted files were there')
-    assert.equal(during.tmp.length >= 1 && during.folder, true)
-    assert.deepEqual(after, { home: [], tmp: [], folder: false }, 'gone when the signal had been handled')
+    await new Promise((resolve) => setTimeout(resolve, 300))
     assert.equal(proc.exited, 130)
+    assert.deepEqual(atExit, { home: [], tmp: [], folder: false, inside: null }, 'nothing left at the moment the process ends')
+    assert.equal(w.claude.calls.length, 1, 'the second configuration was never started')
+    assert.deepEqual(await leftovers(), { home: [], tmp: [], folder: false, inside: null }, 'and nothing was planted after it either')
+
+    // Nothing is left to refuse the next self-test as a folder that is not its own.
+    w.claude.script = confinedClaude(w)
+    const again = await main({ argv: ['--selftest'], ...w.ctx(), places, codeDir: w.places.codeDir, tmpDir: tmp, out: (text) => lines.push(text), err: (text) => lines.push(text) })
+    assert.equal(again, 0, lines.join(' | '))
   } finally {
     await w.cleanup()
   }
