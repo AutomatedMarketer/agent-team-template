@@ -259,11 +259,12 @@ test('the guide says the runner guards .git itself, and the code has both halves
 
 test('the guide says what a stop by launchctl bootout does, and the entry file really listens for the signals', async () => {
   const doc = flat(await guide())
-  assert.match(doc, /Stopping the runner with `launchctl bootout`, a logout or Ctrl-C is treated the same way/)
+  assert.match(doc, /Stopping the runner with `launchctl bootout`, a logout, closing the Terminal window or Ctrl-C is treated the same way/)
   assert.match(doc, /The runner ends Claude and everything Claude started, and it releases its lock/)
   assert.match(doc, /left as outcome unknown/)
   const { SIGNALS } = await import('../scripts/lib/mailbox/signals.mjs')
-  assert.deepEqual(Object.keys(SIGNALS).sort(), ['SIGINT', 'SIGTERM'])
+  assert.deepEqual(Object.keys(SIGNALS).sort(), ['SIGHUP', 'SIGINT', 'SIGTERM'])
+  assert.match(doc, /removes it when it ends, or when you stop it with Ctrl-C or close the Terminal/)
   assert.ok((await read('scripts/mailbox-runner.mjs')).includes('proc: process'))
 })
 

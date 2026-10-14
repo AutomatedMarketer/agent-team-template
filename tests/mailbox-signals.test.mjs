@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { access, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
 import { mailboxWorld } from './helpers/mailbox-world.mjs'
 import { git } from './helpers/git.mjs'
 import { main } from '../scripts/lib/mailbox/command.mjs'
@@ -143,4 +144,103 @@ test('the entry file hands the real process to the command, so a real signal is 
   const listener = new EventEmitter()
   listenForSignals(listener, () => {})
   assert.deepEqual([listener.listenerCount('SIGTERM'), listener.listenerCount('SIGINT')], [1, 1])
+})
+
+/* ---------- the gaps the first handler left ------------------------------------------------------------------------------------ */
+
+test('a signal that arrives during the version check right before a run: Claude is not started at all', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    w.send({ action: 'run', workflow: 'morning-intel' })
+    const live = createLive()
+    const killed = []
+    const exited = []
+    // Releasing the lock takes a moment on a real disk, as here.
+    const handle = signalHandler(live, { kill: (pid, signal) => killed.push([pid, signal]), release: async (lock) => { await new Promise((resolve) => setTimeout(resolve, 25)); await releaseLock(lock) }, exit: (code) => exited.push(code) })
+    let versions = 0
+    const exec = async (file, args) => {
+      if (args[0] === '--version') {
+        versions += 1
+        if (versions === 2) handle('SIGTERM')
+        return { stdout: '2.1.290 (Claude Code)\n', code: 0 }
+      }
+      if (args[0] === 'auth') return { stdout: JSON.stringify({ authMethod: 'claude.ai', loggedIn: true }), code: 0 }
+      throw new Error('an unexpected program')
+    }
+    await assert.rejects(runTick(w.ctx({ live, exec })), /stopped by a signal/)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(w.claude.calls.length, 0, 'Claude was never started')
+    assert.deepEqual(exited, [143])
+    assert.equal(await exists(join(w.places.stateDir, 'lock')), false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a signal that arrives while Claude is being started: the process that was started is killed at once, never left running', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    w.send({ action: 'run', workflow: 'morning-intel' })
+    const live = createLive()
+    const killed = []
+    const starting = (...args) => {
+      live.stopping = true
+      return w.claudeSpawn(...args)
+    }
+    await assert.rejects(runTick(w.ctx({ live, spawn: starting, kill: (pid, signal) => killed.push([pid, signal]) })), /stopped by a signal/)
+    assert.deepEqual(killed, [[4242, 'SIGKILL']])
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('closing the Terminal (SIGHUP) is handled like SIGTERM, exit 129, and the command listens for it', async () => {
+  const live = createLive()
+  live.children.add(9)
+  const exited = []
+  const killed = []
+  await signalHandler(live, { kill: (pid) => killed.push(pid), release: async () => {}, exit: (code) => exited.push(code) })('SIGHUP')
+  assert.deepEqual([killed, exited], [[9], [129]])
+  const w = await mailboxWorld()
+  try {
+    const proc = Object.assign(new EventEmitter(), { exit: () => {} })
+    await main({ argv: ['--preflight'], ...w.ctx(), codeDir: w.places.codeDir, out: () => {}, err: () => {}, proc })
+    assert.deepEqual(['SIGHUP', 'SIGINT', 'SIGTERM'].map((name) => proc.listenerCount(name)), [1, 1, 1])
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a --selftest stopped by Ctrl-C removes the made-up secret files in the home and temp folders and the throwaway folder, as it does when it ends', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const places = defaultPlaces(w.root)
+    const tmp = join(w.root, 'tmp')
+    const proc = Object.assign(new EventEmitter(), { exit: (code) => { proc.exited = code } })
+    const leftovers = async () => ({
+      home: (await readdir(w.root)).filter((name) => name.startsWith('.mailbox-selftest-')),
+      tmp: (await readdir(tmp).catch(() => [])).filter((name) => name.startsWith('mailbox-selftest-')),
+      folder: await exists(join(dirname(places.workDir), 'selftest'))
+    })
+    let during = null
+    let after = null
+    w.claude.script = async () => {
+      during = await leftovers()
+      proc.emit('SIGINT')
+      // The handler is asynchronous: give it the moment it needs.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      after = await leftovers()
+      return []
+    }
+    const lines = []
+    await main({ argv: ['--selftest'], ...w.ctx({ log: (text) => lines.push(text) }), places, codeDir: w.places.codeDir, tmpDir: tmp, out: (text) => lines.push(text), err: (text) => lines.push(text), proc })
+    assert.equal(during.home.length, 1, 'the planted files were there')
+    assert.equal(during.tmp.length >= 1 && during.folder, true)
+    assert.deepEqual(after, { home: [], tmp: [], folder: false }, 'gone when the signal had been handled')
+    assert.equal(proc.exited, 130)
+  } finally {
+    await w.cleanup()
+  }
 })

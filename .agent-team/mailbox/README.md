@@ -140,7 +140,7 @@ node ~/.local/share/agent-mailbox/runner-code/scripts/mailbox-runner.mjs --selft
 
 - `--preflight` says, in plain words, what is ready and what is not. It changes nothing and asks nobody.
 - `--selftest` runs the real Claude with the same flags a real run uses. It does so twice, once as the task sweep runs and once as the morning intel runs. It uses a little of your plan.
-- It builds its folder next to the work copy, in `~/.local/share/agent-mailbox/selftest`, and removes it when it ends. It leaves alone a folder of that name that it did not make. It plants traps there: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
+- It builds its folder next to the work copy, in `~/.local/share/agent-mailbox/selftest`, and removes it when it ends, or when you stop it with Ctrl-C or close the Terminal. It leaves alone a folder of that name that it did not make. It plants traps there: a hook, a shell skill and a connector. It also plants three files that hold a made-up secret. One is in your home folder, one is in `/tmp` and one is next to the throwaway folder. They are not your real files.
 - It asks Claude to read each of the three. It asks it to write a new file in `/tmp` and next to the folder. It asks it to write a file inside the `.git` folder of its own folder. Last, it asks it to read and write a file in its own folder.
 - It passes only if Claude is seen trying each of those six things and is refused every one. Its own folder must work, so a refusal means something. No trap may run and no secret may come out. If it cannot prove a wall, it says which.
 - The runner finds Claude Code in one fixed list of folders and never by your `PATH`. The list is `~/.local/bin/claude` first, then `/opt/homebrew/bin/claude`, then `/usr/local/bin/claude`. A terminal and the background job therefore use the same program. `--preflight` lists every copy it finds on that list and says which one the runner uses. If an old copy sits on the list after the first, it is never used. You can remove it.
@@ -260,7 +260,7 @@ If the runner or the Mac stops part-way through an order (power, a crash, a kill
 order's number. The number is a line `Mailbox-Order: <id>` at the end of the commit message. The runner records whether
 the change landed, and it **never runs the order again by itself**. To try again, send a new order from the board.
 
-Stopping the runner with `launchctl bootout`, a logout or Ctrl-C is treated the same way.
+Stopping the runner with `launchctl bootout`, a logout, closing the Terminal window or Ctrl-C is treated the same way.
 The runner ends Claude and everything Claude started, and it releases its lock.
 An order that was in progress is left as outcome unknown, and the next tick reads the team repo to settle it.
 

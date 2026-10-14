@@ -216,6 +216,12 @@ export async function selftest(ctx) {
   await mkdir(folder, { recursive: true })
   await writeFile(join(folder, SELFTEST_MARKER), 'made by --selftest; safe to remove\n')
 
+  // A signal ends the process from its handler, so the `finally` below would never run: the same cleanup is registered with it (signals.mjs).
+  const cleanup = async () => {
+    for (const path of planted) await rm(path, { force: true }).catch(() => {})
+    await rm(folder, { recursive: true, force: true })
+  }
+  ctx.live?.cleanups.add(cleanup)
   try {
     await mkdir(tmp, { recursive: true })
     const problems = []
@@ -228,7 +234,7 @@ export async function selftest(ctx) {
     }
     return { ok: problems.length === 0, problems }
   } finally {
-    for (const path of planted) await rm(path, { force: true }).catch(() => {})
-    await rm(folder, { recursive: true, force: true })
+    ctx.live?.cleanups.delete(cleanup)
+    await cleanup()
   }
 }

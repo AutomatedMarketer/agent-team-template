@@ -219,6 +219,12 @@ export function runClaude({
   const allowedNames = new Set([...tools, ...TOLERATED])
   const stop = kill ?? ((pid, signal) => killTree(pid, signal, { platform, spawn }))
   return new Promise((resolve) => {
+    // The runner was told to stop (a signal) between its last look and here: Claude is not started at all. Anything started in that gap would be
+    // missed by the handler's kill loop and run on with no time limit (signals.mjs).
+    if (live?.stopping) {
+      resolve({ ok: false, why: 'claude-failed', calls: {}, denials: 0, exitCode: null, transcriptBytes: 0 })
+      return
+    }
     const calls = new Map()
     let transcriptBytes = 0
     let reason = null
@@ -305,6 +311,8 @@ export function runClaude({
       return
     }
     if (child.pid) live?.children.add(child.pid)
+    // A signal that came while it was being started: the kill loop has already run, so this one is killed here and now.
+    if (live?.stopping) hardStop('claude-failed')
     timer = setTimeout(() => {
       reason ??= 'timed-out'
       if (child.pid) stop(child.pid, 'SIGTERM')

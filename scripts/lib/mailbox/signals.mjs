@@ -4,16 +4,19 @@
 // limit is kept by the runner, and the runner is gone), and the lock would stay for an hour (takeLock treats only an older one as stale).
 // So the runner keeps a small record of what is alive (`live`: the Claude processes it started, and the lock it holds), and on SIGTERM or SIGINT:
 //   1. every live Claude is killed, the whole group, with the same kill the time limit uses;
-//   2. the lock is released;
+//   2. the cleanups of anything long (the self-test's made-up secret files and throwaway folder) run, then the lock is released;
 //   3. whatever order was in progress is left exactly as it is: its claim has a receipt and no final word, which the next tick reads as
 //      "outcome unknown" and settles by READING the team repo (ledger.mjs, reconcile). It is never run again, and never written down as
 //      failed or ok here, because nobody knows;
 //   4. the process exits with a code that is not 0 (128 plus the signal's number, the shell's own way of saying "killed by a signal").
 // `stopping` tells the rest of the code a signal came: nothing more is written as an order's final word after that (tick.mjs, settle).
 
-export const SIGNALS = Object.freeze({ SIGINT: 2, SIGTERM: 15 })
+// SIGHUP is what closing the Terminal window sends to a runner started by hand (--once, --selftest).
+export const SIGNALS = Object.freeze({ SIGHUP: 1, SIGINT: 2, SIGTERM: 15 })
 
-export const createLive = () => ({ children: new Set(), lock: null, stopping: false })
+// `cleanups` are functions that put right what a long job made (the self-test's planted files and throwaway folder): a signal ends the process from
+// the handler, so a `finally` block never gets to run them.
+export const createLive = () => ({ children: new Set(), cleanups: new Set(), lock: null, stopping: false })
 
 // -> an async function (signal) -> void. `kill(pid, signal)` and `release(lock)` are the real ones in the runner and fakes in the tests;
 // `exit(code)` ends the process. It acts once: a second signal while it is working changes nothing.
@@ -31,6 +34,13 @@ export function signalHandler(live, { kill, release, exit, log = () => {} }) {
       }
     }
     live.children.clear()
+    for (const cleanup of [...live.cleanups]) {
+      try {
+        await cleanup()
+      } catch {
+        // Best effort: the rest still has to happen.
+      }
+    }
     const lock = live.lock
     live.lock = null
     try {
