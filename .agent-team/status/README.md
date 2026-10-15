@@ -427,7 +427,8 @@ back in step.
 What the Readiness wall shows: every scheduled job on this computer - the Mac's LaunchAgents and
 Hermes's cron jobs - one row each, with how it is scheduled, how its last run went, and when it
 should have last run. **Names, schedules, times and states only.** On a Mac the collector runs two
-short programs for this, `/usr/bin/plutil` and `/bin/launchctl list`. It **never runs `hermes`**,
+short programs for this, `/usr/bin/plutil` and `/bin/launchctl list`, and a third, `/usr/sbin/sysctl -n kern.boottime`,
+to say when the Mac last started. It **never runs `hermes`**,
 and it starts no program for Hermes at all: everything comes from Hermes's own files.
 
 ```json
@@ -436,6 +437,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
   "takenAt": "2026-10-09T15:00:00Z",
   "computer": "Mac Mini",
   "timezone": "America/New_York",
+  "bootedAt": "2026-10-05T11:42:00Z",
   "launchd": {
     "status": "found",
     "items": [
@@ -469,6 +471,7 @@ and it starts no program for Hermes at all: everything comes from Hermes's own f
 | LaunchAgents | the plists in `~/Library/LaunchAgents` - the user's own folder, **never `/Library`** - turned into JSON by `/usr/bin/plutil`, in memory, from the empty folder | `Label`, `StartCalendarInterval`, `StartInterval`, `KeepAlive`, `RunAtLoad`, `Disabled`. The rest of the plist is dropped the moment these are taken |
 | Loaded or not | `/bin/launchctl list` | `running` (it has a process), `loaded` (listed, no process), `not loaded` (not listed); and the last exit status (-255 to 255) of a job it lists |
 | When it last reported | the two log files the plist names (`StandardOutPath`, `StandardErrorPath`) | their newest **modified time**. The files are never opened, so what a job printed cannot be read, and their paths are not kept |
+| When the Mac last started | `/usr/sbin/sysctl -n kern.boottime`, from the empty folder | one time, **rounded down to the minute**, as `bootedAt` at the top of the file. The board shows "Mac restarted at ..." from it and words a job that failed just after it differently. It is left out (no key, never a null) off a Mac, when sysctl does not answer, and when the answer is a time nobody could believe (before 2000, or later than the check). Nothing else sysctl prints is kept |
 | The collector's own row | `XPC_SERVICE_NAME`, which launchd sets to the label of the job it runs | `self: true` on that row |
 | Hermes jobs | `cron/jobs.json` in the Hermes home and in each profile - up to 1 MB each. It is one JSON file, so it is parsed whole in memory; only the keys named here are then used | the job's `id` (it is published as `Hermes job a1b2c3d4e5f6`, never under the name the file gives it), whether it is on (`enabled`, and whether `state` or `paused_at` marks it paused), its `schedule` (`kind`, `expr`, `minutes`, `timezone`: a cron expression, or an interval in minutes), when it last ran (`last_run_at`) and how it ended (`last_status`) |
 | Hermes's timezone | each profile's `config.yaml`: the top-level `timezone:` line, and no other line | nothing is written: the zone is only compared with the computer's, to decide whether a cron time can be judged |
@@ -972,7 +975,7 @@ parts to every scheduled run, with nothing changed in the plist:
 |---|---|
 | **connections** | It reads Claude Code's and Codex's settings files for names, and **runs `claude mcp list`** from the empty folder, which **starts every local server** on that list and asks every web server to connect - up to 2 minutes. It also runs `--version` for Claude Code, Codex, Git, GitHub CLI and Tailscale, and reads the apps' `Info.plist`. |
 | **hermes** | It reads Hermes's files under `~/.hermes` (version, gateway and scheduler times, each profile's model lines and skill count) and copies each profile's `state.db` into `<state-dir>/hermes-db-...` to count sessions, then deletes the copy. It runs nothing. When Hermes is alive it also commits `runs/heartbeat/hermes.json`. |
-| **jobs** | It reads the plists in `~/Library/LaunchAgents` through `/usr/bin/plutil` and asks `/bin/launchctl list` which are loaded - two short programs, from the empty folder - and looks at the modified time of each job's log files. It reads Hermes's `cron/jobs.json` files and starts nothing for Hermes. |
+| **jobs** | It reads the plists in `~/Library/LaunchAgents` through `/usr/bin/plutil` and asks `/bin/launchctl list` which are loaded, and asks `/usr/sbin/sysctl -n kern.boottime` when the Mac last started - three short programs, from the empty folder - and looks at the modified time of each job's log files. It reads Hermes's `cron/jobs.json` files and starts nothing for Hermes. |
 
 Nuno approved the live check every 3 hours (decision D1). Whether `claude mcp list`, run from the
 empty folder, records that folder as a project in `~/.claude.json` is **not verified yet** (below).

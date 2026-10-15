@@ -11,6 +11,9 @@
 // Every Hermes job is published as "Hermes job <id>" (hermesJobName), and the gate refuses any other
 // name. The board shows the owner's own name for it, from jobs.yml, when there is one.
 //
+// One more key, optional: bootedAt, when the computer last started, to the minute (see BOOT below). It lets
+// the board say the Mac restarted and word a job that failed just after it. A file without it is complete.
+//
 // The file never says whether a job is on time. It carries when each job should have run
 // (dueAt, dueBeforeAt - worked out on the Mac in the job's own timezone, where the schedule is
 // known) and when it last reported; the board compares the two. A schedule the Mac cannot read is
@@ -24,6 +27,11 @@ export const JOBS_FOLDER = '.agent-team/status/jobs'
 export const JOBS_STALE_AFTER_HOURS = 8
 export const JOBS_MAX_FILES_READ = 5
 export const JOBS_MAX_FILE_BYTES = 65536
+
+// When the computer last started: an ISO time in UTC to the whole minute (seconds are :00), not before
+// 2000 and not after the check. Written only when the computer can say; otherwise the key is absent.
+export const BOOT = { key: 'bootedAt', roundedToSeconds: 60, earliest: '2000-01-01T00:00:00Z' }
+const WHOLE_MINUTE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/
 
 export const JOBS_CAPS = { launchd: 60, hermes: 40, slots: 48 }
 
@@ -186,6 +194,20 @@ function dueAfterGrace(doc) {
   return problems
 }
 
+// bootedAt is judged only once it reads as a time (the shape reports one that does not): a whole minute,
+// after the earliest believable time, and not after the check.
+function bootProblems(doc) {
+  const value = doc?.[BOOT.key]
+  const ms = typeof value === 'string' ? Date.parse(value) : NaN
+  if (!Number.isFinite(ms)) return []
+  const problems = []
+  if (!WHOLE_MINUTE.test(value)) problems.push([BOOT.key, 'is not a whole minute'])
+  if (ms < Date.parse(BOOT.earliest)) problems.push([BOOT.key, 'is before the year 2000'])
+  const taken = Date.parse(doc.takenAt)
+  if (Number.isFinite(taken) && ms > taken) problems.push([BOOT.key, 'is after the time the file was taken'])
+  return problems
+}
+
 export const JOBS_SHAPE = {
   type: 'object',
   keys: {
@@ -193,6 +215,7 @@ export const JOBS_SHAPE = {
     takenAt: iso,
     computer: { type: 'text' },
     timezone: { type: 'timezone' },
+    bootedAt: iso,
     launchd: {
       type: 'block',
       found: { items: itemsOf(launchdItemShape, JOBS_CAPS.launchd, ['label']), hidden: count, more: count },
@@ -205,5 +228,5 @@ export const JOBS_SHAPE = {
     }
   },
   required: ['schema', 'takenAt', 'computer', 'timezone', 'launchd', 'hermes'],
-  rule: dueAfterGrace
+  rule: (doc) => [...dueAfterGrace(doc), ...bootProblems(doc)]
 }

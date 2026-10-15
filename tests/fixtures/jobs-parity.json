@@ -55,7 +55,7 @@
     "slotRule": "A slot is one minute of the hour. With an hour it is one time of day; without, it is every hour. With a weekday (0 is Sunday) it is that day of the week; with a day (1 to 31) that day of the month; with neither, every day. A slot never has both a weekday and a day. Slots are written in order of day, weekday, hour, then minute, a missing value first."
   },
   "allowedKeys": {
-    "file": ["schema", "takenAt", "computer", "timezone", "launchd", "hermes"],
+    "file": ["schema", "takenAt", "computer", "timezone", "bootedAt", "launchd", "hermes"],
     "blockFound": ["status", "items", "hidden", "more"],
     "blockNotFound": ["status", "why"],
     "launchdItem": ["label", "cadence", "state", "lastExit", "lastReportAt", "dueAt", "dueBeforeAt", "self", "disabled"],
@@ -72,6 +72,12 @@
     "file": ["schema", "takenAt", "computer", "timezone", "launchd", "hermes"],
     "launchdItem": ["label", "cadence", "state"],
     "hermesItem": ["profile", "id", "name", "enabled", "cadence", "lastResult"]
+  },
+  "boot": {
+    "key": "bootedAt",
+    "roundedToSeconds": 60,
+    "earliest": "2000-01-01T00:00:00Z",
+    "rule": "When the computer last started: an ISO time in UTC to the whole minute (seconds are :00), after 2000 and not after takenAt. Optional: the Mac writes it only when it can say, and a file without it is complete. The collector reads it with /usr/sbin/sysctl -n kern.boottime on a Mac and nowhere else. The board shows it, and words a job that failed just after it differently; it never turns a missing time into a guess."
   },
   "keysRead": {
     "plist": ["Label", "StartCalendarInterval", "StartInterval", "KeepAlive", "RunAtLoad", "Disabled", "StandardOutPath", "StandardErrorPath"],
@@ -279,6 +285,7 @@
     "takenAt": "2026-10-09T15:00:00Z",
     "computer": "Mac Mini",
     "timezone": "America/New_York",
+    "bootedAt": "2026-10-05T11:42:00Z",
     "launchd": {
       "status": "found",
       "items": [

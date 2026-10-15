@@ -125,7 +125,7 @@ test('--only jobs on a Mac writes the jobs file and nothing else, and says count
     assert.match(result.stdout, /^Jobs:$/m)
     assert.match(result.stdout, /- launchd found: 3 listed \(1 running, 2 loaded, 0 not loaded\), 0 hidden, 0 more/)
     for (const label of Object.values(PLISTS).map((plist) => plist.Label)) assert.ok(!result.stdout.includes(label), `the log named ${label}`)
-    assert.deepEqual([...new Set(exec.calls.map((call) => call.file))].sort(), ['/bin/launchctl', '/usr/bin/plutil'])
+    assert.deepEqual([...new Set(exec.calls.map((call) => call.file))].sort(), ['/bin/launchctl', '/usr/bin/plutil', '/usr/sbin/sysctl'])
     await rm(result.target, { recursive: true, force: true })
   } finally {
     await fake.cleanup()

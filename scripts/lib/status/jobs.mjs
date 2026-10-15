@@ -14,11 +14,15 @@
 //                                     a job printed cannot be read, and their paths are not kept.
 //   XPC_SERVICE_NAME                  the label launchd gave this collector's own job, to mark
 //                                     that row `self`.
+//   /usr/sbin/sysctl -n kern.boottime when the computer last started: one time, rounded down to the
+//                                     minute, written as `bootedAt`. The board uses it to say the Mac
+//                                     restarted, and to word a job that failed just after. Nothing else
+//                                     the program prints is kept. Left out when it cannot be read.
 // Never read and never kept: the program and its arguments (ProgramArguments, Program), the
 // environment (EnvironmentVariables), every folder (WorkingDirectory and the rest), and every other
 // key a plist can have. The plist is dropped as soon as those few values are taken from it.
 //
-// Both programs run through deps.exec: absolute path, from the empty folder the collector owns, with
+// All three programs run through deps.exec: absolute path, from the empty folder the collector owns, with
 // a time limit and an output cap (programs.mjs). A failure of either is a state word, never a message.
 //
 // Hermes (any computer it is on). Hermes is NEVER run - this half starts no program at all. Where it
@@ -54,6 +58,7 @@ import { isoSeconds, isPlainObject } from './util.mjs'
 
 const LAUNCHCTL = '/bin/launchctl'
 const PLUTIL = '/usr/bin/plutil'
+const SYSCTL = '/usr/sbin/sysctl'
 const NOT_FOUND = { status: 'not found' }
 const UNREADABLE = { status: 'unavailable', why: JOBS_WHY.unreadable }
 const DAY_MS = 86400_000
@@ -63,6 +68,8 @@ const EARLIEST_BELIEVABLE_MS = Date.parse('2000-01-01T00:00:00Z')
 export const MAX_PLISTS_READ = 200
 const LAUNCHCTL_OUTPUT_CAP = 512 * 1024
 const PLIST_OUTPUT_CAP = 256 * 1024
+// sysctl prints one short line; anything longer is not what was asked for.
+const SYSCTL_OUTPUT_CAP = 1024
 
 // --- launchctl list ---------------------------------------------------------------------------------------
 
@@ -140,7 +147,7 @@ const exitStatus = (status) => (Number.isInteger(status) && status >= -255 && st
 
 // --- the block --------------------------------------------------------------------------------------------
 
-// Runs one of the two programs and returns its output, or null when it did not answer.
+// Runs one of the programs and returns its output, or null when it did not answer.
 async function ask(deps, cwd, file, args, maxOutput) {
   try {
     const { stdout } = await deps.exec(file, args, { cwd, timeout: VERSION_TIMEOUT_MS, maxOutput })
@@ -343,6 +350,31 @@ export async function collectHermesJobs(deps, zone) {
   return { status: 'found', items: items.slice(0, JOBS_CAPS.hermes), hidden, more: skippedProfiles + Math.max(0, items.length - JOBS_CAPS.hermes) }
 }
 
+// --- when the computer started -------------------------------------------------------------------------------
+
+// `kern.boottime` prints a struct and then the same moment as a date: "{ sec = 1791921387, usec = 481926 } Tue ...".
+// Only the whole seconds are taken, and of those only digits.
+const BOOT_SECONDS = /\{\s*sec\s*=\s*(\d{1,16})\s*,/
+
+// When this computer last started, as an ISO time in UTC rounded DOWN to the minute, or null: not a Mac, no
+// program to ask, no answer, an answer that is not that struct, or a time nobody could believe (before 2000, or
+// later than the check - a clock that is wrong is not a restart). A missing time is never a wrong one.
+export async function collectBootTime(deps) {
+  if (deps.platform !== 'darwin' || typeof deps.exec !== 'function' || !deps.stateDir) return null
+  let cwd
+  try {
+    cwd = await emptyFolder(deps.stateDir)
+  } catch {
+    return null
+  }
+  const text = await ask(deps, cwd, SYSCTL, ['-n', 'kern.boottime'], SYSCTL_OUTPUT_CAP)
+  const match = text === null ? null : BOOT_SECONDS.exec(text)
+  if (!match) return null
+  const ms = Number(match[1]) * 1000
+  if (!Number.isSafeInteger(ms) || ms < EARLIEST_BELIEVABLE_MS || ms > deps.now) return null
+  return isoSeconds(Math.floor(ms / 60_000) * 60_000)
+}
+
 // --- the whole part ---------------------------------------------------------------------------------------------------
 
 // The computer's timezone as the gate will accept it, or null when this runtime does not know it. An
@@ -384,5 +416,9 @@ export async function collectJobs(deps, computer) {
   const zone = machineZone(deps)
   const launchd = await safely(() => collectLaunchd(deps, zone))
   const hermes = await safely(() => collectHermesJobs(deps, zone))
-  return fitToFile({ schema: JOBS_SCHEMA, takenAt: isoSeconds(deps.now), computer, timezone: zone ?? 'UTC', launchd, hermes })
+  const bootedAt = await safely(() => collectBootTime(deps)).then((value) => (typeof value === 'string' ? value : null))
+  // bootedAt has no key at all when it is not known: an older board never sees a null it does not expect.
+  const doc = { schema: JOBS_SCHEMA, takenAt: isoSeconds(deps.now), computer, timezone: zone ?? 'UTC' }
+  if (bootedAt) doc.bootedAt = bootedAt
+  return fitToFile({ ...doc, launchd, hermes })
 }

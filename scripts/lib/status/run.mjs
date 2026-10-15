@@ -403,7 +403,7 @@ const USAGE_TEXT = [
   "  hermes: Hermes's version, gateway and profiles - counts, times and names only, from its",
   '          files. It never runs hermes. When Hermes is alive it also writes runs/heartbeat/hermes.json.',
   '  jobs: scheduled jobs - Mac LaunchAgents and Hermes cron jobs - names, times and states only.',
-  '        On a Mac it runs /usr/bin/plutil and /bin/launchctl list; it never runs hermes.',
+  '        On a Mac it runs /usr/bin/plutil, /bin/launchctl list and sysctl (boot time); it never runs hermes.',
   '  vaults: the memory graph - Obsidian vaults as dots and lines. Only a vault this computer allows (allowed-vaults.yml',
   '          in the --state-dir folder) and vaults.yml names is read, in memory; no note text is kept. A vault shows',
   '          titles only if both say so. No allowlist: nothing is read. Written when it changed, or when a day old.',

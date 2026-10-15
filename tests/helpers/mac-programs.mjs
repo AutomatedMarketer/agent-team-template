@@ -1,5 +1,5 @@
-// The two programs a Mac's scheduled jobs are read through, pretended: /usr/bin/plutil prints a plist
-// as JSON, /bin/launchctl lists what is loaded. Each answer is whatever the test hands over, and every
+// The programs a Mac's scheduled jobs are read through, pretended: /usr/bin/plutil prints a plist
+// as JSON, /bin/launchctl lists what is loaded, /usr/sbin/sysctl says when the Mac started. Each answer is whatever the test hands over, and every
 // call is recorded, so a test can say which programs ran, with what, and from where. Nothing here
 // starts a real program.
 
@@ -8,13 +8,19 @@ import { FAKE_USERNAME } from './fake-home.mjs'
 
 // plists: { 'name.plist': object (printed as JSON) | string (printed as it is) | Error (plutil fails) }
 // launchctl: the table text launchctl prints. launchctlFails: launchctl itself fails.
-export function fakePrograms({ plists = {}, launchctl = null, launchctlFails = false } = {}) {
+// boottime: what /usr/sbin/sysctl -n kern.boottime prints (a string), or an Error for it to fail. Left out, the
+// program is one nobody expected, which is what a Mac that cannot answer looks like.
+export function fakePrograms({ plists = {}, launchctl = null, launchctlFails = false, boottime = null } = {}) {
   const calls = []
   const exec = async (file, args, options) => {
     calls.push({ file, args: [...args], options })
     if (file === '/bin/launchctl' && args.length === 1 && args[0] === 'list') {
       if (launchctlFails) throw new Error(`launchctl failed at /Users/${FAKE_USERNAME}`)
       return { stdout: launchctl ?? '', code: 0 }
+    }
+    if (file === '/usr/sbin/sysctl' && args.length === 2 && args[0] === '-n' && args[1] === 'kern.boottime' && boottime !== null) {
+      if (boottime instanceof Error) throw boottime
+      return { stdout: boottime, code: 0 }
     }
     if (file === '/usr/bin/plutil' && args[0] === '-convert' && args[1] === 'json' && args[2] === '-o' && args[3] === '-' && args.length === 5) {
       const entry = plists[basename(args[4])]

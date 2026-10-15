@@ -1272,8 +1272,8 @@ test('the whole part: launchd and Hermes in one file that passes the gate, with 
     assert.equal(doc.launchd.status, 'found')
     assert.equal(doc.hermes.items.length, 1)
     assert.deepEqual(checkJobs(doc, fake.identity), [])
-    // Hermes was read from files; the only programs that ran are the two for launchd.
-    assert.deepEqual([...new Set(exec.calls.map((call) => call.file))].sort(), ['/bin/launchctl', '/usr/bin/plutil'])
+    // Hermes was read from files; the only programs that ran are the two for launchd and the one that says when the Mac started.
+    assert.deepEqual([...new Set(exec.calls.map((call) => call.file))].sort(), ['/bin/launchctl', '/usr/bin/plutil', '/usr/sbin/sysctl'])
   } finally {
     await fake.cleanup()
   }
