@@ -87,6 +87,41 @@ test('a Mac that cannot answer, answers with something else, or answers a time n
   })
 })
 
+test('only the number after "sec =" is taken: a valid time anywhere else in the answer is not', async () => {
+  const good = BOOT_SECONDS
+  const answers = [
+    String(good),
+    `boottime=${good}`,
+    `{ usec = ${good}, sec = 5 }`,
+    `{ usec = ${good}, sec = ${good} }`,
+    `sec = ${good}`,
+    `{ xsec = ${good}, usec = 0 }`,
+    `kern.boottime: { usec = 1, sec = ${good} }`,
+    `Tue Oct 13 15:56:27 2026 ${good}`
+  ]
+  for (const boottime of answers) {
+    await withMac(async (fake, exec) => {
+      assert.equal(await collectBootTime(depsFor(fake, exec)), null, boottime)
+    }, { boottime })
+  }
+})
+
+test('an answer that is not text at all gives no boot time, and the file is written without the key', async () => {
+  for (const stdout of [undefined, null, 1791920187, { sec: BOOT_SECONDS }, ['{ sec = 1 }'], true]) {
+    const fake = await makeFakeHome({})
+    try {
+      const inner = fakePrograms({ launchctl: launchctlTable([]) })
+      const exec = async (file, args, options) => (file === '/usr/sbin/sysctl' ? { stdout, code: 0 } : inner(file, args, options))
+      assert.equal(await collectBootTime(depsFor(fake, exec)), null, String(stdout))
+      const doc = await collectJobs(depsFor(fake, exec), 'Mac Mini')
+      assert.ok(!('bootedAt' in doc), String(stdout))
+      assert.deepEqual(checkJobs(doc, fake.identity), [])
+    } finally {
+      await fake.cleanup()
+    }
+  }
+})
+
 test('a boot at the very second of the check is allowed, and one a few seconds earlier rounds down into the minute before', async () => {
   await withMac(async (fake, exec) => {
     assert.equal(await collectBootTime(depsFor(fake, exec)), '2026-10-14T13:07:00Z')
