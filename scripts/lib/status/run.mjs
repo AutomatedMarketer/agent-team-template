@@ -9,8 +9,8 @@
 // goes into one commit. The Hermes part can bring one more file: Hermes's heartbeat, written only
 // when the alive rule holds (hermes-schema.mjs), checked and committed with the rest.
 
-import { join } from 'node:path'
-import { mkdir, rm } from 'node:fs/promises'
+import { join, dirname, isAbsolute } from 'node:path'
+import { mkdir, rm, lstat } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { createHash } from 'node:crypto'
 import {
@@ -50,6 +50,7 @@ import {
   prepareClone,
   commitAndPush,
   isInsideFolder,
+  realFolder,
   RemoteUnreachable,
   SNAPSHOT_SUBJECT
 } from './commit.mjs'
@@ -395,7 +396,7 @@ function report(snapshots, say) {
 
 const USAGE_TEXT = [
   'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes,jobs,vaults] [--dry-run]',
-  '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
+  '                                       [--commit [--clone <dir>] [--state-dir <dir>]] [--out <folder> [--state-dir <dir>]]',
   'Parts (every one, unless --only picks some):',
   '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
   '  connections: installed tools, and Claude and Codex servers and plugins - names only.',
@@ -407,6 +408,7 @@ const USAGE_TEXT = [
   '  vaults: the memory graph - Obsidian vaults as dots and lines. Only a vault this computer allows (allowed-vaults.yml',
   '          in the --state-dir folder) and vaults.yml names is read, in memory; no note text is kept. A vault shows',
   '          titles only if both say so. No allowlist: nothing is read. Written when it changed, or when a day old.',
+  '--out <folder>: write the files to a folder outside every repo (a full path), with no git command and no commit.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 
@@ -414,6 +416,7 @@ const OPTIONS = {
   computer: { type: 'string' },
   only: { type: 'string' },
   commit: { type: 'boolean' },
+  out: { type: 'string' },
   clone: { type: 'string' },
   'state-dir': { type: 'string' },
   'dry-run': { type: 'boolean' },
@@ -450,6 +453,47 @@ async function writeAll(target, files, options) {
   await writeSnapshots(target, files, options)
 }
 
+// --out: the folder the snapshot files go to instead of the repo, and the reasons a folder is refused. Each
+// reason is fixed words - the folder's own path is never repeated, because it holds the user name.
+async function pathExists(path) {
+  try {
+    return await lstat(path)
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+    throw error
+  }
+}
+
+// A repo is found by its .git (a folder, or a file in a linked work tree) in the folder or above it, looked
+// for on disk - this mode runs no git command. The real path is walked, so a link cannot hide a repo.
+async function insideGitRepo(path) {
+  let current = await realFolder(path)
+  for (;;) {
+    if (await pathExists(join(current, '.git'))) return true
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
+export async function outFolderProblems(out, repoRoot) {
+  if (typeof out !== 'string' || !out || !isAbsolute(out)) {
+    return ['Refused: --out must be a full path (one that starts at the top of a drive or at /), so the files cannot land somewhere by accident.']
+  }
+  const found = await pathExists(out)
+  if (found?.isSymbolicLink()) {
+    return ['Refused: the --out folder is a link. Give the real folder, so the files cannot be sent somewhere else by changing the link.']
+  }
+  if (found && !found.isDirectory()) return ['Refused: the --out path is there but is not a folder.']
+  if (await isInsideFolder(out, repoRoot)) {
+    return ['Refused: the --out folder is inside the folder the collector runs in (or is a link into it).', 'The point of --out is to keep the files out of the repo. Give a folder somewhere else.']
+  }
+  if (await insideGitRepo(out)) {
+    return ['Refused: the --out folder is inside a git repo.', 'Snapshot files there could be committed and pushed by mistake. Give a folder that is not in any repo.']
+  }
+  return []
+}
+
 export const defaultStateDir = (deps) => join(deps.home, '.local', 'state', 'agent-status-collector')
 
 // args: { argv, deps, repoRoot, out, err }
@@ -481,8 +525,12 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain('--dry-run writes nothing, so it cannot also --commit.')
     return 2
   }
-  if (!values.commit && (values.clone !== undefined || values['state-dir'] !== undefined)) {
-    complain('--clone and --state-dir only mean something with --commit.')
+  if (values.out !== undefined && (values.commit || values['dry-run'] || values.clone !== undefined)) {
+    complain('--out writes the files to its own folder without git, so it cannot be combined with --commit, --clone or --dry-run.')
+    return 2
+  }
+  if (!values.commit && (values.clone !== undefined || (values['state-dir'] !== undefined && values.out === undefined))) {
+    complain('--clone and --state-dir only mean something with --commit or --out.')
     return 2
   }
 
@@ -492,6 +540,16 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain(`Refused before reading anything. ${labelProblems.join('; ')}.`)
     complain('Give a plain label such as --computer "Mac Mini". It is never the computer\'s own name.')
     return 2
+  }
+
+  // Refused before anything is read, like the other folder rules: --out is where the files go, and it must be
+  // outside every repo.
+  if (values.out !== undefined) {
+    const problems = await outFolderProblems(values.out, repoRoot)
+    if (problems.length) {
+      problems.forEach(complain)
+      return 2
+    }
   }
 
   // The data clone is reset to the remote every run. Code inside it would be code chosen by
@@ -530,12 +588,17 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   // vaults.yml is read from the folder the snapshot files go to: the dedicated clone when there is one (as the team
   // repo has it, never the code checkout, which is only code), otherwise this folder.
   deps = { ...deps, stateDir, clone: values.clone, dataDir: values.clone ?? repoRoot }
+  // --out: no git command runs in this mode (so none is handed on), the earlier files are the ones in the out
+  // folder, and what is made there is private to the user. Without it the files go into the repo folder as always.
+  const target = values.out ?? repoRoot
+  const writeOptions = values.out === undefined ? { git: deps.git } : { git: undefined, fileMode: 0o600, dirMode: 0o700 }
+  if (values.out !== undefined) deps = { ...deps, git: undefined, priorDir: values.out }
 
   if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
 
   // Checked before anything is read, and again by every write.
   try {
-    if (!values['dry-run']) await assertNoLinksAll(repoRoot, pathsFor(parts, computer), { git: deps.git })
+    if (!values['dry-run']) await assertNoLinksAll(target, pathsFor(parts, computer), writeOptions)
   } catch (error) {
     if (!(error instanceof LinkedPath)) throw error
     LINK_REFUSAL.forEach(complain)
@@ -571,7 +634,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   }
 
   try {
-    await writeAll(repoRoot, files, { git: deps.git })
+    await writeAll(target, files, writeOptions)
   } catch (error) {
     if (error instanceof LinkedPath) {
       LINK_REFUSAL.forEach(complain)

@@ -134,7 +134,7 @@ async function sameFolder(a, b) {
 
 // The real path of a folder, following links. A path that does not exist yet is resolved as far
 // as it does exist, with the rest added back on.
-async function realFolder(path) {
+export async function realFolder(path) {
   const full = resolve(path)
   try {
     return await realpath(full)
