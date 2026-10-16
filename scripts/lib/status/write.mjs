@@ -63,13 +63,15 @@ export async function assertNoLinks(root, relativePath, { git } = {}) {
 // Checks, makes the folder, checks again where it really is, then writes the text to a temporary
 // file beside the target. Returns { temporary, path } once the temporary file holds the whole text;
 // `made` is told the temporary name as soon as this call has created it, so a caller can remove it.
-async function stage(root, relativePath, text, { git, fileMode, dirMode }, made) {
+async function stage(root, relativePath, text, { git, fileMode, dirMode, verifyRoot }, made) {
   await assertNoLinks(root, relativePath, { git })
   const path = join(root, ...relativePath.split('/'))
   await mkdir(dirname(path), dirMode === undefined ? { recursive: true } : { recursive: true, mode: dirMode })
   // A link made between the check and the mkdir, or one the check could not see.
   await assertNoLinks(root, relativePath, { git })
   if (!(await isInsideFolder(dirname(path), root))) throw new LinkedPath()
+  // The root itself, just made or just found: for --out it must still be the folder that was checked.
+  await verifyRoot?.()
   // A small gap is left on purpose between this last check and the write below: swapping a
   // folder for a link inside it takes a program already running on this computer as this user.
   // A push cannot do that - git only changes the clone when the collector runs git, and nothing
@@ -91,14 +93,15 @@ async function stage(root, relativePath, text, { git, fileMode, dirMode }, made)
 // else is touched. A reader never sees half a file.
 // `fileMode` and `dirMode`, when given, are the modes the files and any folders this call makes are created
 // with (the --out folder is private to the user). Left out, they are made exactly as before.
-export async function writeSnapshots(root, files, { git, fileMode, dirMode } = {}) {
+export async function writeSnapshots(root, files, { git, fileMode, dirMode, verifyRoot } = {}) {
   for (const { relativePath } of files) await assertNoLinks(root, relativePath, { git })
   const made = []
   const removeMade = () => Promise.all(made.map((temporary) => rm(temporary, { force: true }).catch(() => {})))
   const staged = []
   let renamed = 0
   try {
-    for (const { relativePath, text } of files) staged.push(await stage(root, relativePath, text, { git, fileMode, dirMode }, made))
+    for (const { relativePath, text } of files) staged.push(await stage(root, relativePath, text, { git, fileMode, dirMode, verifyRoot }, made))
+    await verifyRoot?.()
     for (const { temporary, path } of staged) {
       await rename(temporary, path)
       renamed += 1

@@ -1,10 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, readFile, writeFile, symlink, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { join, sep } from 'node:path'
-import { runCollector } from '../scripts/lib/status/run.mjs'
+import { runCollector, outFolderProblems } from '../scripts/lib/status/run.mjs'
 import { collectConnections } from '../scripts/lib/status/connections.mjs'
+import { collectJobs } from '../scripts/lib/status/jobs.mjs'
 import { whyLeaveVaultsAlone } from '../scripts/lib/status/vaults.mjs'
 import { makeFakeHome } from './helpers/fake-home.mjs'
 import { hostileHome, FORBIDDEN, depsFor, filesUnder, NOW } from './helpers/hostile-home.mjs'
@@ -248,6 +251,120 @@ test('a source that is handed deps.git finds none in --out mode', async () => {
   } finally {
     await rm(out, { recursive: true, force: true })
     await fake.cleanup()
+  }
+})
+
+// --- the folder is swapped for a link while the run is going --------------------------------------------
+
+// A source that, when it is asked for its part, replaces the out folder with a link into a git repo - as a
+// program on this computer could during the two minutes the connections part may take.
+async function swapDuring(fake, out, victim) {
+  const repo = await temp('agent-out-repo-')
+  const jobs = async (deps, computer) => {
+    await rm(out, { recursive: true, force: true })
+    await symlink(victim, out, 'junction')
+    return collectJobs(deps, computer)
+  }
+  return collect(fake, ['--out', out, '--only', 'jobs'], { repo, extra: { sources: { jobs } } })
+}
+
+test('the out folder swapped for a link into a git repo during the run: refused, nothing lands in that repo', async () => {
+  const fake = await makeFakeHome()
+  const base = await temp('agent-out-')
+  try {
+    const victim = await temp('agent-out-victim-')
+    await mkdir(join(victim, '.git'))
+    const out = join(base, 'out')
+    await mkdir(out)
+    const result = await swapDuring(fake, out, victim)
+    assert.notEqual(result.code, 0, 'the run did not report success')
+    assert.deepEqual(await relativeFiles(victim), [], 'nothing was written in the repo the link pointed to')
+    await rm(result.repo, { recursive: true, force: true })
+    await rm(victim, { recursive: true, force: true })
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await fake.cleanup()
+  }
+})
+
+test('an out folder that did not exist when checked, made a link into a git repo before it was created: refused', async () => {
+  const fake = await makeFakeHome()
+  const base = await temp('agent-out-')
+  try {
+    const victim = await temp('agent-out-victim-')
+    await mkdir(join(victim, '.git'))
+    const result = await swapDuring(fake, join(base, 'not-yet'), victim)
+    assert.notEqual(result.code, 0)
+    assert.deepEqual(await relativeFiles(victim), [])
+    await rm(result.repo, { recursive: true, force: true })
+    await rm(victim, { recursive: true, force: true })
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await fake.cleanup()
+  }
+})
+
+// --- odd paths ---------------------------------------------------------------------------------------------
+
+test('a path with a NUL character is refused with exit 2, not a crash', async () => {
+  const fake = await makeFakeHome()
+  try {
+    const result = await refused(fake, ['--out', join(tmpdir(), 'bad' + String.fromCharCode(0) + 'name')])
+    await rm(result.repo, { recursive: true, force: true })
+  } finally {
+    await fake.cleanup()
+  }
+})
+
+test('an --out that cannot be checked is refused, whatever the reason (checking never throws)', async () => {
+  const repo = await temp('agent-out-repo-')
+  try {
+    const missingDrive = isWindows ? [...'ZYXWVUTSRQPONMLKJIHGFED'].find((letter) => !existsSync(letter + ':' + sep)) : null
+    const odd = isWindows ? [...(missingDrive ? [missingDrive + ':' + sep + 'no-such-drive' + sep + 'x'] : []), 'C:' + sep + 'tmp' + sep + 'NUL', 'C:' + sep + 'CON'] : ['/proc/self/mem/x']
+    for (const path of odd) {
+      assert.ok((await outFolderProblems(path, repo)).length > 0, path + ' was accepted')
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('on Windows a network path, a long-path spelling, a stream name and a trailing dot or space are refused', { skip: !isWindows && 'Windows spellings' }, async () => {
+  const repo = await temp('agent-out-repo-')
+  const BS = String.fromCharCode(92)
+  try {
+    const drive = repo.slice(0, 1)
+    const rest = repo.slice(2)
+    const spellings = [
+      BS + BS + 'localhost' + BS + drive + '$' + rest + BS + 'x',
+      BS + BS + '?' + BS + repo + BS + 'x',
+      BS + BS + '?' + BS + 'UNC' + BS + 'localhost' + BS + drive + '$' + rest + BS + 'x',
+      BS + BS + '.' + BS + repo + BS + 'x',
+      repo + '.' + BS + 'x',
+      repo + ' ' + BS + 'x',
+      repo + '::$INDEX_ALLOCATION' + BS + 'x'
+    ]
+    for (const path of spellings) {
+      assert.ok((await outFolderProblems(path, repo)).length > 0, path + ' was accepted')
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('the repo is recognised by what it is, not how its path is spelled: its 8.3 short name is refused', { skip: !isWindows && 'Windows short names' }, async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'agent-out-a-long-repo-name-'))
+  try {
+    let short
+    try {
+      short = execFileSync('cmd', ['/c', 'for', '%I', 'in', '("' + repo + '")', 'do', '@echo', '%~sI'], { encoding: 'utf8' }).trim()
+    } catch {
+      return
+    }
+    if (!short || short.toLowerCase() === repo.toLowerCase()) return // short names are off on this drive
+    assert.ok((await outFolderProblems(join(short, 'x'), repo)).length > 0, 'the short name got through')
+  } finally {
+    await rm(repo, { recursive: true, force: true })
   }
 })
 
