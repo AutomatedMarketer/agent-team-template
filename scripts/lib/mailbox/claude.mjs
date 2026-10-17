@@ -253,6 +253,14 @@ export function runClaude({
     const transcript = openStream(transcriptPath, { flags: 'w', mode: 0o600 })
     transcript.on('error', () => hardStop('claude-failed'))
 
+    // On Windows a process number is given to the next program that starts once the first has ended, and taskkill takes a number: after the program has
+    // exited (its 'exit' event) nothing more is sent to it. (A process group, on a Mac, has no such trouble.)
+    let exited = false
+    const stopTree = (signal) => {
+      if (!child?.pid || (platform === 'win32' && exited)) return
+      stop(child.pid, signal)
+    }
+
     const answer = () => {
       const base = { calls: Object.fromEntries(calls), denials: Array.isArray(resultMessage?.permission_denials) ? resultMessage.permission_denials.length : 0, exitCode, transcriptBytes }
       if (reason === null && exitCode === 0 && resultMessage?.type === 'result' && resultMessage.is_error === false && resultMessage.subtype === 'success') return { ok: true, ...base }
@@ -275,7 +283,7 @@ export function runClaude({
     // Stop the program now, whole group, and give it a short time to close; whatever it says meanwhile is only kept.
     function hardStop(why) {
       reason ??= why
-      if (child?.pid) stop(child.pid, 'SIGKILL')
+      stopTree('SIGKILL')
       closeTimer ??= setTimeout(() => finalize(null), closeWaitMs)
     }
 
@@ -326,9 +334,9 @@ export function runClaude({
     if (live?.stopping) hardStop('claude-failed')
     timer = setTimeout(() => {
       reason ??= 'timed-out'
-      if (child.pid) stop(child.pid, 'SIGTERM')
+      stopTree('SIGTERM')
       killTimer = setTimeout(() => {
-        if (child.pid) stop(child.pid, 'SIGKILL')
+        stopTree('SIGKILL')
         closeTimer ??= setTimeout(() => finalize(null), closeWaitMs)
       }, killAfterMs)
     }, timeoutMs)
@@ -352,6 +360,9 @@ export function runClaude({
       const part = chunk.subarray(0, STDERR_MAX_BYTES - stderrBytes)
       stderrBytes += part.length
       stderrFile.write(part)
+    })
+    child.on('exit', () => {
+      exited = true
     })
     child.on('error', () => finalize(null))
     child.on('close', (code) => finalize(code))
