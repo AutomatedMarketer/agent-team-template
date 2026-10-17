@@ -503,6 +503,8 @@ const REFUSE_ODD = ['Refused: that --out path is not one the collector can use a
 
 // Reasons the --out folder is refused, as fixed lines; [] when it is fit to use. Anything unexpected while
 // checking is a refusal too, never a crash.
+const REFUSE_NETWORK = ['Refused: the --out folder is on a network share.', 'A network folder is not allowed: it cannot be checked the way a folder on this computer can. Give a folder on this computer.']
+
 export async function outFolderProblems(out, repoRoot) {
   try {
     if (typeof out !== 'string' || !out || !isAbsolute(out)) {
@@ -518,6 +520,8 @@ export async function outFolderProblems(out, repoRoot) {
       if (segments.some((segment) => WINDOWS_RESERVED.test(segment) || /[. ]$/.test(segment) || /[<>"|?*]/.test(segment))) return REFUSE_ODD
     }
     if (!(await pathExists(parse(out).root))) return REFUSE_ODD
+    // A mapped network drive resolves to a network path: say that, not 'is a link'.
+    if (process.platform === 'win32' && /^[\\/]{2}/.test(await realFolder(out))) return REFUSE_NETWORK
     const found = await pathExists(out)
     if (found?.isSymbolicLink()) {
       return ['Refused: the --out folder is a link. Give the real folder, so the files cannot be sent somewhere else by changing the link.']

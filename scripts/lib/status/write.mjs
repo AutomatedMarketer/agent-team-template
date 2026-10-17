@@ -65,6 +65,8 @@ export async function assertNoLinks(root, relativePath, { git } = {}) {
 // `made` is told the temporary name as soon as this call has created it, so a caller can remove it.
 async function stage(root, relativePath, text, { git, fileMode, dirMode, verifyRoot }, made) {
   await assertNoLinks(root, relativePath, { git })
+  // For --out, before any folder is made: a root swapped for a link must not get even an empty folder.
+  await verifyRoot?.()
   const path = join(root, ...relativePath.split('/'))
   await mkdir(dirname(path), dirMode === undefined ? { recursive: true } : { recursive: true, mode: dirMode })
   // A link made between the check and the mkdir, or one the check could not see.

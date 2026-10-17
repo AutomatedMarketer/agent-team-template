@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, readFile, writeFile, symlink, stat } from 'node:fs/promises'
+import { readdir, mkdtemp, mkdir, rm, readFile, writeFile, symlink, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
@@ -279,6 +279,7 @@ test('the out folder swapped for a link into a git repo during the run: refused,
     const result = await swapDuring(fake, out, victim)
     assert.notEqual(result.code, 0, 'the run did not report success')
     assert.deepEqual(await relativeFiles(victim), [], 'nothing was written in the repo the link pointed to')
+    assert.deepEqual(await readdir(victim, { recursive: true }), ['.git'], 'and no folder was made there either')
     await rm(result.repo, { recursive: true, force: true })
     await rm(victim, { recursive: true, force: true })
   } finally {
@@ -296,6 +297,7 @@ test('an out folder that did not exist when checked, made a link into a git repo
     const result = await swapDuring(fake, join(base, 'not-yet'), victim)
     assert.notEqual(result.code, 0)
     assert.deepEqual(await relativeFiles(victim), [])
+    assert.deepEqual(await readdir(victim, { recursive: true }), ['.git'], 'and no folder was made there either')
     await rm(result.repo, { recursive: true, force: true })
     await rm(victim, { recursive: true, force: true })
   } finally {
