@@ -192,7 +192,11 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
   const ctx = { ...rest, home, places, find, findAll, log: rest.log ?? out, force: parsed.force, live }
   if (rest.proc) {
     const kill = rest.kill ?? ((pid, signal) => killTree(pid, signal, { platform: rest.platform, spawn: rest.spawn }))
-    listenForSignals(rest.proc, signalHandler(live, { kill, release: releaseLock, exit: (code) => rest.proc.exit(code), log: out }))
+    // `keepLockOnSignal`: the runner runs inside a process that does not end on a signal (the board on a student's computer). There the
+    // handler only kills Claude: the tick goes on until it unwinds, and its own `finally` releases the lock then. Released here, another taker
+    // could get the lock while the tick still works, and the tick would then delete THAT lock. Left out (the Mac), nothing changes.
+    const release = rest.keepLockOnSignal === true ? async () => {} : releaseLock
+    listenForSignals(rest.proc, signalHandler(live, { kill, release, exit: (code) => rest.proc.exit(code), log: out }))
   }
 
   try {

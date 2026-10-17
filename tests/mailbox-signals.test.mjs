@@ -139,6 +139,37 @@ test('the command listens for SIGTERM and SIGINT on the process it is given, and
   }
 })
 
+// The board on a student's computer runs the runner inside its own process (agent-cockpit local/runner.mjs): a signal handed to the
+// runner there must stop Claude, but the process does not end, so the tick goes on until it unwinds. The lock must stay the tick's until
+// then - released by the handler, a second taker (a second board, a --selftest by hand) would get it while the tick still works, and the
+// tick's own cleanup would then delete THAT lock.
+test('in a process that does not end on a signal (keepLockOnSignal), the handler kills Claude but leaves the lock to the tick, which releases it when it really ends', async () => {
+  const w = await mailboxWorld()
+  try {
+    const proc = Object.assign(new EventEmitter(), { exit: (code) => { proc.exited = code } })
+    const killed = []
+    let lockWhileUnwinding = null
+    w.claude.script = async () => {
+      proc.emit('SIGTERM')
+      for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve))
+      lockWhileUnwinding = await exists(join(w.places.stateDir, 'lock'))
+      return []
+    }
+    w.send({ action: 'run', workflow: 'morning-intel' })
+    const lines = []
+    const code = await main({ argv: ['--once'], ...w.ctx({ kill: (pid, signal) => killed.push([pid, signal]) }), codeDir: w.places.codeDir, out: (text) => lines.push(text), err: (text) => lines.push(text), proc, keepLockOnSignal: true })
+    assert.deepEqual(killed, [[4242, 'SIGKILL']], 'Claude is still killed at once')
+    assert.equal(lockWhileUnwinding, true, 'the lock was released while the tick was still running')
+    assert.equal(await exists(join(w.places.stateDir, 'lock')), false, 'the tick released it when it ended')
+    assert.equal(code, 1)
+    assert.ok(lines.some((line) => line.includes('left as outcome unknown')))
+    const claim = (await readdir(join(w.places.stateDir, 'claims'))).find((name) => name.endsWith('.claim'))
+    assert.equal(await w.claimFile(claim.slice(0, -'.claim'.length), 'final.json'), null, 'the order is left for the next tick to settle by reading')
+  } finally {
+    await w.cleanup()
+  }
+})
+
 test('the entry file hands the real process to the command, so a real signal is heard', async () => {
   const text = await read('scripts/mailbox-runner.mjs')
   assert.ok(text.includes('proc: process'))
