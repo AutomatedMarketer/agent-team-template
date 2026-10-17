@@ -96,6 +96,7 @@ const PRIVATE_WORDS = {
   'no-user': 'the Windows account name is not known or is not a plain name',
   'lock-failed': 'icacls could not set the folder to your account only',
   'others-have-access': 'after the lock another account still has access to the folder',
+  'link-in-state': 'there is a shortcut or link inside the state folder, so it was not touched; take the link out and run this again',
   'not-you': 'after the lock the one account with access is not yours',
   unavailable: 'this run has no way to lock the folder'
 }

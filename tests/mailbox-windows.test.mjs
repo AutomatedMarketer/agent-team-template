@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { spawn as realSpawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
 import { join, win32 } from 'node:path'
 import { mailboxWorld } from './helpers/mailbox-world.mjs'
@@ -533,6 +533,47 @@ test('the real icacls: a file deep in the tree (claims\\o1) given its own Everyo
   assert.deepEqual(await lock(places), { ok: true })
   assert.equal(accessEntries(await ask(file)).length, 1, 'repaired')
   assert.equal(await everyOne(), 4)
+}))
+
+/* ---- a link inside the state folder: /reset /T would follow it and change a folder outside ---- */
+
+test('a link or junction anywhere inside the state folder (or the folder itself being one) is refused BEFORE anything is changed: no reset, no grant', () => withDir(async (dir) => {
+  const { places, state, tree, env } = await stateWith(dir)
+  const outside = join(dir, 'outside')
+  await mkdir(outside)
+  const bad = { tree: tree({ state: [ENTRY(), ENTRY('BUILTIN\\Users')] }), env: env() }
+  const kind = onWindows ? 'junction' : 'dir'
+  // Deep inside, and at the top.
+  await mkdir(join(state, 'claims', 'o1'), { recursive: true })
+  for (const where of [join(state, 'claims', 'o1', 'shortcut'), join(state, 'shortcut')]) {
+    await symlink(outside, where, kind)
+    const fake = fakeIcacls({ before: bad })
+    assert.deepEqual(await lockWith(fake)(places), { ok: false, why: 'link-in-state' }, where)
+    assert.ok(!fake.calls.some((call) => call.args.includes('/reset') || call.args.includes('/grant:r')), 'nothing was changed')
+    await rm(where, { recursive: true, force: true })
+  }
+  // The state folder itself is a link to somewhere else.
+  const moved = join(dir, 'moved-state')
+  await rename(state, moved)
+  await symlink(moved, state, kind)
+  const fake = fakeIcacls({ before: bad })
+  assert.deepEqual(await lockWith(fake)(places), { ok: false, why: 'link-in-state' })
+  assert.ok(!fake.calls.some((call) => call.args.includes('/reset') || call.args.includes('/grant:r')))
+}))
+
+test('the real icacls: a junction inside the state folder to a folder outside it is refused, and the outside folder and its file are left exactly as they were (this computer)', (t) => realLock(t, async ({ dir, places, ask, lock }) => {
+  const outside = join(dir, 'outside')
+  await mkdir(outside)
+  const precious = join(outside, 'precious.txt')
+  await writeFile(precious, 'not the runner\'s')
+  const before = [await ask(outside), await ask(precious)]
+  await symlink(outside, join(places.stateDir, 'shortcut'), 'junction')
+  assert.deepEqual(await lock(places), { ok: false, why: 'link-in-state' })
+  assert.deepEqual([await ask(outside), await ask(precious)], before, 'the access lists outside are what they were')
+  // And with the junction gone the same folder locks.
+  await rm(join(places.stateDir, 'shortcut'), { recursive: true, force: true })
+  assert.deepEqual(await lock(places), { ok: true })
+  assert.deepEqual([await ask(outside), await ask(precious)], before, 'still untouched')
 }))
 
 /* ---------- a tick on Windows does not start without the lock ------------------------------------------------------ */

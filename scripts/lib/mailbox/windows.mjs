@@ -157,6 +157,9 @@ export function privatePlaces({ exec, env, user, domain, platform = process.plat
         problem = 'unreadable'
       }
       if (problem === null) return { ok: true }
+      // /reset /T follows a junction or a link into whatever it points at and changes THAT folder's access lists. So before anything is changed the whole
+      // tree is walked without following anything, and a single link, junction or the folder itself being one means nothing is touched at all.
+      if (await hasLink(fs, state)) return { ok: false, why: 'link-in-state' }
       await exec(icacls, [state, '/reset', '/T', '/C'], options)
       await exec(icacls, [state, '/inheritance:r', '/grant:r', `${name}:(OI)(CI)F`], options)
       problem = await look()
@@ -165,6 +168,22 @@ export function privatePlaces({ exec, env, user, domain, platform = process.plat
       return { ok: false, why: 'lock-failed' }
     }
     return { ok: true }
+  }
+}
+
+// Whether the folder, or anything at any level inside it, is a symbolic link or a junction. lstat and readdir types never follow one. An entry that cannot
+// be looked at counts as one: nothing is changed on a tree that was not fully seen.
+async function hasLink(fs, folder) {
+  try {
+    if ((await fs.lstat(folder)).isSymbolicLink()) return true
+    for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
+      const path = win32.join(folder, entry.name)
+      if (entry.isSymbolicLink() || (await fs.lstat(path)).isSymbolicLink()) return true
+      if (entry.isDirectory() && (await hasLink(fs, path))) return true
+    }
+    return false
+  } catch {
+    return true
   }
 }
 
