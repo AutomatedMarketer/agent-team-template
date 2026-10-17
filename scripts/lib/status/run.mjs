@@ -9,8 +9,8 @@
 // goes into one commit. The Hermes part can bring one more file: Hermes's heartbeat, written only
 // when the alive rule holds (hermes-schema.mjs), checked and committed with the rest.
 
-import { join } from 'node:path'
-import { mkdir, rm } from 'node:fs/promises'
+import { join, dirname, isAbsolute, resolve, parse } from 'node:path'
+import { mkdir, rm, lstat, stat } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { createHash } from 'node:crypto'
 import {
@@ -50,6 +50,7 @@ import {
   prepareClone,
   commitAndPush,
   isInsideFolder,
+  realFolder,
   RemoteUnreachable,
   SNAPSHOT_SUBJECT
 } from './commit.mjs'
@@ -395,7 +396,7 @@ function report(snapshots, say) {
 
 const USAGE_TEXT = [
   'Usage: node scripts/collect-status.mjs [--computer "Mac Mini"] [--only usage,connections,hermes,jobs,vaults] [--dry-run]',
-  '                                       [--commit [--clone <dir>] [--state-dir <dir>]]',
+  '                                       [--commit [--clone <dir>] [--state-dir <dir>]] [--out <folder> [--state-dir <dir>]]',
   'Parts (every one, unless --only picks some):',
   '  usage: plan limits, plan names and an activity estimate for Claude and Codex',
   '  connections: installed tools, and Claude and Codex servers and plugins - names only.',
@@ -407,6 +408,7 @@ const USAGE_TEXT = [
   '  vaults: the memory graph - Obsidian vaults as dots and lines. Only a vault this computer allows (allowed-vaults.yml',
   '          in the --state-dir folder) and vaults.yml names is read, in memory; no note text is kept. A vault shows',
   '          titles only if both say so. No allowlist: nothing is read. Written when it changed, or when a day old.',
+  '--out <folder>: write the files to a folder outside every repo (a full path), with no git command and no commit.',
   'What each part reads and never writes: .agent-team/status/README.md'
 ]
 
@@ -414,6 +416,7 @@ const OPTIONS = {
   computer: { type: 'string' },
   only: { type: 'string' },
   commit: { type: 'boolean' },
+  out: { type: 'string' },
   clone: { type: 'string' },
   'state-dir': { type: 'string' },
   'dry-run': { type: 'boolean' },
@@ -450,6 +453,92 @@ async function writeAll(target, files, options) {
   await writeSnapshots(target, files, options)
 }
 
+// --out: the folder the snapshot files go to instead of the repo, and the reasons a folder is refused. Each
+// reason is fixed words - the folder's own path is never repeated, because it holds the user name.
+async function pathExists(path) {
+  try {
+    return await lstat(path)
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+    throw error
+  }
+}
+
+// A repo is found by its .git (a folder, or a file in a linked work tree) in the folder or above it, looked
+// for on disk - this mode runs no git command. The real path is walked, so a link cannot hide a repo.
+async function insideGitRepo(path) {
+  let current = await realFolder(path)
+  for (;;) {
+    if (await pathExists(join(current, '.git'))) return true
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
+// The same folder by its identity on disk (device and file id), not by how its path is spelled: a UNC or
+// \? spelling, a short 8.3 name or a trailing dot all name the same folder with different strings.
+const identityOf = async (path) => {
+  const { dev, ino } = await stat(path, { bigint: true })
+  return `${dev}:${ino}`
+}
+
+async function insideByIdentity(path, folder) {
+  const wanted = await identityOf(folder)
+  let current = resolve(path)
+  for (;;) {
+    try {
+      if ((await identityOf(current)) === wanted) return true
+    } catch {
+      // not there yet: look higher
+    }
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(\..*)?$/i
+const REFUSE_ODD = ['Refused: that --out path is not one the collector can use as a plain folder.', 'Give a full path to an ordinary folder on this computer, such as one under your home folder.']
+
+// Reasons the --out folder is refused, as fixed lines; [] when it is fit to use. Anything unexpected while
+// checking is a refusal too, never a crash.
+const REFUSE_NETWORK = ['Refused: the --out folder is on a network share.', 'A network folder is not allowed: it cannot be checked the way a folder on this computer can. Give a folder on this computer.']
+
+export async function outFolderProblems(out, repoRoot) {
+  try {
+    if (typeof out !== 'string' || !out || !isAbsolute(out)) {
+      return ['Refused: --out must be a full path (one that starts at the top of a drive or at /), so the files cannot land somewhere by accident.']
+    }
+    if (out.includes('\u0000')) return REFUSE_ODD
+    if (process.platform === 'win32') {
+      // Network paths and \?\ \.\ spellings name the same folder in ways the checks below cannot compare.
+      if (/^[\\/]{2}/.test(out)) return REFUSE_ODD
+      const rest = out.slice(/^[a-z]:/i.test(out) ? 2 : 0)
+      if (rest.includes(':')) return REFUSE_ODD
+      const segments = rest.split(/[\\/]+/).filter(Boolean)
+      if (segments.some((segment) => WINDOWS_RESERVED.test(segment) || /[. ]$/.test(segment) || /[<>"|?*]/.test(segment))) return REFUSE_ODD
+    }
+    if (!(await pathExists(parse(out).root))) return REFUSE_ODD
+    // A mapped network drive resolves to a network path: say that, not 'is a link'.
+    if (process.platform === 'win32' && /^[\\/]{2}/.test(await realFolder(out))) return REFUSE_NETWORK
+    const found = await pathExists(out)
+    if (found?.isSymbolicLink()) {
+      return ['Refused: the --out folder is a link. Give the real folder, so the files cannot be sent somewhere else by changing the link.']
+    }
+    if (found && !found.isDirectory()) return ['Refused: the --out path is there but is not a folder.']
+    if ((await isInsideFolder(out, repoRoot)) || (await insideByIdentity(out, repoRoot))) {
+      return ['Refused: the --out folder is inside the folder the collector runs in (or is a link into it).', 'The point of --out is to keep the files out of the repo. Give a folder somewhere else.']
+    }
+    if (await insideGitRepo(out)) {
+      return ['Refused: the --out folder is inside a git repo.', 'Snapshot files there could be committed and pushed by mistake. Give a folder that is not in any repo.']
+    }
+    return []
+  } catch {
+    return REFUSE_ODD
+  }
+}
+
 export const defaultStateDir = (deps) => join(deps.home, '.local', 'state', 'agent-status-collector')
 
 // args: { argv, deps, repoRoot, out, err }
@@ -481,8 +570,12 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain('--dry-run writes nothing, so it cannot also --commit.')
     return 2
   }
-  if (!values.commit && (values.clone !== undefined || values['state-dir'] !== undefined)) {
-    complain('--clone and --state-dir only mean something with --commit.')
+  if (values.out !== undefined && (values.commit || values['dry-run'] || values.clone !== undefined)) {
+    complain('--out writes the files to its own folder without git, so it cannot be combined with --commit, --clone or --dry-run.')
+    return 2
+  }
+  if (!values.commit && (values.clone !== undefined || (values['state-dir'] !== undefined && values.out === undefined))) {
+    complain('--clone and --state-dir only mean something with --commit or --out.')
     return 2
   }
 
@@ -492,6 +585,16 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
     complain(`Refused before reading anything. ${labelProblems.join('; ')}.`)
     complain('Give a plain label such as --computer "Mac Mini". It is never the computer\'s own name.')
     return 2
+  }
+
+  // Refused before anything is read, like the other folder rules: --out is where the files go, and it must be
+  // outside every repo.
+  if (values.out !== undefined) {
+    const problems = await outFolderProblems(values.out, repoRoot)
+    if (problems.length) {
+      problems.forEach(complain)
+      return 2
+    }
   }
 
   // The data clone is reset to the remote every run. Code inside it would be code chosen by
@@ -530,12 +633,29 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   // vaults.yml is read from the folder the snapshot files go to: the dedicated clone when there is one (as the team
   // repo has it, never the code checkout, which is only code), otherwise this folder.
   deps = { ...deps, stateDir, clone: values.clone, dataDir: values.clone ?? repoRoot }
+  // --out: no git command runs in this mode (so none is handed on), the earlier files are the ones in the out
+  // folder, and what is made there is private to the user. Without it the files go into the repo folder as always.
+  // The folder is used by its real path from here on, and checked again right before anything is written (and
+  // after its folders are made), because the first check was some time ago - the connections part can take two
+  // minutes - and a folder or a link could have been put in its place since.
+  const target = values.out === undefined ? repoRoot : await realFolder(values.out)
+  const writeOptions = values.out === undefined
+    ? { git: deps.git }
+    : {
+        git: undefined,
+        fileMode: 0o600,
+        dirMode: 0o700,
+        verifyRoot: async () => {
+          if ((await outFolderProblems(target, repoRoot)).length) throw new LinkedPath()
+        }
+      }
+  if (values.out !== undefined) deps = { ...deps, git: undefined, priorDir: target }
 
   if (values.commit) return commitRun({ values, parts, computer, deps, repoRoot, say, complain })
 
   // Checked before anything is read, and again by every write.
   try {
-    if (!values['dry-run']) await assertNoLinksAll(repoRoot, pathsFor(parts, computer), { git: deps.git })
+    if (!values['dry-run']) await assertNoLinksAll(target, pathsFor(parts, computer), writeOptions)
   } catch (error) {
     if (!(error instanceof LinkedPath)) throw error
     LINK_REFUSAL.forEach(complain)
@@ -571,7 +691,7 @@ export async function runCollector({ argv, deps, repoRoot, out, err }) {
   }
 
   try {
-    await writeAll(repoRoot, files, { git: deps.git })
+    await writeAll(target, files, writeOptions)
   } catch (error) {
     if (error instanceof LinkedPath) {
       LINK_REFUSAL.forEach(complain)

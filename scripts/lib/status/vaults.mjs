@@ -793,7 +793,8 @@ const graphOf = (doc) => JSON.stringify([doc?.schema, doc?.computer, doc?.vaults
 // An earlier file that is a link, too big, not JSON, from the future or without a time is no earlier file.
 export async function whyLeaveVaultsAlone(deps, relativePath, doc) {
   if (typeof deps.dataDir !== 'string') return null
-  const read = await readSmall(fsOf(deps), join(deps.dataDir, ...relativePath.split('/')), VAULTS_MAX_FILE_BYTES)
+  // The earlier file is where the snapshot goes: the data folder, or the --out folder (deps.priorDir) when there is one.
+  const read = await readSmall(fsOf(deps), join(deps.priorDir ?? deps.dataDir, ...relativePath.split('/')), VAULTS_MAX_FILE_BYTES)
   if (read.state === 'missing') return doc.vaults?.status === 'not found' ? 'nothing named' : null
   if (read.state !== 'ok') return null
   let earlier
