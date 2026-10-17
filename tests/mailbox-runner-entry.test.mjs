@@ -47,7 +47,8 @@ test('a tick on a computer with no allowlist says so in one line and exits 1 - a
   try {
     assert.equal(run.status, 1)
     assert.equal(run.out.trim(), 'mailbox tick: unavailable (no-allowlist) - 0 claimed, 0 done, 0 refused, 0 failed')
-    const state = join(run.home, '.local', 'state', 'agent-mailbox')
+    // Windows keeps its state under LOCALAPPDATA (the test gives it no LOCALAPPDATA, so it is the one under the home folder).
+    const state = process.platform === 'win32' ? join(run.home, 'AppData', 'Local', 'Agent Board', 'state') : join(run.home, '.local', 'state', 'agent-mailbox')
     assert.ok((await readdir(state)).includes('last-tick.json'), 'the owner can see when it last ran')
     await assert.rejects(access(join(state, 'claims')), 'nothing was claimed')
     assert.deepEqual(await readdir(join(run.home, '.local', 'share')).catch(() => []), [], 'no clone was made')
@@ -60,6 +61,6 @@ test('the entry file reaches the machine only through the tested parts: git neve
   const text = await read('scripts/mailbox-runner.mjs')
   assert.ok(text.includes("GIT_TERMINAL_PROMPT: '0'"), 'git could stop to ask a question nobody is there to answer')
   const imports = [...text.matchAll(/^import .* from '([^']+)'$/gm)].map((match) => match[1]).sort()
-  assert.deepEqual(imports, ['./lib/mailbox/command.mjs', './lib/status/programs.mjs', 'node:child_process', 'node:os', 'node:util'])
+  assert.deepEqual(imports, ['./lib/mailbox/command.mjs', './lib/mailbox/windows.mjs', './lib/status/programs.mjs', 'node:child_process', 'node:os', 'node:util'])
   assert.ok(!/ANTHROPIC|MAILBOX_(KEY|SECRET)/.test(text), 'the entry file reads no secret itself')
 })

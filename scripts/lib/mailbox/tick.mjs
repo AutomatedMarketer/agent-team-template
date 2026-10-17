@@ -125,6 +125,12 @@ export async function runTick(ctx) {
   const where = await checkPlaces(places)
   if (!where.ok) return end('not-ready', `places-${where.why}`)
   await mkdir(places.stateDir, { recursive: true })
+  // Windows has no file modes, so the state folder (claims, allowlist, secrets) is made the current user's alone, and read back, before anything is read from it.
+  // No way to do that means no tick: it fails closed (windows.mjs, privatePlaces).
+  if (ctx.platform === 'win32') {
+    const priv = typeof ctx.privatePlaces === 'function' ? await ctx.privatePlaces(places) : { ok: false, why: 'unavailable' }
+    if (!priv.ok) return end('not-ready', `private-${priv.why}`)
+  }
   if (await exists(join(places.stateDir, 'PAUSE'))) return end('paused')
   const lock = await takeLock(places.stateDir, ctx.now())
   if (lock === null) return { state: 'busy', orders }

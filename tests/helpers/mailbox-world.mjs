@@ -201,6 +201,9 @@ export async function mailboxWorld({ files = {}, allowlist = ALLOWLIST(), clockA
     places,
     now: clock.now,
     platform: process.platform,
+    // Only used when the platform is win32 (the tick then asks for it, and fails closed without it): a folder lock that always says yes. The real one
+    // is tested in mailbox-windows.test.mjs, not by every test that runs a tick.
+    privatePlaces: async () => ({ ok: true }),
     env: { HOME: root, PATH: '/usr/bin' },
     home: root,
     identity: { hostname: 'nunos-mac', username: 'nunotavares', home: root },

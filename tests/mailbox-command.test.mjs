@@ -382,7 +382,7 @@ test('--selftest runs the real kind of run: the cheaper model, and the small env
     await run(w, ['--selftest'], { env })
     for (const call of w.claude.calls) {
       assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
-      assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
+      assert.deepEqual(call.options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1', ...(process.platform === 'win32' ? { NoDefaultCurrentDirectoryInExePath: '1' } : {}) })
     }
   } finally {
     await w.cleanup()

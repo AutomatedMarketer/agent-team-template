@@ -271,7 +271,7 @@ test('the guide says what a stop by launchctl bootout does, and the entry file r
 test('the guide names the fixed list Claude Code is found by, and it is the list in the code, in the same order', async () => {
   const doc = flat(await guide())
   const { claudeFolders } = await import('../scripts/lib/mailbox/claude.mjs')
-  const list = claudeFolders('/Users/owner').map((folder) => unix(folder))
+  const list = claudeFolders('/Users/owner', 'darwin').map((folder) => unix(folder))
   assert.deepEqual(list, ['/Users/owner/.local/bin', '/opt/homebrew/bin', '/usr/local/bin'])
   assert.ok(doc.includes('The list is `~/.local/bin/claude` first, then `/opt/homebrew/bin/claude`, then `/usr/local/bin/claude`'))
   assert.match(doc, /never by your `PATH`/)
@@ -558,7 +558,7 @@ test('step 1 checks the places the runner will really use for Claude Code, in th
   const doc = await guide()
   const step = section(doc, '### 1. A read-only look first', '### 2.')
   const { claudeFolders } = await import('../scripts/lib/mailbox/claude.mjs')
-  const places = claudeFolders('/HOME').map((folder) => `${unix(folder).replace('/HOME', '$HOME')}/claude`)
+  const places = claudeFolders('/HOME', 'darwin').map((folder) => `${unix(folder).replace('/HOME', '$HOME')}/claude`)
   assert.deepEqual(places, ['$HOME/.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'])
   // The one loop in the block names exactly these places, in this order, with quotes only where a variable is.
   const loop = /for place in (.+); do/.exec(step)[1]

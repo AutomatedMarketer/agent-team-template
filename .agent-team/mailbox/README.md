@@ -342,11 +342,32 @@ folder it was never asked to trust. It also says why a tool name with no path is
 
 ## On a Windows computer
 
-Not tested. The pieces are the same - the runner is plain Node.js - but nobody has run the schedule on Windows yet.
-The shape would be a Task Scheduler task that runs every 5 minutes. It must run **only when you are logged on**, so
-Claude's login can be read. It would run `node scripts/mailbox-runner.mjs` from the runner's code folder. Windows has no
-file modes, so the secrets file is not checked for who can read it. Keep it in your own user folder. Do not treat this
-as a tested setup until you have run `--preflight`, `--selftest` and one watched order yourself.
+Not tested end to end. The runner now has a Windows path.
+The parts that differ from a Mac were run once on a real Windows 11 computer (2026-10-17).
+`--preflight` found `claude.exe`, read its version and its login, and locked the state folder to one account.
+Nobody has yet run `--selftest` on Windows, because it spends tokens. Nobody has run a watched order or the schedule either.
+Do not treat it as a tested setup until you have.
+
+What is different from a Mac, and why:
+
+- **Claude Code.** The runner starts only a real `claude.exe`, by its full path.
+  The [native installer](https://code.claude.com/docs/en/setup) puts it at `%USERPROFILE%\.local\bin\claude.exe`.
+  An npm install leaves a `claude.cmd` file instead. That needs a shell to start, and the runner never uses a shell.
+  So `--preflight` tells you to install the native version.
+- **Folders.** Without switches, state and the work copy live under `%LOCALAPPDATA%\Agent Board\` (`state\` and `work\`).
+  The secrets file is `state\runner.env`. The runner's code is under `%USERPROFILE%\Agent Board\runner-code`.
+  The four must still not overlap. A program that runs the runner in-process (the student board) hands in its own four folders as `places`.
+- **File modes do not exist.** Instead the state folder (claims, allowlist, secrets) is given to your account alone, using `icacls` by its full path.
+  It is then read back. If any other account still has access, or the lock cannot be set, no tick starts.
+  The secrets file must be inside the state folder, so that one lock covers both.
+- **git is started by its full path.** Windows looks in the current folder before PATH for a program started by a bare name.
+  The work copy is the folder other people push to. So git is found once on PATH, and a copy inside the runner's own code is never used.
+  It runs from the system folder with `-C <folder>`. Claude's own environment also carries `NoDefaultCurrentDirectoryInExePath=1`.
+- **Stopping.** There are no process groups. A time-out ends Claude and everything it started with `taskkill /T /F`.
+
+The schedule would be a Task Scheduler task that runs every 5 minutes.
+It must run **only when you are logged on**, so Claude's login can be read.
+It would run `node scripts/mailbox-runner.mjs` from the runner's code folder.
 
 ## Not yet verified on a real Mac
 

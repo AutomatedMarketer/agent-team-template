@@ -11,10 +11,22 @@
 // copy inside the code checkout would be code that changes under a run. So the runner refuses to start when one is
 // inside another (or the same as another). "Inside" follows links and ignores capitals where the file system does.
 
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, win32 } from 'node:path'
 import { isInsideFolder } from '../status/commit.mjs'
 
-export function defaultPlaces(home) {
+// On Windows (the same layout the student board uses, "Agent Board"): state and the work copy under %LOCALAPPDATA%, the runner's code under the profile.
+// The secrets file sits inside the state folder, which is allowed and is what lets one private folder (windows.mjs) cover state and secrets.
+// `platform` is left out on a Mac and in every call that predates Windows, which keeps their answer exactly as it was.
+export function defaultPlaces(home, { platform, env } = {}) {
+  if (platform === 'win32') {
+    const local = typeof env?.LOCALAPPDATA === 'string' && win32.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : win32.join(home, 'AppData', 'Local')
+    return {
+      stateDir: win32.join(local, 'Agent Board', 'state'),
+      codeDir: win32.join(home, 'Agent Board', 'runner-code'),
+      workDir: win32.join(local, 'Agent Board', 'work'),
+      envFile: win32.join(local, 'Agent Board', 'state', 'runner.env')
+    }
+  }
   return {
     stateDir: join(home, '.local', 'state', 'agent-mailbox'),
     codeDir: join(home, '.local', 'share', 'agent-mailbox', 'runner-code'),

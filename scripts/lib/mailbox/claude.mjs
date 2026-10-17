@@ -37,7 +37,7 @@
 // the real one is never started on a development computer. This file never imports child_process.
 
 import { createWriteStream } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, win32 } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { REPO_SHAPE } from './contract.mjs'
 
@@ -56,7 +56,13 @@ const TOLERATED = Object.freeze(['EndConversation'])
 // start another, and every run would be refused with no way to fix it by running the self-test again. The native installer puts a link at
 // ~/.local/bin/claude (https://code.claude.com/docs/en/setup#auto-updates, read 2026-10-13), so that comes first; the Homebrew cask and an
 // older npm install put theirs in the two folders after it.
-export const claudeFolders = (home) => [...(typeof home === 'string' && home !== '' ? [join(home, '.local', 'bin')] : []), '/opt/homebrew/bin', '/usr/local/bin']
+// On Windows the native installer puts claude.exe at %USERPROFILE%\.local\bin\claude.exe (https://code.claude.com/docs/en/setup, read 2026-10-17) and that is the only folder: an npm install leaves a claude.cmd
+// shim, which needs a shell to start, and the runner never uses one (programs.mjs refuses a .cmd). The two Mac folders are not Windows folders.
+export const claudeFolders = (home, platform = process.platform) => {
+  const given = typeof home === 'string' && home !== ''
+  if (platform === 'win32') return given ? [win32.join(home, '.local', 'bin')] : []
+  return [...(given ? [join(home, '.local', 'bin')] : []), '/opt/homebrew/bin', '/usr/local/bin']
+}
 export const SETTINGS_FILE = '.agent-team/mailbox/claude-settings.json'
 export const MCP_FILE = '.agent-team/mailbox/empty-mcp.json'
 export const MAX_TURNS = 80
@@ -148,7 +154,7 @@ export function buildArgv({ prompt, model, codeDir, web }) {
 }
 
 const ENV_BASE = ['HOME', 'PATH', 'USER', 'LANG', 'TMPDIR']
-// What a program on Windows cannot start without. (That setup is not tested on a Windows computer.)
+// What a program on Windows cannot start without. (Run once on a real Windows 11 computer on 2026-10-17: claude.exe answered --version and auth status with exactly these.)
 const ENV_WINDOWS = ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'Path']
 
 // WHY: Claude Code "checks for updates on startup and periodically while running. Updates download and install in the background, then
@@ -158,11 +164,16 @@ const ENV_WINDOWS = ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TE
 // cannot stop an update made by a Claude Code the owner uses by hand, so the version is also asked just before each run (tick.mjs).
 export const UPDATE_SWITCHES = Object.freeze({ DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
 
+// Windows only: a program asked for by a bare name is looked for in the current folder first. Claude is started from the work copy, which other
+// people push to, so any program Claude Code (or git, or a tool it starts) names without a path must not be taken from there. This variable
+// (NoDefaultCurrentDirectoryInExePath, the switch behind the Win32 call NeedCurrentDirectoryForExePath) stops that search at the current folder. Our own starts are all by absolute path; this covers what the program we start then starts.
+export const WINDOWS_SWITCHES = Object.freeze({ NoDefaultCurrentDirectoryInExePath: '1' })
+
 // The environment Claude is started with: these variables and the two switches above, and no others - no key, no token, none of this
 // Mac's secrets, and nothing that changes where a program is loaded from or where it connects.
 export function claudeEnv(env, platform = process.platform) {
   const wanted = platform === 'win32' ? [...ENV_BASE, ...ENV_WINDOWS] : ENV_BASE
-  return { ...Object.fromEntries(wanted.filter((name) => typeof env?.[name] === 'string').map((name) => [name, env[name]])), ...UPDATE_SWITCHES }
+  return { ...Object.fromEntries(wanted.filter((name) => typeof env?.[name] === 'string').map((name) => [name, env[name]])), ...UPDATE_SWITCHES, ...(platform === 'win32' ? WINDOWS_SWITCHES : {}) }
 }
 
 // Keys and addresses that would send a run to a different account, a different server or a per-token bill. The runner

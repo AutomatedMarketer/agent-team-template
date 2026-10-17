@@ -140,7 +140,7 @@ test('a run order starts Claude once with the pinned flags and prompt, and lands
   const call = w.claude.calls[0]
   assert.equal(call.file, '/fake/bin/claude')
   assert.equal(call.options.cwd, w.places.workDir)
-  assert.deepEqual(Object.keys(call.options.env).sort(), ['DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'PATH'])
+  assert.deepEqual(Object.keys(call.options.env).sort(), ['DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'PATH', ...(process.platform === 'win32' ? ['NoDefaultCurrentDirectoryInExePath'] : [])].sort())
   assert.ok(call.args.includes('--permission-prompts'), 'this Claude is new enough')
   assert.ok(call.args.includes('--restricted'))
   assert.equal(call.args[call.args.indexOf('--model') + 1], 'sonnet')
@@ -1195,7 +1195,7 @@ test('Claude is started with a few variables of its own and none of the Mac\'s: 
   const env = { HOME: w.root, PATH: '/usr/bin', GITHUB_TOKEN: 'a-github-token', AWS_SECRET_ACCESS_KEY: 'an-aws-secret', MAILBOX_KEY: 'a-mailbox-key', NODE_OPTIONS: '--require /tmp/x.js', SSH_AUTH_SOCK: '/tmp/agent' }
   await runTick(w.ctx({ env }))
   assert.equal(w.claude.calls.length, 1)
-  assert.deepEqual(w.claude.calls[0].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
+  assert.deepEqual(w.claude.calls[0].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1', ...(process.platform === 'win32' ? { NoDefaultCurrentDirectoryInExePath: '1' } : {}) })
 }))
 
 // A good task sweep: the digest, one card worked (status, day, a Result section) and a log for the orchestrator.
@@ -1434,7 +1434,7 @@ test('the version is asked immediately before Claude starts - from an empty fold
   assert.deepEqual(events, ['version', 'version', 'spawn'], 'the daily check, then the one just before the run')
   assert.equal(asked[1].file, '/fake/bin/claude')
   assert.equal(asked[1].options.cwd, join(w.places.stateDir, 'empty-cwd'), 'never the team repo')
-  assert.deepEqual(asked[1].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1' })
+  assert.deepEqual(asked[1].options.env, { HOME: w.root, PATH: '/usr/bin', DISABLE_AUTOUPDATER: '1', DISABLE_UPDATES: '1', ...(process.platform === 'win32' ? { NoDefaultCurrentDirectoryInExePath: '1' } : {}) })
 }))
 
 test('a version that cannot be read just before a run, or one the self-test never saw, is the same as a changed one: no run', () => withWorld(async (w) => {

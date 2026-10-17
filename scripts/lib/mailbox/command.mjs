@@ -75,6 +75,20 @@ const PLACE_WORDS = {
   'env-inside-work': 'the secrets file is inside the work copy'
 }
 
+// Windows only: the one case of "not found" that is really "found, but not as a program the runner may start".
+const WINDOWS_SHIM = 'Claude: Claude Code was found only as a .cmd file (an npm install) or inside the work copy. The runner starts only a real claude.exe, by its full path. Install the native version (https://code.claude.com/docs/en/setup) and run this again.'
+
+// Windows only (windows.mjs, privatePlaces): why the state folder could not be made private to the current account.
+const PRIVATE_WORDS = {
+  'secrets-outside-state': 'the secrets file is not inside the state folder, so the folder lock would not cover it',
+  'no-system-root': 'the Windows system folder (SystemRoot) is not known',
+  'no-user': 'the Windows account name is not known or is not a plain name',
+  'lock-failed': 'icacls could not set the folder to your account only',
+  'others-have-access': 'after the lock another account still has access to the folder',
+  'not-you': 'after the lock the one account with access is not yours',
+  unavailable: 'this run has no way to lock the folder'
+}
+
 const PROBLEM_WORDS = {
   'claude-missing': 'Claude Code was not found.',
   'version-unknown': 'Claude Code did not say which version it is.',
@@ -97,6 +111,11 @@ async function report(ctx, places, out) {
   const where = await checkPlaces(places)
   say(where.ok, where.ok ? 'folders: none overlaps another' : `folders: ${PLACE_WORDS[where.why] ?? where.why}`)
 
+  if (ctx.platform === 'win32') {
+    const priv = typeof ctx.privatePlaces === 'function' ? await ctx.privatePlaces(places) : { ok: false, why: 'unavailable' }
+    say(priv.ok, priv.ok ? 'private folder: only your Windows account can open the state folder and the secrets in it' : `private folder: ${PRIVATE_WORDS[priv.why] ?? priv.why}`)
+  }
+
   const allowed = await readAllowedOrders(places.stateDir, ctx.identity)
   if (allowed.state === 'ok') say(true, `allowlist: ${allowed.allow.actions.length} actions, ${allowed.allow.jobs.size} jobs, ${allowed.allow.perDay.orders} orders a day`)
   else say(false, allowed.state === 'missing' ? 'allowlist: missing - there is no allowed-orders.yml in the state folder, so nothing will run' : `allowlist: not usable (${allowed.why}) - nothing will run`)
@@ -111,7 +130,8 @@ async function report(ctx, places, out) {
   const accepted = ctx.originAccepted ?? (allowed.state === 'ok' ? (url) => originMatches(url, allowed.allow.repo) : () => false)
   const checks = await preflight({ find: ctx.find, exec: ctx.exec, origin: () => readOrigin(places.workDir), originAccepted: accepted, emptyDir: empty, env: ctx.env, platform: ctx.platform })
   const has = (problem) => checks.problems.includes(problem)
-  say(!has('claude-missing'), has('claude-missing') ? 'Claude: Claude Code was not found.' : `Claude: found${checks.version ? `, version ${checks.version.join('.')}` : ''}`)
+  const shim = has('claude-missing') && ctx.platform === 'win32' && (await ctx.find('claude')).state === 'refused'
+  say(!has('claude-missing'), has('claude-missing') ? (shim ? WINDOWS_SHIM : 'Claude: Claude Code was not found.') : `Claude: found${checks.version ? `, version ${checks.version.join('.')}` : ''}`)
   if (!has('claude-missing') && ctx.findAll) {
     // Every copy on the list, and the one the runner uses. Paths are shown from the home folder, never with the user name.
     const every = (await ctx.findAll('claude')).paths
@@ -146,11 +166,11 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
     return parsed.help ? 0 : 2
   }
   const scriptRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-  const places = { ...(rest.places ?? { ...defaultPlaces(home), codeDir: codeDir ?? scriptRoot }), ...parsed.paths }
+  const places = { ...(rest.places ?? { ...defaultPlaces(home, { platform: rest.platform, env: rest.env }), codeDir: codeDir ?? scriptRoot }), ...parsed.paths }
   // A program inside the work copy is never run: that is the folder other people push to.
   // Claude Code is found by one fixed list of folders (claude.mjs, claudeFolders), the same in a terminal and under launchd. Any other program
   // is found as before. `claudeFolders` in the arguments is for the tests, which cannot have a real /opt/homebrew/bin.
-  const folders = Array.isArray(rest.claudeFolders) ? rest.claudeFolders : claudeFolders(home)
+  const folders = Array.isArray(rest.claudeFolders) ? rest.claudeFolders : claudeFolders(home, rest.platform)
   const where = (name) => ({ clone: places.workDir, ...(name === 'claude' ? { folders } : {}) })
   const find = typeof rest.find === 'function' ? (name) => rest.find(name, where(name)) : undefined
   const findAll = typeof rest.findAll === 'function' ? (name) => rest.findAll(name, where(name)) : undefined

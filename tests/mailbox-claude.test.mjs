@@ -204,10 +204,10 @@ test('Claude gets five variables of the Mac\'s and the two switches that stop it
   assert.deepEqual(claudeEnv({ DISABLE_AUTOUPDATER: '0', DISABLE_UPDATES: '0' }, 'darwin'), NO_UPDATES, 'and nothing the runner was started with can turn them off')
 })
 
-test('on Windows the few variables a program there cannot start without are added (not tested on a Windows computer)', () => {
+test('on Windows the few variables a program there cannot start without are added, and a bare program name is not looked for in the current folder', () => {
   const env = { HOME: 'C:\\Users\\s', USERPROFILE: 'C:\\Users\\s', APPDATA: 'C:\\Users\\s\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\s\\AppData\\Local', SystemRoot: 'C:\\Windows', TEMP: 'C:\\t', TMP: 'C:\\t', Path: 'C:\\Windows', GITHUB_TOKEN: 'g' }
   const found = claudeEnv(env, 'win32')
-  assert.deepEqual(Object.keys(found).sort(), ['APPDATA', 'DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'LOCALAPPDATA', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'USERPROFILE'])
+  assert.deepEqual(Object.keys(found).sort(), ['APPDATA', 'DISABLE_AUTOUPDATER', 'DISABLE_UPDATES', 'HOME', 'LOCALAPPDATA', 'NoDefaultCurrentDirectoryInExePath', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'USERPROFILE'])
 })
 
 test('a runner started with a key of its own in its environment is refused, naming the variable and never its value', () => {
