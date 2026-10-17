@@ -155,7 +155,9 @@ test('in a process that does not end on a signal (keepLockOnSignal), the handler
     let lockWhileUnwinding = null
     w.claude.script = async () => {
       proc.emit('SIGTERM')
-      for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve))
+      // Looked at once the handler has finished (it calls exit last), not after a few turns: a release still on its way to the disk
+      // would otherwise pass for a lock that was kept.
+      for (let turn = 0; turn < 400 && proc.exited === undefined; turn += 1) await new Promise((resolve) => setTimeout(resolve, 5))
       lockWhileUnwinding = await exists(join(w.places.stateDir, 'lock'))
       return []
     }
