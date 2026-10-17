@@ -32,6 +32,7 @@ import { isoSeconds } from '../status/util.mjs'
 import { mailboxPath } from '../status/mailbox-schema.mjs'
 import { ACTIONS } from './contract.mjs'
 import { verifyEnvelope } from './envelope.mjs'
+import { createProgress, settleLeftovers } from './progress.mjs'
 import { validatePayload } from './validate.mjs'
 import { checkPlaces } from './places.mjs'
 import { readMailboxEnv } from './keys.mjs'
@@ -162,6 +163,8 @@ async function locked(ctx, { orders, end, log }) {
   const emptyCwd = join(places.stateDir, 'empty-cwd')
   await rm(emptyCwd, { recursive: true, force: true })
   await mkdir(emptyCwd)
+  // This tick holds the lock, so no run of this runner is alive: a progress file that never finished belongs to one that died (progress.mjs).
+  await settleLeftovers({ stateDir: places.stateDir, now: ctx.now(), fs: ctx.fs })
 
   const s = {
     ctx, orders, log, allow: allowed.allow, keys: secrets.secrets, key: secrets.key, claimsSince: store.since, hooks,
@@ -346,7 +349,9 @@ async function settle(s, id, action, change) {
     commit: change.commit ?? null,
     why: change.why ?? null,
     landed: null,
-    ...(change.files ? { files: change.files } : {})
+    ...(change.files ? { files: change.files } : {}),
+    // How many tool calls a run made, kept for the status file. Only a run that ended says it; nothing else has the key.
+    ...(Number.isSafeInteger(change.steps) && change.steps >= 0 && (change.state === 'ok' || change.state === 'failed') ? { steps: change.steps } : {})
   }
   // A final word that cannot be written stops everything, as a crash would: the claim then has none, and the next tick settles it.
   if (!(await writeClaimFile(ctx.places.stateDir, id, 'final.json', record, { fs: ctx.fs })).ok) throw new Error('the final word of an order could not be written')
@@ -437,34 +442,48 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   // What git reads as configuration, as it is now: compared again when Claude is done, before git is run in this folder (gitguard.mjs).
   const before = await snapshotGit(workDir)
   if (!before.ok) return fail('change-refused')
-  const ran = await runClaude({
-    file: fit.file,
-    argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
-    cwd: workDir,
-    env: claudeEnv(ctx.env, ctx.platform),
-    tools: toolsFor(plan.web),
-    timeoutMs: minutes * 60_000,
-    transcriptPath: join(claimDir, 'transcript.jsonl'),
-    stderrPath: join(claimDir, 'stderr.txt'),
-    spawn: ctx.spawn,
-    kill: ctx.kill,
-    platform: ctx.platform,
-    live: ctx.live
-  })
+  // How far it has got, for whoever is watching (progress.mjs). Counts and tool names only. Marked final however the run ends, also when a signal stops the
+  // runner (the cleanup is run by the handler, signals.mjs).
+  const progress = createProgress({ stateDir, id, now: ctx.now, fs: ctx.fs })
+  const closeProgress = () => progress.finish({ ok: false })
+  ctx.live?.cleanups.add(closeProgress)
+  let ran
+  try {
+    ran = await runClaude({
+      file: fit.file,
+      argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
+      cwd: workDir,
+      env: claudeEnv(ctx.env, ctx.platform),
+      tools: toolsFor(plan.web),
+      timeoutMs: minutes * 60_000,
+      transcriptPath: join(claimDir, 'transcript.jsonl'),
+      stderrPath: join(claimDir, 'stderr.txt'),
+      spawn: ctx.spawn,
+      kill: ctx.kill,
+      platform: ctx.platform,
+      live: ctx.live,
+      onEvent: progress.onEvent
+    })
+  } finally {
+    ctx.live?.cleanups.delete(closeProgress)
+    await progress.finish({ ok: ran?.ok === true })
+  }
+  const steps = Object.values(ran.calls ?? {}).reduce((sum, count) => sum + count, 0)
+  const failed = (why) => settle(s, id, action, { state: 'failed', why, startedAt, steps })
   // Before anything else, and whether or not the run went well: git must not run in a folder where Claude changed what git reads. The order fails
   // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.
   if (!(await gitUnchanged(workDir, before))) {
     s.log('mailbox: a run changed the git settings of the work copy, so the order failed and the work copy was made again')
     await remakeWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, before })
-    return fail('change-refused')
+    return failed('change-refused')
   }
-  if (!ran.ok) return fail(ran.why)
+  if (!ran.ok) return failed(ran.why)
 
   const checked = await checkChanges({ root: workDir, git: s.git, action, fields, plan })
-  if (!checked.ok) return fail(checked.why)
+  if (!checked.ok) return failed(checked.why)
   await finishRunLogs({ root: workDir, paths: checked.logs, finishedAt: ctx.now() })
   const again = await checkChanges({ root: workDir, git: s.git, action, fields, plan })
-  if (!again.ok) return fail(again.why)
+  if (!again.ok) return failed(again.why)
 
   // What goes back: each changed file's final text, and for a changed one the text it was changed from, so that after a
   // race the change is put back only where nobody else has touched.
@@ -472,7 +491,7 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   for (const file of again.files) {
     const now = await readRepoFile(workDir, file.path, s.git)
     const was = file.status === 'modified' ? (await s.git(['show', `HEAD:${file.path}`], workDir)).stdout : null
-    if (now.state !== 'ok') return fail('change-refused')
+    if (now.state !== 'ok') return failed('change-refused')
     saved.push({ ...file, text: now.text, was })
   }
   const redo = async () => {
@@ -488,7 +507,7 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
     const rechecked = await checkChanges({ root: workDir, git: s.git, action, fields, plan })
     return rechecked.ok ? { ok: true, files: rechecked.files.map((file) => file.path) } : { ok: false, state: 'failed', why: rechecked.why }
   }
-  return publish(s, { id, action, head: reset.head, files: again.files.map((file) => file.path), redo, level, fail, startedAt })
+  return publish(s, { id, action, head: reset.head, files: again.files.map((file) => file.path), redo, level, fail: failed, startedAt, steps })
 }
 
 /* ---------- putting a change back ----------------------------------------------------------------------------------- */
@@ -536,7 +555,7 @@ async function publish(s, o) {
     if (!reset.ok) break
     o.head = reset.head
     const redone = await o.redo()
-    if (!redone.ok) return settle(s, o.id, o.action, { state: redone.state, why: redone.why, startedAt: o.startedAt })
+    if (!redone.ok) return settle(s, o.id, o.action, { state: redone.state, why: redone.why, startedAt: o.startedAt, steps: o.steps })
     o.files = redone.files
   }
   // Nothing of it left this Mac. The clone is brought level again before anything else is done in it, and Claude is not run again.
@@ -551,7 +570,7 @@ async function settleLanded(s, o, commit) {
     const read = await readRepoFile(workDir, path, s.git)
     files.push({ path, sha256: sha256(read.text ?? '') })
   }
-  await settle(s, o.id, o.action, { state: 'ok', commit: commit.slice(0, 12), startedAt: o.startedAt, files })
+  await settle(s, o.id, o.action, { state: 'ok', commit: commit.slice(0, 12), startedAt: o.startedAt, files, steps: o.steps })
 }
 
 /* ---------- the status file ----------------------------------------------------------------------------------------- */

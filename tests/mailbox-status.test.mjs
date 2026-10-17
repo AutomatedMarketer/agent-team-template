@@ -14,6 +14,7 @@ import {
   MAILBOX_MAX_COMPUTERS_SHOWN,
   MAILBOX_MAX_ORDERS,
   MAILBOX_MAX_JOBS,
+  MAILBOX_MAX_STEPS,
   MAILBOX_STATES,
   MAILBOX_COMMIT,
   MAILBOX_REASONS,
@@ -47,6 +48,8 @@ test('mailbox status: this side\'s numbers, words and lists are the contract\'s'
   assert.deepEqual(MAILBOX_KEYS.allows, status.allowedKeys.allows)
   assert.deepEqual(MAILBOX_KEYS.order, status.allowedKeys.order)
   assert.deepEqual(status.requiredKeys, status.allowedKeys, 'every key is required')
+  assert.deepEqual(MAILBOX_KEYS.orderOptional, status.optionalKeys.order)
+  assert.equal(MAILBOX_MAX_STEPS, status.maxSteps)
   assert.equal(`${MAILBOX_FOLDER}/${status.fileName.replace('<runner>', 'mac-mini')}`, mailboxPath('mac-mini'))
   assert.equal(mailboxPath('Mac Mini'), null)
   assert.equal(mailboxPath('../x'), null)
@@ -61,6 +64,25 @@ for (const { why, entry } of status.orderRefuse) {
     const file = sample()
     file.orders.push(entry)
     assert.ok(checkMailbox(file, IDENTITY).length > 0, why)
+  })
+}
+
+// steps is optional: the board's older copy of the contract does not know it. These are the cases for the one key a run that ended may add.
+for (const { why, entry } of status.stepsRefuse) {
+  test(`the gate refuses an order entry with ${why}, for the steps alone`, () => {
+    const file = sample()
+    file.orders.push({ ...entry, id: 'fe'.repeat(16) })
+    const problems = checkMailbox(file, IDENTITY)
+    assert.equal(problems.length, 1, JSON.stringify(problems))
+    assert.match(problems[0], /steps/)
+  })
+}
+
+for (const { why, entry } of status.stepsAccept) {
+  test(`the gate accepts an order entry with ${why}`, () => {
+    const file = sample()
+    file.orders.push({ ...entry, id: 'fe'.repeat(16) })
+    assert.deepEqual(checkMailbox(file, IDENTITY), [])
   })
 }
 

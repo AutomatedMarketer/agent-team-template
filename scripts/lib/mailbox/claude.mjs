@@ -225,7 +225,10 @@ export function runClaude({
   // The tools this run was started with (toolsFor): any other tool listed or called stops it.
   tools = TOOLS,
   // `live` (signals.mjs) is told which process is alive, so a signal that stops the runner can kill it.
-  spawn, kill, platform = process.platform, openStream = createWriteStream, live = null
+  spawn, kill, platform = process.platform, openStream = createWriteStream, live = null,
+  // Optional: told how far the run has got - { type: 'started' }, { type: 'tool', name } for each allowed tool call, { type: 'finishing' } - and NEVER given a word
+  // Claude wrote or read (progress.mjs). It can throw or be slow; neither reaches the run.
+  onEvent = null
 }) {
   const allowedNames = new Set([...tools, ...TOLERATED])
   const stop = kill ?? ((pid, signal) => killTree(pid, signal, { platform, spawn }))
@@ -292,9 +295,19 @@ export function runClaude({
       hardStop('tool-refused')
     }
 
+    const report = (event) => {
+      if (typeof onEvent !== 'function') return
+      try {
+        onEvent(event)
+      } catch {
+        // Progress is best effort: it can never fail a run.
+      }
+    }
+
     const audit = (name) => {
       if (!allowedNames.has(name)) return refuseTool(name)
       calls.set(name, (calls.get(name) ?? 0) + 1)
+      report({ type: 'tool', name })
       return undefined
     }
 
@@ -312,6 +325,7 @@ export function runClaude({
           if (!allowedNames.has(name)) return refuseTool(name)
         }
         if (Array.isArray(event.mcp_servers) && event.mcp_servers.length) return refuseTool('mcp')
+        report({ type: 'started' })
       } else if (Array.isArray(event?.message?.content)) {
         for (const block of event.message.content) {
           if (block?.type === 'tool_use') audit(block.name)
@@ -319,6 +333,7 @@ export function runClaude({
         }
       } else if (event?.type === 'result') {
         resultMessage = event
+        report({ type: 'finishing' })
       }
     }
 
