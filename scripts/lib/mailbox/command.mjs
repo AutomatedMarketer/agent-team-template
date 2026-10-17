@@ -11,8 +11,8 @@
 // switch that is not one.
 
 import { fileURLToPath } from 'node:url'
-import { mkdir, realpath, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { access, mkdir, realpath, rm } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
 import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
@@ -76,6 +76,17 @@ const PLACE_WORDS = {
 }
 
 // Windows only: the one case of "not found" that is really "found, but not as a program the runner may start".
+async function npmShimExists(env) {
+  const key = Object.keys(env ?? {}).find((name) => name.toUpperCase() === 'APPDATA')
+  if (key === undefined || typeof env[key] !== 'string' || !isAbsolute(env[key])) return false
+  try {
+    await access(join(env[key], 'npm', 'claude.cmd'))
+    return true
+  } catch {
+    return false
+  }
+}
+
 const WINDOWS_SHIM = 'Claude: Claude Code was found only as a .cmd file (an npm install) or inside the work copy. The runner starts only a real claude.exe, by its full path. Install the native version (https://code.claude.com/docs/en/setup) and run this again.'
 
 // Windows only (windows.mjs, privatePlaces): why the state folder could not be made private to the current account.
@@ -130,7 +141,8 @@ async function report(ctx, places, out) {
   const accepted = ctx.originAccepted ?? (allowed.state === 'ok' ? (url) => originMatches(url, allowed.allow.repo) : () => false)
   const checks = await preflight({ find: ctx.find, exec: ctx.exec, origin: () => readOrigin(places.workDir), originAccepted: accepted, emptyDir: empty, env: ctx.env, platform: ctx.platform })
   const has = (problem) => checks.problems.includes(problem)
-  const shim = has('claude-missing') && ctx.platform === 'win32' && (await ctx.find('claude')).state === 'refused'
+  // npm leaves claude.cmd in the npm folder under APPDATA. It is looked for only to give this message: it is never run.
+  const shim = has('claude-missing') && ctx.platform === 'win32' && ((await ctx.find('claude')).state === 'refused' || (await npmShimExists(ctx.env)))
   say(!has('claude-missing'), has('claude-missing') ? (shim ? WINDOWS_SHIM : 'Claude: Claude Code was not found.') : `Claude: found${checks.version ? `, version ${checks.version.join('.')}` : ''}`)
   if (!has('claude-missing') && ctx.findAll) {
     // Every copy on the list, and the one the runner uses. Paths are shown from the home folder, never with the user name.
