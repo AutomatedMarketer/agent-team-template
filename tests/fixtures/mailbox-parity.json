@@ -901,9 +901,9 @@
     "stateRules": {
       "claimed": "Picked up and checked; nothing changed yet. startedAt, finishedAt, commit, why and landed are null.",
       "running": "A job run has started. startedAt is set; finishedAt, commit, why and landed are null.",
-      "ok": "Pushed: commit is the 12-hex start of the commit on main. finishedAt is set; why and landed are null. A run may also carry steps.",
+      "ok": "Pushed: commit is the 12-hex start of the commit on main. finishedAt is set; why and landed are null.",
       "refused": "Nothing ran. why is one of reasons.refused. commit and landed are null.",
-      "failed": "It ran, and nothing left the Mac. why is one of reasons.failed. commit and landed are null. A run may also carry steps.",
+      "failed": "It ran, and nothing left the Mac. why is one of reasons.failed. commit and landed are null.",
       "unknown": "The runner stopped part-way (OUTCOME_UNKNOWN) and will never run it again. landed is true when a commit with this order's Mailbox-Order trailer is on main (commit is then set), false when there is none, null until that has been checked. why is null."
     },
     "reasons": {

@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import * as realFsPromises from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mailboxWorld, T0 } from './helpers/mailbox-world.mjs'
@@ -13,7 +14,7 @@ import { entryFromRecords } from '../scripts/lib/mailbox/ledger.mjs'
 import { runClaude } from '../scripts/lib/mailbox/claude.mjs'
 import { PROGRESS, createProgress, settleLeftovers } from '../scripts/lib/mailbox/progress.mjs'
 import { checkMailbox } from '../scripts/lib/status/safe.mjs'
-import { MAILBOX_SHAPE } from '../scripts/lib/status/mailbox-schema.mjs'
+import { MAILBOX_SHAPE, MAILBOX_MAX_STEPS } from '../scripts/lib/status/mailbox-schema.mjs'
 
 /* Live progress of a run. While Claude works, the runner keeps one small file in its state folder (progress/<order id>.json) that says only HOW FAR it is:
    a phase, how many tool calls and which tools, when it started and when it last did something. Never a word Claude wrote or read - the same rule as
@@ -132,33 +133,60 @@ test('the file says phase, step count, calls by tool, last tool, start and last-
   assert.deepEqual((await readdir(join(dir, PROGRESS.folder))), [`${ID}.json`], 'no half-written file is left behind')
 }))
 
+// A clock for timers too: the catch-up write and the wait on a slow disk are timers, so a test fires them by hand.
+function fakeTimers() {
+  const pending = new Map()
+  let next = 1
+  return {
+    set: (fn, ms) => { const handle = next++; pending.set(handle, { fn, ms }); return handle },
+    clear: (handle) => { pending.delete(handle) },
+    count: () => pending.size,
+    msOf: () => [...pending.values()].map((entry) => entry.ms),
+    fireAll: async () => { for (const [handle, entry] of [...pending]) { pending.delete(handle); entry.fn() } }
+  }
+}
+
 test('it is written at most once every 2 seconds, the first event at once, and the last state always on finish', () => withState(async (dir) => {
   const c = clock()
-  const progress = createProgress({ stateDir: dir, id: ID, now: c.now })
+  const timers = fakeTimers()
+  const progress = createProgress({ stateDir: dir, id: ID, now: c.now, timers })
   progress.onEvent({ type: 'started' })
   await progress.settled()
-  const writes = []
-  const seen = async () => {
-    await progress.settled()
-    const body = await read(dir)
-    if (body.steps !== (writes.at(-1) ?? 0)) writes.push(body.steps)
-  }
   for (let n = 1; n <= 10; n += 1) {
     c.move(100)
     progress.onEvent({ type: 'tool', name: 'Grep' })
-    await seen()
+    await progress.settled()
   }
-  assert.deepEqual(writes, [], 'a second of events inside the window wrote nothing more')
+  assert.equal((await read(dir)).steps, 0, 'a second of events inside the window wrote nothing more')
+  assert.equal(timers.count(), 1, 'but ONE catch-up write is waiting for the end of the window, not one per event')
+  assert.ok(timers.msOf()[0] > 0 && timers.msOf()[0] <= PROGRESS.throttleMs)
+  c.move(1000)
+  await timers.fireAll()
+  await progress.settled()
+  assert.equal((await read(dir)).steps, 10, 'the catch-up write puts everything so far in the file, with no further event')
   c.move(2000)
   progress.onEvent({ type: 'tool', name: 'Grep' })
-  await seen()
-  assert.deepEqual(writes, [11], 'once the window is over the next event writes everything so far')
+  await progress.settled()
+  assert.equal((await read(dir)).steps, 11, 'once the window is over the next event writes at once')
   c.move(10)
   progress.onEvent({ type: 'tool', name: 'Grep' })
+  assert.equal(timers.count(), 1)
   await progress.finish({ ok: false })
+  assert.equal(timers.count(), 0, 'finish clears the catch-up timer')
   const last = await read(dir)
   assert.equal(last.steps, 12, 'the end always writes the true count')
   assert.equal(last.outcome, 'failed')
+}))
+
+test('the catch-up timer does not keep the process alive', () => withState(async (dir) => {
+  const c = clock()
+  const progress = createProgress({ stateDir: dir, id: ID, now: c.now })
+  progress.onEvent({ type: 'started' })
+  c.move(10)
+  progress.onEvent({ type: 'tool', name: 'Read' })
+  await progress.finish({ ok: true })
+  // A real timer left running would hold this test process open; reaching here with the file final is the check that finish cleared it.
+  assert.equal((await read(dir)).final, true)
 }))
 
 test('no text ever reaches the file: an event carrying text, or a name that is text, is cut down to the fixed fields', () => withState(async (dir) => {
@@ -370,7 +398,7 @@ test('a signal that stops the runner mid-run marks the progress file final at on
     }
     await assert.rejects(runTick(w.ctx({ live })), /stopped by a signal/)
     assert.equal(seenRightAfter.final, true)
-    assert.equal(seenRightAfter.outcome, 'failed')
+    assert.equal(seenRightAfter.outcome, 'unknown', 'a stopped order is outcome unknown, the same word signals.mjs gives it')
   } finally {
     await w.cleanup()
   }
@@ -401,3 +429,148 @@ test('the ledger keeps steps only for an order that ended', () => {
   for (const bad of [-1, 1.5, '5', null, 100001]) assert.ok(!('steps' in entryFromRecords(ID, receipt, { ...final('ok'), steps: bad })), String(bad))
 })
 
+
+/* ---------- review fixes ------------------------------------------------------------------------------------------ */
+
+const strayThenGood = (w) => async (cwd, args, call) => {
+  const events = await w.claude.good(cwd, args, call)
+  await mkdir(join(cwd, 'stray'), { recursive: true })
+  await writeFile(join(cwd, 'stray', 'extra.txt'), 'a file this job may not write\n')
+  return events
+}
+
+test('fix 2: Claude ok but the changes are refused afterwards - the progress file says failed, like the final word', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = strayThenGood(w)
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    await runTick(w.ctx())
+    const final = await w.claimFile(sent.id, 'final.json')
+    assert.equal(final.state, 'failed')
+    const body = await progressOf(w, sent.id)
+    assert.equal(body.final, true)
+    assert.equal(body.outcome, 'failed')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('fix 2: Claude ok but the push fails - the progress file says failed, like the final word', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    let raced = false
+    const { git } = w.ctx()
+    const racing = async (args, cwd) => {
+      if (args.includes('commit') && !raced && String(args[args.indexOf('-m') + 1]).startsWith('Mailbox order')) {
+        raced = true
+        await w.otherPush('inbox/2026-10-12/morning-intel.md', 'someone else wrote the brief first\n')
+      }
+      return git(args, cwd)
+    }
+    await runTick(w.ctx({ git: racing }))
+    assert.equal((await w.claimFile(sent.id, 'final.json')).why, 'push-failed')
+    assert.equal((await progressOf(w, sent.id)).outcome, 'failed')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('fix 2: Claude ok and the order lands - the progress file says ok, with the final word', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    await runTick(w.ctx())
+    assert.equal((await w.claimFile(sent.id, 'final.json')).state, 'ok')
+    assert.equal((await progressOf(w, sent.id)).outcome, 'ok')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('fix 2: the progress file is not final while Claude is done but the order is not settled yet', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    const { git } = w.ctx()
+    let seen = null
+    const watching = async (args, cwd) => {
+      if (args.includes('push') && seen === null) seen = await progressOf(w, sent.id)
+      return git(args, cwd)
+    }
+    await runTick(w.ctx({ git: watching }))
+    assert.equal(seen.final, false, 'during the push the order could still fail, so the file does not yet claim an end')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('fix 4: a progress folder that is a junction or link is not followed: nothing at its target is touched', () => withState(async (dir) => {
+  const target = join(dir, 'elsewhere')
+  await mkdir(target)
+  const bystander = join(target, `${ID}.json`)
+  const old = { schema: PROGRESS.schema, id: ID, phase: 'working', startedAt: iso(T0), lastEventAt: iso(T0), steps: 1, calls: { Read: 1 }, lastTool: 'Read', final: false }
+  await writeFile(bystander, `${JSON.stringify(old)}\n`)
+  await writeFile(join(target, 'notes.txt'), 'not ours')
+  const before = await readFile(bystander, 'utf8')
+  await symlink(target, join(dir, PROGRESS.folder), 'junction')
+  await settleLeftovers({ stateDir: dir, now: T0 + 3 * 24 * 3600 * 1000 })
+  assert.equal(await readFile(bystander, 'utf8'), before, 'the file behind the link was not marked stale')
+  assert.equal(await readFile(join(target, 'notes.txt'), 'utf8'), 'not ours', 'and no file behind it was removed')
+  assert.deepEqual((await readdir(target)).sort(), [`${ID}.json`, 'notes.txt'])
+}))
+
+test('fix 5: the final write is tried again after a busy or denied file, and gives up quietly after three tries', () => withState(async (dir) => {
+  const c = clock()
+  let failures = 0
+  const sleeps = []
+  const fs = { ...realFsPromises, rename: async (...args) => { if (failures > 0) { failures -= 1; throw Object.assign(new Error('busy'), { code: 'EBUSY' }) } return realFsPromises.rename(...args) } }
+  const progress = createProgress({ stateDir: dir, id: ID, now: c.now, fs, sleep: async (ms) => { sleeps.push(ms) } })
+  progress.onEvent({ type: 'tool', name: 'Read' })
+  await progress.settled()
+  failures = 2
+  await progress.finish({ ok: true })
+  assert.equal((await read(dir)).final, true, 'the final word got through after two failures')
+  assert.equal(sleeps.length, 2)
+  assert.ok(sleeps.every((ms) => ms > 0 && ms <= 1000), 'with a short back-off')
+  const other = await mkdtemp(join(tmpdir(), 'mailbox-progress-'))
+  try {
+    const always = { ...realFsPromises, rename: async () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }) } }
+    const tries = []
+    const stubborn = createProgress({ stateDir: other, id: ID, now: c.now, fs: always, sleep: async (ms) => { tries.push(ms) } })
+    await stubborn.finish({ ok: true })
+    assert.equal(tries.length, 2, 'three tries in all')
+  } finally {
+    await rm(other, { recursive: true, force: true })
+  }
+}))
+
+test('fix 7: finish does not wait longer than about 2 seconds on a disk that hangs', () => withState(async (dir) => {
+  const c = clock()
+  const timers = fakeTimers()
+  const hung = { ...realFsPromises, writeFile: () => new Promise(() => {}) }
+  const progress = createProgress({ stateDir: dir, id: ID, now: c.now, fs: hung, timers })
+  progress.onEvent({ type: 'tool', name: 'Read' })
+  let done = false
+  const finishing = progress.finish({ ok: true }).then(() => { done = true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(done, false, 'still waiting while the limit has not passed')
+  assert.ok(timers.msOf().some((ms) => ms >= 1500 && ms <= 3000), 'the wait is limited to about 2 seconds')
+  await timers.fireAll()
+  await finishing
+  assert.equal(done, true)
+}))
+
+test('fix 8: progress and the status file share one step cap, 100000', () => {
+  assert.equal(PROGRESS.maxSteps, MAILBOX_MAX_STEPS)
+  assert.equal(PROGRESS.maxSteps, 100000)
+})
+
+test('fix 9: the shared fixture keeps the stateRules text it had on main', async () => {
+  const fixture = JSON.parse(await readFile(new URL('./fixtures/mailbox-parity.json', import.meta.url), 'utf8'))
+  const rules = fixture.status.stateRules
+  for (const key of ['ok', 'failed']) assert.ok(!rules[key].includes('steps'), `stateRules.${key} is unchanged from main`)
+})
