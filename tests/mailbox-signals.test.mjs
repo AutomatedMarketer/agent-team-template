@@ -119,14 +119,18 @@ test('the command listens for SIGTERM and SIGINT on the process it is given, and
   try {
     const proc = Object.assign(new EventEmitter(), { exit: (code) => { proc.exited = code } })
     const killed = []
+    let lockAtExit = null
     w.claude.script = async () => {
       proc.emit('SIGTERM')
-      await new Promise((resolve) => setImmediate(resolve))
+      // On a Mac the process ends at exit(), so the tick's own finally never runs: the handler must have released the lock by then.
+      for (let turn = 0; turn < 400 && proc.exited === undefined; turn += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+      lockAtExit = await exists(join(w.places.stateDir, 'lock'))
       return []
     }
     w.send({ action: 'run', workflow: 'morning-intel' })
     const lines = []
     await main({ argv: ['--once'], ...w.ctx({ kill: (pid, signal) => killed.push([pid, signal]) }), codeDir: w.places.codeDir, out: (text) => lines.push(text), err: (text) => lines.push(text), proc })
+    assert.equal(lockAtExit, false, 'the handler left the lock to the tick, whose finally never runs once the process has exited')
     assert.deepEqual(proc.listenerCount('SIGTERM'), 1)
     assert.deepEqual(proc.listenerCount('SIGINT'), 1)
     assert.deepEqual(killed, [[4242, 'SIGKILL']])
