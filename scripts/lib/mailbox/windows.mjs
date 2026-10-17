@@ -72,9 +72,27 @@ export function accessEntries(output) {
   return String(output).split(/\r?\n/).filter((line) => /:\([A-Z]/.test(line))
 }
 
-// What icacls prints for several files: one block per file, separated by a blank line, then a summary. -> a list of lists of entries, summary left out.
-export function accessBlocks(output) {
-  return String(output).split(/\r?\n\s*\r?\n/).map(accessEntries).filter((entries) => entries.length > 0)
+// What icacls prints for a folder and everything in it (/T): one object per file or folder, each starting at a line that begins with a path (a drive letter
+// or \\), its entries on that line and on the indented lines after it. A file with an empty list prints "No permissions are set. All users have full control."
+// and NO entry - and NO blank line before the next file - so objects are told apart by where a path starts, never by blank lines or by counting entries.
+// -> a list with one list of entries per object (an empty one for an empty list). The summary line at the end is not an object.
+export function accessObjects(output) {
+  const objects = []
+  for (const line of String(output).split(/\r?\n/)) {
+    if (/^(?:[A-Za-z]:\\|\\\\)/.test(line)) objects.push([])
+    if (objects.length > 0 && /:\([A-Z]/.test(line)) objects[objects.length - 1].push(line)
+  }
+  return objects
+}
+
+// How many files and folders are inside a folder, all levels (links are counted and not followed).
+async function countInside(fs, folder) {
+  let count = 0
+  for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
+    count += 1
+    if (entry.isDirectory()) count += await countInside(fs, win32.join(folder, entry.name))
+  }
+  return count
 }
 
 // Whether one entry line is DOMAIN\user (or just user when there is no domain) and no one else: the text in front of ":(" ends with the name, and what is
@@ -112,11 +130,17 @@ export function privatePlaces({ exec, env, user, domain, platform = process.plat
 
     // null when every access list is exactly the current account's, otherwise the word for what is wrong. Throws when icacls cannot be asked.
     const look = async () => {
-      const lists = [accessEntries((await exec(icacls, [state], options)).stdout)]
-      const names = await fs.readdir(state)
-      if (names.length > 0) lists.push(...accessBlocks((await exec(icacls, [win32.join(state, '*')], options)).stdout))
-      // A secrets file deeper than the top of the folder is looked at on its own.
-      if (win32.dirname(places.envFile).toLowerCase() !== state.toLowerCase() && (await exists(fs, places.envFile))) lists.push(accessEntries((await exec(icacls, [places.envFile], options)).stdout))
+      // The whole tree in one question, and the answer must be about every file and folder in it: one object each, no more and no fewer. A tree with one
+      // folder-or-file missing from the answer (icacls could not read it, or two were run together) is not private.
+      const objects = accessObjects((await exec(icacls, [state, '/T', '/C'], options)).stdout)
+      const lists = [...objects]
+      if (objects.length !== 1 + (await countInside(fs, state))) return 'others-have-access'
+      // The secrets file is always asked about on its own as well.
+      if (await exists(fs, places.envFile)) {
+        const own = accessObjects((await exec(icacls, [places.envFile], options)).stdout)
+        if (own.length !== 1) return 'others-have-access'
+        lists.push(...own)
+      }
       for (const entries of lists) {
         if (entries.length !== 1) return 'others-have-access'
         if (comparable && !entryIsYou(entries[0], name)) return 'not-you'

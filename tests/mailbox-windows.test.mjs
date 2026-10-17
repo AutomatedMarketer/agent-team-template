@@ -13,7 +13,7 @@ import { main } from '../scripts/lib/mailbox/command.mjs'
 import { runTick } from '../scripts/lib/mailbox/tick.mjs'
 import { checkPlaces, defaultPlaces } from '../scripts/lib/mailbox/places.mjs'
 import { claudeEnv, claudeFolders, killTree, runClaude, WINDOWS_SWITCHES } from '../scripts/lib/mailbox/claude.mjs'
-import { accessBlocks, accessEntries, privatePlaces, windowsGit } from '../scripts/lib/mailbox/windows.mjs'
+import { accessEntries, accessObjects, privatePlaces, windowsGit } from '../scripts/lib/mailbox/windows.mjs'
 import { createRunner, findEveryProgram, findProgram } from '../scripts/lib/status/programs.mjs'
 
 /* The runner on a Windows computer. A Mac gives it three things for free that Windows does not, and each is replaced here:
@@ -264,22 +264,26 @@ test('a real program and the program IT started are both ended by killTree on Wi
 
 const ME = 'PC\\student'
 const ENTRY = (who = ME) => `${who}:(OI)(CI)(F)`
-const ONE_ENTRY = (who = ME, path = 'C:\\x\\state') => `${path} ${ENTRY(who)}\n\nSuccessfully processed 1 files; Failed processing 0 files\n`
-const BLOCK = (path, ...entries) => `${path} ${entries[0]}\n${entries.slice(1).map((entry) => `    ${entry}`).join('\n')}${entries.length > 1 ? '\n' : ''}\n`
 const SUMMARY = 'Successfully processed 2 files; Failed processing 0 files\n'
+const EMPTY = 'No permissions are set. All users have full control.'
+// One icacls object: the path and its first entry on one line, the others indented below; an empty list prints the "No permissions" words and nothing else.
+const OBJECT = (path, ...entries) => (entries.length === 0 ? `${path}  ${EMPTY}\n` : `${path} ${entries[0]}\n${entries.slice(1).map((entry) => `    ${entry}`).join('\n')}${entries.length > 1 ? '\n' : ''}`)
+// What icacls prints for `state /T /C`: the folder, then each thing inside it, with blank lines only where icacls puts them (after objects that have entries).
+const TREE = (...objects) => `${objects.join('')}\n${SUMMARY}`
 
 // A fake icacls that remembers whether the folder has been locked yet: `before` is what it prints until the grant, `after` what it prints from then on.
-// Each is { folder, files } where files is the text printed for `state\*`.
-function fakeIcacls({ before = { folder: ONE_ENTRY(), files: '' }, after = before, failOn = null } = {}) {
+// Each is { tree, env } - the text for `state /T /C` and for the secrets file asked about alone.
+function fakeIcacls({ before, after = before, failOn = null } = {}) {
   const calls = []
   let locked = false
   const exec = async (file, args, options) => {
     calls.push({ file, args, options })
     if (failOn !== null && failOn(args)) throw new Error('boom')
     if (args.includes('/inheritance:r')) locked = true
-    if (args.length > 1) return { stdout: '', code: 0 }
+    if (args.includes('/reset')) return { stdout: '', code: 0 }
+    if (args.length > 1 && args.includes('/grant:r')) return { stdout: '', code: 0 }
     const now = locked ? after : before
-    return { stdout: args[0].endsWith('*') ? now.files : now.folder, code: 0 }
+    return { stdout: args.includes('/T') ? now.tree : now.env, code: 0 }
   }
   return { exec, calls }
 }
@@ -296,18 +300,26 @@ async function withDir(fn) {
 }
 
 const lockWith = (fake, change = {}) => privatePlaces({ exec: fake.exec, env: { SystemRoot: SYSTEM_ROOT }, user: 'student', domain: 'PC', platform: 'win32', isInside: async () => true, ...change })
-const BAD = { folder: `C:\\x\\state ${ENTRY()}\n    ${ENTRY('BUILTIN\\Users')}\n\n${SUMMARY}`, files: '' }
 
-test('a folder that is already the current account\'s alone is only READ: nothing is reset, granted or changed', () => withDir(async (dir) => {
+// A state folder on disk with the secrets file and the allowlist in it, and the text icacls would print for it when everything is private.
+async function stateWith(dir, { extra = [] } = {}) {
   const places = placesIn(dir)
-  await mkdir(places.stateDir, { recursive: true })
-  await writeFile(places.envFile, 'x')
-  await writeFile(join(places.stateDir, 'allowed-orders.yml'), 'x')
   const state = places.stateDir
-  const files = `${BLOCK(`${state}\\allowed-orders.yml`, ENTRY())}\n${BLOCK(`${state}\\runner.env`, ENTRY())}\n${SUMMARY}`
-  const fake = fakeIcacls({ before: { folder: ONE_ENTRY(ME, state), files } })
+  await mkdir(state, { recursive: true })
+  await writeFile(places.envFile, 'x')
+  await writeFile(join(state, 'allowed-orders.yml'), 'x')
+  const names = ['allowed-orders.yml', 'runner.env']
+  const tree = (lists = {}) => TREE(OBJECT(state, ...(lists.state ?? [ENTRY()])), ...names.map((file) => OBJECT(`${state}\\${file}`, ...(lists[file] ?? [ENTRY()]))))
+  const env = (entries = [ENTRY()]) => OBJECT(places.envFile, ...entries)
+  return { places, state, tree, env, good: { tree: tree(), env: env() } }
+}
+const UNDER = ['BUILTIN\\Users:(R)']
+
+test('a folder that is already the current account\'s alone is only READ: the whole tree in one question, the secrets file on its own, nothing changed', () => withDir(async (dir) => {
+  const { places, state, good } = await stateWith(dir)
+  const fake = fakeIcacls({ before: good })
   assert.deepEqual(await lockWith(fake)(places), { ok: true })
-  assert.deepEqual(fake.calls.map((call) => [call.file, call.args]), [[ICACLS, [state]], [ICACLS, [`${state}\\*`]]])
+  assert.deepEqual(fake.calls.map((call) => [call.file, call.args]), [[ICACLS, [state, '/T', '/C']], [ICACLS, [places.envFile]]])
   for (const call of fake.calls) {
     assert.equal(call.options.cwd, win32.join(SYSTEM_ROOT, 'System32'), 'started from System32, not from anywhere a repo is')
     assert.deepEqual(call.options.env, { SystemRoot: SYSTEM_ROOT, NoDefaultCurrentDirectoryInExePath: '1' })
@@ -316,71 +328,88 @@ test('a folder that is already the current account\'s alone is only READ: nothin
 }))
 
 test('otherwise every access list in the folder is reset first, then the folder is given to DOMAIN\\user alone, then it is all read back', () => withDir(async (dir) => {
-  const places = placesIn(dir)
-  await mkdir(places.stateDir, { recursive: true })
-  await writeFile(places.envFile, 'x')
-  const state = places.stateDir
-  const fake = fakeIcacls({ before: BAD, after: { folder: ONE_ENTRY(ME, state), files: `${BLOCK(`${state}\\runner.env`, ENTRY())}\n${SUMMARY}` } })
+  const { places, state, tree, env, good } = await stateWith(dir)
+  const fake = fakeIcacls({ before: { tree: tree({ state: [ENTRY(), ENTRY(UNDER[0].slice(0, -4))] }), env: env() }, after: good })
   assert.deepEqual(await lockWith(fake)(places), { ok: true })
   assert.deepEqual(fake.calls.map((call) => call.args), [
-    [state], [`${state}\\*`],
+    [state, '/T', '/C'], [places.envFile],
     [state, '/reset', '/T', '/C'],
     [state, '/inheritance:r', '/grant:r', 'PC\\student:(OI)(CI)F'],
-    [state], [`${state}\\*`]
+    [state, '/T', '/C'], [places.envFile]
   ])
   for (const call of fake.calls) assert.equal(call.file, ICACLS)
   // With no domain the name stands alone.
-  const alone = fakeIcacls({ before: BAD, after: { folder: ONE_ENTRY('student', state), files: '' } })
-  assert.deepEqual(await lockWith(alone, { domain: undefined })(places), { ok: true })
-  assert.equal(alone.calls.find((call) => call.args.includes('/grant:r')).args[3], 'student:(OI)(CI)F')
+  const alone = await stateWith(await mkdtemp(join(dir, 'x-')))
+  const plain = (entries) => entries.map((entry) => entry.replace('PC\\', ''))
+  void plain
+  const fakeAlone = fakeIcacls({ before: { tree: alone.tree({ state: [ENTRY(), ENTRY('Everyone')] }), env: alone.env() }, after: { tree: alone.tree({ state: [ENTRY('student')], 'allowed-orders.yml': [ENTRY('student')], 'runner.env': [ENTRY('student')] }), env: alone.env([ENTRY('student')]) } })
+  assert.deepEqual(await lockWith(fakeAlone, { domain: undefined })(alone.places), { ok: true })
+  assert.equal(fakeAlone.calls.find((call) => call.args.includes('/grant:r')).args[3], 'student:(OI)(CI)F')
 }))
 
 test('a file that keeps its own access list (inheritance off, readable by another account) is found and fixed, and if it stays that way nothing runs', () => withDir(async (dir) => {
-  const places = placesIn(dir)
-  await mkdir(places.stateDir, { recursive: true })
-  await writeFile(join(places.stateDir, 'allowed-orders.yml'), 'x')
-  const state = places.stateDir
-  const sneaky = `${BLOCK(`${state}\\allowed-orders.yml`, ENTRY(ME), ENTRY('Everyone').replace('(OI)(CI)(F)', '(R)'))}\n${SUMMARY}`
-  const good = { folder: ONE_ENTRY(ME, state), files: `${BLOCK(`${state}\\allowed-orders.yml`, ENTRY())}\n${SUMMARY}` }
-  // The folder looks right but the file does not: that alone is a reason to reset.
-  const fixed = fakeIcacls({ before: { folder: ONE_ENTRY(ME, state), files: sneaky }, after: good })
+  const { places, tree, env, good } = await stateWith(dir)
+  const sneaky = { tree: tree({ 'allowed-orders.yml': [ENTRY(), ENTRY('Everyone').replace('(OI)(CI)(F)', '(R)')] }), env: env() }
+  const fixed = fakeIcacls({ before: sneaky, after: good })
   assert.deepEqual(await lockWith(fixed)(places), { ok: true })
   assert.ok(fixed.calls.some((call) => call.args.includes('/reset')))
-  // A reset that does not take: still two entries on the file.
-  const stuck = fakeIcacls({ before: { folder: ONE_ENTRY(ME, state), files: sneaky } })
+  const stuck = fakeIcacls({ before: sneaky })
   assert.deepEqual(await lockWith(stuck)(places), { ok: false, why: 'others-have-access' })
 }))
 
+test('a file with an EMPTY access list ("No permissions are set. All users have full control") is not private: it is never counted as no entry and skipped, nor run into the next file', () => withDir(async (dir) => {
+  const { places, tree, env, good } = await stateWith(dir)
+  // Secrets file empty, seen both in the tree and on its own; or another file empty, which icacls prints with no blank line before the next object.
+  for (const [what, bad] of [
+    ['the secrets file is empty', { tree: tree({ 'runner.env': [] }), env: env([]) }],
+    ['the allowlist is empty', { tree: tree({ 'allowed-orders.yml': [] }), env: env() }],
+    ['the folder itself is empty', { tree: tree({ state: [] }), env: env() }],
+    ['the secrets file is empty only when asked about on its own', { tree: good.tree, env: env([]) }]
+  ]) {
+    const stuck = fakeIcacls({ before: bad })
+    assert.deepEqual(await lockWith(stuck)(places), { ok: false, why: 'others-have-access' }, `${what}: and if the reset does not take, nothing runs`)
+    const fixed = fakeIcacls({ before: bad, after: good })
+    assert.deepEqual(await lockWith(fixed)(places), { ok: true }, `${what}: and if the reset takes, it is private`)
+    assert.ok(fixed.calls.some((call) => call.args.includes('/reset')), what)
+  }
+}))
+
+test('the answer must be about every file and folder: one object each - fewer (an object missing) or more (an extra) is not private', () => withDir(async (dir) => {
+  const { places, state, tree, env, good } = await stateWith(dir)
+  const missing = { tree: TREE(OBJECT(state, ENTRY()), OBJECT(`${state}\\runner.env`, ENTRY())), env: env() }
+  assert.deepEqual(await lockWith(fakeIcacls({ before: missing }))(places), { ok: false, why: 'others-have-access' })
+  void tree
+  void good
+}))
+
 test('the folder lock fails closed: every way it can go wrong stops the runner with a word, and none says ok', () => withDir(async (dir) => {
-  const places = placesIn(dir)
-  const state = places.stateDir
-  const mine = ONE_ENTRY(ME, state)
+  const { places, tree, env, good } = await stateWith(dir)
+  const bad = { tree: tree({ state: [ENTRY(), ENTRY('BUILTIN\\Users')] }), env: env() }
   const cases = [
-    ['icacls cannot reset it', lockWith(fakeIcacls({ before: BAD, failOn: (args) => args.includes('/reset') })), 'lock-failed'],
-    ['icacls cannot set it', lockWith(fakeIcacls({ before: BAD, failOn: (args) => args.includes('/grant:r') })), 'lock-failed'],
-    ['another account still has access', lockWith(fakeIcacls({ before: BAD })), 'others-have-access'],
-    ['nothing at all is listed', lockWith(fakeIcacls({ before: { folder: '', files: '' } })), 'others-have-access'],
-    ['the one entry is not you', lockWith(fakeIcacls({ before: { folder: ONE_ENTRY('PC\\someone-else', state), files: '' } })), 'not-you'],
-    ['the Windows folder is not known', privatePlaces({ exec: fakeIcacls().exec, env: {}, user: 'student', platform: 'win32', isInside: async () => true }), 'no-system-root'],
-    ['the Windows folder is not a full path', privatePlaces({ exec: fakeIcacls().exec, env: { SystemRoot: 'Windows' }, user: 'student', platform: 'win32', isInside: async () => true }), 'no-system-root'],
-    ['the account name is not known', lockWith(fakeIcacls(), { user: null }), 'no-user'],
-    ['the account name is not a name', lockWith(fakeIcacls(), { user: 'a:(OI)(CI)F /grant:r Everyone' }), 'no-user'],
-    ['the domain is not a name', lockWith(fakeIcacls(), { domain: 'PC\\..\\x' }), 'no-user'],
-    ['the secrets file is outside the folder that is locked', lockWith(fakeIcacls(), { isInside: async () => false }), 'secrets-outside-state']
+    ['icacls cannot reset it', lockWith(fakeIcacls({ before: bad, failOn: (args) => args.includes('/reset') })), 'lock-failed'],
+    ['icacls cannot set it', lockWith(fakeIcacls({ before: bad, failOn: (args) => args.includes('/grant:r') })), 'lock-failed'],
+    ['another account still has access', lockWith(fakeIcacls({ before: bad })), 'others-have-access'],
+    ['the secrets file, asked about alone, gets no answer', lockWith(fakeIcacls({ before: { tree: good.tree, env: '' } })), 'others-have-access'],
+    ['nothing at all is listed',lockWith(fakeIcacls({ before: { tree: '', env: '' } })), 'others-have-access'],
+    ['the one entry is not you', lockWith(fakeIcacls({ before: { tree: tree({ state: [ENTRY('PC\\someone-else')] }), env: env() } })), 'not-you'],
+    ['the Windows folder is not known', privatePlaces({ exec: fakeIcacls({ before: good }).exec, env: {}, user: 'student', platform: 'win32', isInside: async () => true }), 'no-system-root'],
+    ['the Windows folder is not a full path', privatePlaces({ exec: fakeIcacls({ before: good }).exec, env: { SystemRoot: 'Windows' }, user: 'student', platform: 'win32', isInside: async () => true }), 'no-system-root'],
+    ['the account name is not known', lockWith(fakeIcacls({ before: good }), { user: null }), 'no-user'],
+    ['the account name is not a name', lockWith(fakeIcacls({ before: good }), { user: 'a:(OI)(CI)F /grant:r Everyone' }), 'no-user'],
+    ['the domain is not a name', lockWith(fakeIcacls({ before: good }), { domain: 'PC\\..\\x' }), 'no-user'],
+    ['the secrets file is outside the folder that is locked', lockWith(fakeIcacls({ before: good }), { isInside: async () => false }), 'secrets-outside-state']
   ]
-  void mine
   for (const [what, lock, why] of cases) assert.deepEqual(await lock(places), { ok: false, why }, what)
-  const never = fakeIcacls()
+  const never = fakeIcacls({ before: good })
   assert.deepEqual(await lockWith(never, { isInside: async () => false })(places), { ok: false, why: 'secrets-outside-state' })
   assert.equal(never.calls.length, 0)
 }))
 
 test('an icacls that cannot be read at all is treated as "not private yet" and the folder is locked; if the read-back fails too, nothing runs', () => withDir(async (dir) => {
   const places = placesIn(dir)
-  const state = places.stateDir
   let reads = 0
   const exec = async (file, args) => {
-    if (args.length === 1) {
+    if (args.includes('/T') && args.length === 3) {
       reads += 1
       throw new Error('boom')
     }
@@ -388,76 +417,123 @@ test('an icacls that cannot be read at all is treated as "not private yet" and t
   }
   assert.deepEqual(await lockWith({ exec })(places), { ok: false, why: 'lock-failed' })
   assert.equal(reads, 2, 'once before and once after')
-  void state
 }))
 
 test('an account name with spaces and round brackets ("John (Work)") is fine: it goes to icacls as one argument', () => withDir(async (dir) => {
-  const places = placesIn(dir)
-  const state = places.stateDir
+  const { places, tree, env } = await stateWith(dir)
   const who = 'PC\\John (Work)'
-  const fake = fakeIcacls({ before: BAD, after: { folder: ONE_ENTRY(who, state), files: '' } })
+  const fake = fakeIcacls({
+    before: { tree: tree({ state: [ENTRY(), ENTRY('Everyone')] }), env: env() },
+    after: { tree: tree({ state: [ENTRY(who)], 'allowed-orders.yml': [ENTRY(who)], 'runner.env': [ENTRY(who)] }), env: env([ENTRY(who)]) }
+  })
   assert.deepEqual(await lockWith(fake, { user: 'John (Work)' })(places), { ok: true })
   assert.equal(fake.calls.find((call) => call.args.includes('/grant:r')).args[3], 'PC\\John (Work):(OI)(CI)F')
 }))
 
 test('"is that entry you" compares the whole name: bob is not rob, and a longer name that ends the same is not you', () => withDir(async (dir) => {
-  const places = placesIn(dir)
-  const state = places.stateDir
+  const { places, tree, env } = await stateWith(dir)
   for (const other of ['PC\\notstudent', 'PC\\student2', 'OTHERPC\\student', 'PC\\xstudent']) {
-    const fake = fakeIcacls({ before: { folder: ONE_ENTRY(other, state), files: '' } })
+    const fake = fakeIcacls({ before: { tree: tree({ state: [ENTRY(other)] }), env: env() } })
     assert.deepEqual(await lockWith(fake)(places), { ok: false, why: 'not-you' }, other)
   }
   // Capitals do not matter to Windows.
-  assert.deepEqual(await lockWith(fakeIcacls({ before: { folder: ONE_ENTRY('pc\\STUDENT', state), files: '' } }))(places), { ok: true })
+  const caps = { tree: tree({ state: [ENTRY('pc\\STUDENT')], 'allowed-orders.yml': [ENTRY('pc\\STUDENT')], 'runner.env': [ENTRY('pc\\STUDENT')] }), env: env([ENTRY('pc\\STUDENT')]) }
+  assert.deepEqual(await lockWith(fakeIcacls({ before: caps }))(places), { ok: true })
 }))
 
 test('on a Mac or Linux the lock does nothing and asks nobody: file modes do it there', () => withDir(async (dir) => {
   for (const platform of ['darwin', 'linux']) {
-    const fake = fakeIcacls()
+    const fake = fakeIcacls({ before: { tree: '', env: '' } })
     assert.deepEqual(await lockWith(fake, { platform })(placesIn(dir)), { ok: true })
     assert.equal(fake.calls.length, 0)
   }
 }))
 
-test('access entries are counted from what icacls prints: one per line with NAME:(flags); the path line, blank lines and the summary are not entries', () => {
-  assert.equal(accessEntries(ONE_ENTRY()).length, 1)
+test('access entries and objects are read from what icacls prints: objects start at a path, an empty list is an object with no entries, the summary is not an object', () => {
+  assert.equal(accessEntries(OBJECT('C:\\x\\state', ENTRY())).length, 1)
   assert.equal(accessEntries(`C:\\a b\\state NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)\r\n    BUILTIN\\Administrators:(I)(OI)(CI)(F)\r\n    PC\\x:(I)(OI)(CI)(M)\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`).length, 3)
   assert.equal(accessEntries('').length, 0)
   assert.equal(accessEntries(undefined).length, 0)
-  assert.deepEqual(accessBlocks(`${BLOCK('C:\\a', ENTRY(), ENTRY('X\\y'))}\n${BLOCK('C:\\b', ENTRY())}\n${SUMMARY}`).map((entries) => entries.length), [2, 1])
+  const text = TREE(OBJECT('C:\\a', ENTRY(), ENTRY('X\\y')), OBJECT('C:\\a\\empty'), OBJECT('C:\\a\\b', ENTRY()), OBJECT('\\\\server\\share\\c', ENTRY()))
+  assert.deepEqual(accessObjects(text).map((entries) => entries.length), [2, 0, 1, 1])
+  assert.deepEqual(accessObjects(''), [])
+  assert.deepEqual(accessObjects('Successfully processed 0 files; Failed processing 0 files'), [])
 })
 
-test('the real icacls on this computer fixes a file that carries its own list (inheritance off, Everyone can read), and leaves one entry on everything (this computer)', async (t) => {
+/* ---- the real icacls, on this computer ---- */
+
+// An access list with no rules at all (a "null" list): everyone has full control. Set with the system's own PowerShell, by absolute path.
+async function emptyAccessList(path) {
+  const powershell = win32.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = `$sd = New-Object System.Security.AccessControl.FileSecurity; $sd.SetSecurityDescriptorSddlForm('D:NO_ACCESS_CONTROL'); Set-Acl -LiteralPath '${path.replaceAll("'", "''")}' -AclObject $sd`
+  await execFileP(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true })
+}
+
+async function realLock(t, fn) {
   if (!onWindows) return t.skip('icacls is Windows')
   await withDir(async (dir) => {
     const places = placesIn(dir)
     await mkdir(places.stateDir, { recursive: true })
     const icacls = win32.join(process.env.SystemRoot, 'System32', 'icacls.exe')
     const ask = async (...args) => (await execFileP(icacls, args, { encoding: 'utf8', windowsHide: true })).stdout
-    await writeFile(join(places.stateDir, 'made-before-the-lock.txt'), 'before')
-    // The reviewer's case: the file's own list, not inherited, with Everyone (S-1-1-0) allowed to read.
-    const allowlist = join(places.stateDir, 'allowed-orders.yml')
-    await writeFile(allowlist, 'x')
-    await ask(allowlist, '/inheritance:d')
-    await ask(allowlist, '/grant', '*S-1-1-0:R')
-    assert.equal(accessEntries(await ask(allowlist)).length > 1, true, 'the setup: Everyone can read it')
-
     const exec = createRunner({ spawn: realSpawn, platform: 'win32', env: process.env })
     const lock = privatePlaces({ exec, env: process.env, user: userInfo().username, domain: process.env.USERDOMAIN })
-    assert.deepEqual(await lock(places), { ok: true })
-    for (const path of [places.stateDir, allowlist, join(places.stateDir, 'made-before-the-lock.txt')]) {
-      const entries = accessEntries(await ask(path))
-      assert.equal(entries.length, 1, `${path}: ${entries.join(' | ')}`)
+    // The whole tree has exactly one entry on every object, and as many objects as there are things in it.
+    const everyOne = async () => {
+      const objects = accessObjects(await ask(places.stateDir, '/T', '/C'))
+      assert.ok(objects.length >= 1)
+      assert.deepEqual(objects.map((entries) => entries.length), objects.map(() => 1), 'one entry on every object')
+      return objects.length
     }
-    // A second time only reads (the answer is the same, and the folder is not touched again).
-    assert.deepEqual(await lock(places), { ok: true })
-    await writeFile(places.envFile, 'MAILBOX_KEY=x\n')
-    const after = accessEntries(await ask(places.envFile))
-    assert.equal(after.length, 1, `a file made later is private too: ${after.join(' | ')}`)
-    assert.equal(await readFile(places.envFile, 'utf8'), 'MAILBOX_KEY=x\n')
-    assert.deepEqual(await lock(places), { ok: true })
+    await fn({ dir, places, ask, lock, everyOne })
   })
-})
+}
+
+test('the real icacls on this computer fixes a file that carries its own list (inheritance off, Everyone can read), and leaves one entry on everything (this computer)', (t) => realLock(t, async ({ places, ask, lock, everyOne }) => {
+  await writeFile(join(places.stateDir, 'made-before-the-lock.txt'), 'before')
+  const allowlist = join(places.stateDir, 'allowed-orders.yml')
+  await writeFile(allowlist, 'x')
+  await ask(allowlist, '/inheritance:d')
+  await ask(allowlist, '/grant', '*S-1-1-0:R')
+  assert.equal(accessEntries(await ask(allowlist)).length > 1, true, 'the setup: Everyone can read it')
+  assert.deepEqual(await lock(places), { ok: true })
+  assert.equal(await everyOne(), 3)
+  assert.deepEqual(await lock(places), { ok: true }, 'a second time only reads')
+  await writeFile(places.envFile, 'MAILBOX_KEY=x\n')
+  assert.equal(accessEntries(await ask(places.envFile)).length, 1, 'a file made later is private too')
+  assert.equal(await readFile(places.envFile, 'utf8'), 'MAILBOX_KEY=x\n')
+  assert.deepEqual(await lock(places), { ok: true })
+}))
+
+test('the real icacls: a secrets file and another file with an EMPTY access list are found, and the lock repairs them in the same call (reset), so nothing runs only if the repair fails (this computer)', (t) => realLock(t, async ({ places, ask, lock, everyOne }) => {
+  assert.deepEqual(await lock(places), { ok: true })
+  const other = join(places.stateDir, 'preflight.json')
+  await writeFile(places.envFile, 'MAILBOX_KEY=x\n')
+  await writeFile(other, '{}')
+  for (const path of [places.envFile, other]) {
+    await emptyAccessList(path)
+    assert.equal(accessEntries(await ask(path)).length, 0, 'the setup: no rules at all')
+    assert.deepEqual(await lock(places), { ok: true }, 'found, reset, locked')
+    assert.equal(accessEntries(await ask(path)).length, 1, `${path} is private again`)
+  }
+  assert.equal(await everyOne(), 3)
+}))
+
+test('the real icacls: a file deep in the tree (claims\\o1) given its own Everyone:(R) after the lock is found and fixed (this computer)', (t) => realLock(t, async ({ places, ask, lock, everyOne }) => {
+  assert.deepEqual(await lock(places), { ok: true })
+  const deep = join(places.stateDir, 'claims', 'o1')
+  await mkdir(deep, { recursive: true })
+  const file = join(deep, 'receipt.json')
+  await writeFile(file, '{}')
+  assert.deepEqual(await lock(places), { ok: true })
+  assert.equal(await everyOne(), 4)
+  await ask(file, '/inheritance:d')
+  await ask(file, '/grant', '*S-1-1-0:R')
+  assert.equal(accessEntries(await ask(file)).length > 1, true, 'the setup: Everyone can read it')
+  assert.deepEqual(await lock(places), { ok: true })
+  assert.equal(accessEntries(await ask(file)).length, 1, 'repaired')
+  assert.equal(await everyOne(), 4)
+}))
 
 /* ---------- a tick on Windows does not start without the lock ------------------------------------------------------ */
 
