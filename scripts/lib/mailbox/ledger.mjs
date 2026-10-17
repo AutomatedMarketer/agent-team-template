@@ -12,7 +12,7 @@
 
 import { isoSeconds } from '../status/util.mjs'
 import { checkMailbox } from '../status/safe.mjs'
-import { MAILBOX_SCHEMA, MAILBOX_MAX_ORDERS } from '../status/mailbox-schema.mjs'
+import { MAILBOX_SCHEMA, MAILBOX_MAX_ORDERS, MAILBOX_MAX_STEPS } from '../status/mailbox-schema.mjs'
 import { ACTIONS } from './contract.mjs'
 import { listClaims, readClaimFile, writeClaimFile } from './claims.mjs'
 
@@ -33,7 +33,9 @@ export function entryFromRecords(id, receipt, final) {
   if (final !== null) {
     const at = whole(final.at)
     if (at === null) return null
-    return { id, action, state: final.state, at, startedAt: whole(final.startedAt), finishedAt: whole(final.finishedAt), commit: final.commit ?? null, why: final.why ?? null, landed: final.landed ?? null }
+    // `steps` is only for a run that ended, and only when the claim kept a sensible number: otherwise the entry has no such key, exactly as before.
+    const steps = (final.state === 'ok' || final.state === 'failed') && Number.isSafeInteger(final.steps) && final.steps >= 0 && final.steps <= MAILBOX_MAX_STEPS ? { steps: final.steps } : {}
+    return { id, action, state: final.state, at, startedAt: whole(final.startedAt), finishedAt: whole(final.finishedAt), commit: final.commit ?? null, why: final.why ?? null, landed: final.landed ?? null, ...steps }
   }
   const at = whole(receipt.at)
   if (at === null) return null

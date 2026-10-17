@@ -146,7 +146,7 @@ npm test
 that matter:
 
 ```
-ℹ tests 2401
+ℹ tests 2444
 ℹ fail 0
 ```
 
@@ -317,6 +317,10 @@ pushes.
 
 - **Set it up:** [The Mac mailbox guide](.agent-team/mailbox/README.md) - eight copy-paste steps for the Mac
   Mini, how to pause it, and how to take it out again.
+- **Known limit:** while the runner is paused or not ready it never tidies up, so the progress file of a run
+  that crashed keeps saying "working" until the next full tick. A planned fix treats an old last-event time as stale.
+- **Known limit:** if a signal arrives in the middle of writing an order's final word, the progress file says "unknown" even
+  if the order landed. That is the cautious answer; the status file is what settles it.
 
 ---
 

@@ -887,6 +887,7 @@
     "maxComputersShown": 3,
     "maxOrders": 20,
     "maxJobs": 40,
+    "maxSteps": 100000,
     "times": "Whole seconds, Z, no milliseconds (as every status file), never later than takenAt.",
     "commitShape": "^[0-9a-f]{12}$",
     "states": [
@@ -979,6 +980,12 @@
         "landed"
       ]
     },
+    "optionalKeys": {
+      "order": [
+        "steps"
+      ]
+    },
+    "stepsRule": "steps is optional and never null: a whole number from 0 to maxSteps, the tool calls a job run made. Only an order whose state is ok or failed may have it, and only a run that ended says it; every other order has no steps key at all. A file without it is as valid as ever.",
     "sample": {
       "schema": "agent-mailbox/v1",
       "takenAt": "2026-10-12T14:12:00Z",
@@ -1246,6 +1253,174 @@
           "action": "task",
           "state": "ok",
           "at": "2026-10-12T14:06:00Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null
+        }
+      }
+    ],
+    "stepsRefuse": [
+      {
+        "why": "steps on an order that is still running",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "running",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": null,
+          "commit": null,
+          "why": null,
+          "landed": null,
+          "steps": 3
+        }
+      },
+      {
+        "why": "steps on an order that was only claimed",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "claimed",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": null,
+          "finishedAt": null,
+          "commit": null,
+          "why": null,
+          "landed": null,
+          "steps": 3
+        }
+      },
+      {
+        "why": "steps on an order that was refused",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "refused",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": null,
+          "finishedAt": null,
+          "commit": null,
+          "why": "expired",
+          "landed": null,
+          "steps": 3
+        }
+      },
+      {
+        "why": "steps that is below nought",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": -1
+        }
+      },
+      {
+        "why": "steps that is not a whole number",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": 1.5
+        }
+      },
+      {
+        "why": "steps that is text",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": "14"
+        }
+      },
+      {
+        "why": "steps that is null",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": null
+        }
+      }
+    ],
+    "stepsAccept": [
+      {
+        "why": "a run that ended well with its steps",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": 14
+        }
+      },
+      {
+        "why": "a run that ended well with no tool calls",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": "3b717814fb34",
+          "why": null,
+          "landed": null,
+          "steps": 0
+        }
+      },
+      {
+        "why": "a run that failed with its steps",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "failed",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
+          "finishedAt": "2026-10-12T14:06:00Z",
+          "commit": null,
+          "why": "timed-out",
+          "landed": null,
+          "steps": 80
+        }
+      },
+      {
+        "why": "a run from a runner that does not know steps",
+        "entry": {
+          "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "action": "run",
+          "state": "ok",
+          "at": "2026-10-12T14:06:00Z",
+          "startedAt": "2026-10-12T14:05:30Z",
           "finishedAt": "2026-10-12T14:06:00Z",
           "commit": "3b717814fb34",
           "why": null,

@@ -35,8 +35,12 @@ export const MAILBOX_REASONS = {
 export const MAILBOX_KEYS = {
   file: ['schema', 'takenAt', 'computer', 'runner', 'allows', 'orders'],
   allows: ['actions', 'jobs'],
-  order: ['id', 'action', 'state', 'at', 'startedAt', 'finishedAt', 'commit', 'why', 'landed']
+  order: ['id', 'action', 'state', 'at', 'startedAt', 'finishedAt', 'commit', 'why', 'landed'],
+  // Allowed and never required: a run that ended says how many tool calls it made. A file from a runner that does not know the key has none, and is as valid as ever.
+  orderOptional: ['steps']
 }
+
+export const MAILBOX_MAX_STEPS = 100000
 
 export function mailboxPath(runner) {
   return typeof runner === 'string' && MAILBOX_RUNNER.test(runner) ? `${MAILBOX_FOLDER}/${runner}.json` : null
@@ -50,6 +54,11 @@ const enumOf = (values) => ({ type: 'enum', values })
 
 // What each state says about the other keys. A key that is not mentioned is free.
 function stateProblems(order) {
+  const extra = Object.hasOwn(order, 'steps') && order.state !== 'ok' && order.state !== 'failed' ? [['steps', `must be absent when the order is ${order.state}`]] : []
+  return [...extra, ...stateRules(order)]
+}
+
+function stateRules(order) {
   const none = (...keys) => keys.filter((key) => order[key] !== null).map((key) => [key, `must be null when the order is ${order.state}`])
   const some = (...keys) => keys.filter((key) => order[key] === null).map((key) => [key, `must be set when the order is ${order.state}`])
   switch (order.state) {
@@ -81,7 +90,8 @@ const orderShape = {
     finishedAt: nullable(second),
     commit: nullable({ type: 'pattern', pattern: MAILBOX_COMMIT }),
     why: nullable(enumOf([...MAILBOX_REASONS.refused, ...MAILBOX_REASONS.failed])),
-    landed: nullable({ type: 'boolean' })
+    landed: nullable({ type: 'boolean' }),
+    steps: { type: 'int', min: 0, max: MAILBOX_MAX_STEPS }
   },
   required: MAILBOX_KEYS.order,
   rule: stateProblems
