@@ -574,3 +574,61 @@ test('fix 9: the shared fixture keeps the stateRules text it had on main', async
   const rules = fixture.status.stateRules
   for (const key of ['ok', 'failed']) assert.ok(!rules[key].includes('steps'), `stateRules.${key} is unchanged from main`)
 })
+
+/* ---------- round 2 ------------------------------------------------------------------------------------------------ */
+
+test('round 2 A: a clock that jumps back writes at once, and the catch-up delay is never more than the window', () => withState(async (dir) => {
+  const c = clock()
+  const timers = fakeTimers()
+  const progress = createProgress({ stateDir: dir, id: ID, now: c.now, timers })
+  progress.onEvent({ type: 'started' })
+  await progress.settled()
+  c.move(-3600 * 1000)
+  progress.onEvent({ type: 'tool', name: 'Read' })
+  await progress.settled()
+  assert.equal((await read(dir)).steps, 1, 'a clock gone back one hour is "write now", not "wait an hour"')
+  // Forward jumps and small steps: whatever the clock does, a waiting catch-up is never longer than the window.
+  c.move(100)
+  progress.onEvent({ type: 'tool', name: 'Read' })
+  assert.ok(timers.msOf().every((ms) => ms >= 1 && ms <= PROGRESS.throttleMs), `delays: ${timers.msOf()}`)
+}))
+
+test('round 2 B: the steps of an order are capped at the status file maximum, in final.json and progress alike', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = async (cwd, args, callInfo) => {
+      const events = await w.claude.good(cwd, args, callInfo)
+      const many = Array.from({ length: MAILBOX_MAX_STEPS + 50 }, () => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: {} }] } }))
+      return [events[0], ...many, events.at(-1)]
+    }
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    await runTick(w.ctx())
+    const final = await w.claimFile(sent.id, 'final.json')
+    assert.equal(final.steps, MAILBOX_MAX_STEPS, 'final.json never says more than the status file allows')
+    assert.equal((await progressOf(w, sent.id)).steps, MAILBOX_MAX_STEPS)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('round 2 C: a push that ends unreachable settles the order as unknown: no steps in final.json, and progress final with outcome unknown', async () => {
+  const w = await mailboxWorld()
+  try {
+    w.claude.script = w.claude.good
+    const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+    const { git } = w.ctx()
+    const down = async (args, cwd) => {
+      if (args.includes('push') || args.includes('ls-remote')) throw new Error('unreachable')
+      return git(args, cwd)
+    }
+    await runTick(w.ctx({ git: down }))
+    const final = await w.claimFile(sent.id, 'final.json')
+    assert.equal(final.state, 'unknown')
+    assert.ok(!('steps' in final), 'an unknown order carries no steps')
+    const body = await progressOf(w, sent.id)
+    assert.equal(body.final, true)
+    assert.equal(body.outcome, 'unknown')
+  } finally {
+    await w.cleanup()
+  }
+})

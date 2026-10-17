@@ -29,7 +29,7 @@ import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs
 import { join } from 'node:path'
 import { releaseLock, takeLock } from '../status/commit.mjs'
 import { isoSeconds } from '../status/util.mjs'
-import { mailboxPath } from '../status/mailbox-schema.mjs'
+import { mailboxPath, MAILBOX_MAX_STEPS } from '../status/mailbox-schema.mjs'
 import { ACTIONS } from './contract.mjs'
 import { verifyEnvelope } from './envelope.mjs'
 import { createProgress, settleLeftovers } from './progress.mjs'
@@ -477,7 +477,8 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   }
 
   async function afterRun() {
-    const steps = Object.values(ran.calls ?? {}).reduce((sum, count) => sum + count, 0)
+    // Capped at what the status file allows, so the final word, the status file and the progress file all say the same number.
+    const steps = Math.min(MAILBOX_MAX_STEPS, Object.values(ran.calls ?? {}).reduce((sum, count) => sum + count, 0))
     const failed = (why) => settle(s, id, action, { state: 'failed', why, startedAt, steps })
     // Before anything else, and whether or not the run went well: git must not run in a folder where Claude changed what git reads. The order fails
     // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.

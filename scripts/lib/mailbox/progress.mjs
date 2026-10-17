@@ -115,7 +115,8 @@ export function createProgress({ stateDir, id, now, fs = realFs, timers = realTi
     if (catchUp !== null) timers.clear(catchUp)
     catchUp = null
   }
-  const due = () => lastWriteAt === null || now() - lastWriteAt >= PROGRESS.throttleMs
+  // A clock that went back is "write now" (a negative gap), never "wait until it catches up".
+  const due = () => lastWriteAt === null || now() - lastWriteAt < 0 || now() - lastWriteAt >= PROGRESS.throttleMs
   const touch = () => {
     s.lastEventAt = isoSeconds(now())
     if (due()) {
@@ -131,7 +132,7 @@ export function createProgress({ stateDir, id, now, fs = realFs, timers = realTi
       if (s.final) return
       lastWriteAt = now()
       write()
-    }, Math.max(1, PROGRESS.throttleMs - (now() - lastWriteAt)))
+    }, Math.min(PROGRESS.throttleMs, Math.max(1, PROGRESS.throttleMs - (now() - lastWriteAt))))
     catchUp?.unref?.()
   }
 
