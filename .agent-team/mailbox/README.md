@@ -364,6 +364,7 @@ What is different from a Mac, and why:
   The work copy is the folder other people push to. So git is found once on PATH, and a copy inside the runner's own code is never used.
   It runs from the system folder with `-C <folder>`. Claude's own environment also carries `NoDefaultCurrentDirectoryInExePath=1`.
 - **Stopping.** There are no process groups. A time-out ends Claude and everything it started with `taskkill /T /F`.
+  If the scheduler kills Node outright, the runner cannot do that. Claude may then keep running until its own limit.
 
 The schedule would be a Task Scheduler task that runs every 5 minutes.
 It must run **only when you are logged on**, so Claude's login can be read.
