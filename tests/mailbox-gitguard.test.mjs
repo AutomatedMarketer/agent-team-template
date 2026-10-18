@@ -297,6 +297,25 @@ test('a work copy that cannot be moved aside is not deleted in place: it is left
   }
 })
 
+test('a work copy that cannot be moved aside, whose marker cannot be written either, is still not deleted in place', async () => {
+  const c = await clone()
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    await mkdir(empty)
+    await plantCommondir(c)
+    const calls = []
+    // A state folder that is not there: the marker cannot be written.
+    const result = await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before, stateDir: join(c.root, 'no-such-state'), rename: refuseRename })
+    assert.deepEqual(result, { ok: false, stuck: true })
+    assert.deepEqual(calls, [], 'no git was run')
+    assert.equal((await readFile(join(c.work, 'a.txt'), 'utf8')).trim(), 'a', 'nothing was deleted in place')
+    assert.equal(await readFile(join(c.work, '.git', 'commondir'), 'utf8'), 'evil\n')
+  } finally {
+    await c.done()
+  }
+})
+
 test('a stuck work copy stays stuck while it cannot be moved, with no git run; once it can be, the marker goes and the copy is made again', async () => {
   const c = await clone()
   try {

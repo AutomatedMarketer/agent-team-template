@@ -159,7 +159,8 @@ export async function remakeWorkCopy({ git, work, emptyHooks, before, stateDir, 
   try {
     if ((await moveAside(work, renameImpl)) === 'stuck') {
       // The runner's own address is kept with the marker, so the copy can be made again once the folder can be moved.
-      if (typeof stateDir === 'string') await writeFile(join(stateDir, STUCK_FILE), `${JSON.stringify({ address: typeof before?.address === 'string' ? before.address : null })}\n`)
+      // Even if the marker cannot be written, nothing is deleted in place: resetWorkCopy still refuses a .git that points elsewhere.
+      if (typeof stateDir === 'string') await writeFile(join(stateDir, STUCK_FILE), `${JSON.stringify({ address: typeof before?.address === 'string' ? before.address : null })}\n`).catch(() => {})
       return { ok: false, stuck: true }
     }
     if (typeof before?.address !== 'string' || before.address === '' || addressHasLogin(before.address)) return { ok: false }

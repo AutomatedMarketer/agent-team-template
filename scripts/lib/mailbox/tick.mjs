@@ -45,7 +45,7 @@ import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProb
 import { proofHolds, proofKept } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { gitUnchanged, remakeWorkCopy, snapshotGit, sweepAside, unstickWorkCopy, workCopyStuck } from './gitguard.mjs'
-import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
+import { commitPaths, landedCommit, pinnedGit, pointsElsewhere, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
 import { ordersFromClaims, reconcile } from './ledger.mjs'
 
@@ -174,6 +174,15 @@ async function locked(ctx, { orders, end, log }) {
     claudeReady: false, claudePath: null, notReady: [], emptyCwd
   }
 
+  // The work copy's own state comes before the origin check, which reads the folder's config: after a run that changed .git, what that
+  // config says is Claude's, and an origin problem reported from it would hide the real one - and would send the owner to run git by
+  // hand in a folder whose .git points somewhere else. Old folders a remake moved aside and could not delete then are swept; a work copy
+  // left stuck by an earlier remake (it could not be moved aside) is made again now if it can be moved - from the runner's own address,
+  // kept with the marker - and otherwise no git is run in it and the tick stops (gitguard.mjs). A .git that points elsewhere stops it too.
+  await sweepAside(places.workDir)
+  if ((await unstickWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, stateDir: places.stateDir, originAccepted: s.originAccepted })).stuck) return end('not-ready', 'work-copy-stuck')
+  if (await pointsElsewhere(places.workDir)) return end('not-ready', 'work-points-elsewhere')
+
   const checked = await dailyCheck(s, emptyCwd)
   if (checked.problems.includes('key-in-environment')) return end('not-ready', 'key-in-environment')
   if (checked.problems.includes('origin-has-login')) return end('not-ready', 'origin-has-login')
@@ -189,11 +198,6 @@ async function locked(ctx, { orders, end, log }) {
     s.claudeReady = false
     s.notReady = [...s.notReady, 'selftest-needed']
   }
-
-  // Old folders a remake moved aside and could not delete then are swept; a work copy left stuck by an earlier remake (it could not be
-  // moved aside) is made again now if it can be moved, and otherwise no git is run in it and the tick stops (gitguard.mjs).
-  await sweepAside(places.workDir)
-  if ((await unstickWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, stateDir: places.stateDir, originAccepted: s.originAccepted })).stuck) return end('not-ready', 'work-copy-stuck')
 
   // The clone's own config is written again before git is first run in it, then orders lost track of are settled by reading.
   const level = await resetWork(s)

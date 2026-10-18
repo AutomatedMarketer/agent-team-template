@@ -17,7 +17,8 @@ import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
 import { MINIMUM_VERSION, claudeFolders, followToFile, killTree, preflight, originMatches } from './claude.mjs'
-import { readOrigin } from './workcopy.mjs'
+import { pointsElsewhere, readOrigin } from './workcopy.mjs'
+import { workCopyStuck } from './gitguard.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
 import { proofHolds } from './proof.mjs'
@@ -165,6 +166,12 @@ async function report(ctx, places, out) {
     say(proof.holds, proof.holds ? `self-test: passed on ${proof.at.slice(0, 10)} for this Claude and these settings` : `self-test: ${PROBLEM_WORDS['selftest-needed']}`)
   }
   say(!has('key-in-environment'), has('key-in-environment') ? `API key: ${PROBLEM_WORDS['key-in-environment']}` : 'API key: none set')
+  // The work copy's own state, as every tick sees it before the origin check (tick.mjs). Either one means no tick does anything, so
+  // --preflight must not say "Everything is ready".
+  const stuck = await workCopyStuck(places.stateDir)
+  const elsewhere = !stuck && (await pointsElsewhere(places.workDir))
+  if (stuck) say(false, 'work copy: a run changed its git settings and it could not be moved aside to be made again. Close whatever is open in the work copy folder (a terminal, an editor, a file window); the next tick makes it again by itself.')
+  else if (elsewhere) say(false, 'work copy: its .git holds a file that sends git to other settings or objects (commondir, config.worktree or objects/info/alternates). Delete the work copy folder and clone it again (step 3); do not run git in it.')
   const originProblem = ['origin-has-login', 'origin-mismatch'].find(has)
   say(originProblem === undefined, originProblem !== undefined ? `team repo: ${PROBLEM_WORDS[originProblem]}` : 'team repo: the work copy\'s origin is the team repo')
 

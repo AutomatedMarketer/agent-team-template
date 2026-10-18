@@ -503,6 +503,34 @@ test('a work copy whose origin holds a token stops the runner before any git tal
   assert.ok(!w.logs.join('\n').includes('abc123'), 'the token is not logged')
 }))
 
+test('a stuck work copy whose config Claude also changed is made again before the origin check, so the tick is not stopped by the planted address', () => withWorld(async (w) => {
+  const card = w.send({ action: 'task', title: 'Chase the invoice' })
+  const address = await originUrl(w.places.workDir)
+  // What Claude wrote into the folder's config: an address the daily check refuses on its own.
+  await git(['remote', 'set-url', 'origin', ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')], w.places.workDir)
+  await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+  await writeFile(join(w.places.stateDir, STUCK_FILE), JSON.stringify({ address }))
+  const result = await runTick(w.ctx({ force: true }))
+  assert.equal(result.state, 'done', `${result.state} (${result.why})`)
+  assert.equal(entryFor(await statusIn(w), card.id).state, 'ok')
+  assert.equal(await workCopyStuck(w.places.stateDir), false)
+}))
+
+test('a work copy whose .git points elsewhere is named as that before the origin check, whatever its config says, and no git runs in it', () => withWorld(async (w) => {
+  w.send({ action: 'task', title: 'Chase the invoice' })
+  await git(['remote', 'set-url', 'origin', ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')], w.places.workDir)
+  await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+  const inWork = []
+  const watching = async (args, cwd) => {
+    if (typeof cwd === 'string' && cwd.startsWith(w.places.workDir)) inWork.push(args.join(' '))
+    return git(args, cwd)
+  }
+  const result = await runTick(w.ctx({ git: watching, force: true }))
+  assert.deepEqual([result.state, result.why], ['not-ready', 'work-points-elsewhere'])
+  assert.equal(w.board.polls, 0)
+  assert.deepEqual(inWork, [])
+}))
+
 test('a work copy left stuck by an earlier remake is made again at the start of the next tick that can move it, and the tick goes on', () => withWorld(async (w) => {
   const card = w.send({ action: 'task', title: 'Chase the invoice' })
   await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
