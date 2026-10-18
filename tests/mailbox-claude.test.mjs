@@ -637,6 +637,119 @@ test('a run is checked against the tools it was started with: the web tools list
   assert.equal(files.result.ok, true)
 })
 
+/* ---------- a call to a tool Claude was never given, refused by Claude Code itself ------------------------------------ */
+
+// Two things look alike in a transcript and are not. (a) Claude was OFFERED a tool outside the list: the init names it. That is a wall
+// that is not there, and the run is stopped at once, whatever happens next. (b) Claude ASKED for a tool it was never offered: the
+// model can write any tool name it likes, and Claude Code answers such a call itself, with an error, and runs nothing. That wall held.
+// The fixture is a real run on Windows 11 (Claude Code 2.1.300, 2026-10-18), started with the runner's own flags (buildArgv, web on)
+// and asked to call Bash; only the folder it ran in is replaced. Its answer is the exact text Claude Code gives.
+const REAL_REFUSAL = readFileSync(join(repoRoot, 'tests', 'fixtures', 'claude-unoffered-tool.jsonl'), 'utf8')
+const refusalOf = (name, id = 't1') => ({ type: 'user', message: { content: [{ type: 'tool_result', content: `<tool_use_error>Error: No such tool available: ${name}. ${name} is disabled for this session, in subagents as well as here.</tool_use_error>`, is_error: true, tool_use_id: id }] } })
+const callWith = (id, name, input = {}) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } })
+const answer = (id, content, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, ...(isError === undefined ? {} : { is_error: isError }) }] } })
+
+test('the real transcript: the init does not offer Bash, Claude asks for it anyway, Claude Code answers "No such tool available" - the run goes on and ends well, and the attempt is counted', async () => {
+  const folder = await workFolder()
+  try {
+    const fake = fakeSpawn((child) => {
+      child.stdout.write(REAL_REFUSAL)
+      finish(child, 0)
+    })
+    const result = await runClaude(options(folder, fake, { tools: [...toolsFor(true)] }))
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.deepEqual(result.attempted, { Bash: 1 })
+    assert.deepEqual(result.calls, {}, 'a refused call is not a call of an allowed tool')
+    assert.deepEqual(fake.kills, [])
+  } finally {
+    await folder.cleanup()
+  }
+})
+
+test('a refused call to a tool never offered does not stop the run: the work after it is done and counted, and each name is counted apart', async () => {
+  const { result, fake } = await runStream([INIT, callWith('a', 'Bash', { command: 'git status' }), refusalOf('Bash', 'a'), callWith('b', 'Read'), answer('b', 'the file', false), callWith('c', 'PowerShell'), refusalOf('PowerShell', 'c'), callWith('d', 'Bash'), refusalOf('Bash', 'd'), RESULT()])
+  assert.equal(result.ok, true, JSON.stringify(result))
+  assert.deepEqual(result.attempted, { Bash: 2, PowerShell: 1 })
+  assert.deepEqual(result.calls, { Read: 1 })
+  assert.deepEqual(fake.kills, [])
+})
+
+test('a run with no refused call says nothing about attempts: the answer is the same shape as before', async () => {
+  const { result } = await runStream([INIT, call('Read'), RESULT()])
+  assert.equal('attempted' in result, false)
+})
+
+test('CASE (a) STILL FAILS HARD: a tool the init offers is stopped at the init, even when every call of it is then answered as refused', async () => {
+  for (const extra of ['Bash', 'PowerShell', 'Agent', 'mcp__x__y']) {
+    const { result, fake } = await runStream([{ ...INIT, tools: [...TOOLS, extra] }, callWith('a', extra), refusalOf(extra, 'a'), RESULT()])
+    assert.equal(result.ok, false, extra)
+    assert.equal(result.why, 'tool-refused', extra)
+    assert.equal(result.tool, extra, extra)
+    assert.equal(result.how, 'offered', extra)
+    assert.deepEqual(fake.kills, [[4242, 'SIGKILL']], extra)
+  }
+})
+
+test('a call to a tool never offered whose answer is anything but Claude Code\'s own refusal is a breach: the run is stopped at that answer', async () => {
+  const cases = [
+    ['answered without an error: it ran', answer('a', 'hi', false)],
+    ['answered with no error flag at all', answer('a', 'hi')],
+    ['answered with an error of its own: it ran and failed', answer('a', 'Exit code 1\nrm: cannot remove', true)],
+    ['answered as a permission denial: a tool that was there to deny', answer('a', 'Permission to use Bash has been denied.', true)],
+    ['answered with the refusal of another tool', answer('a', '<tool_use_error>Error: No such tool available: Read. Read is disabled for this session, in subagents as well as here.</tool_use_error>', true)],
+    ['answered with the refusal but not as an error', answer('a', '<tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>', false)],
+    ['answered with the refusal words somewhere after other output', answer('a', 'hi\n<tool_use_error>Error: No such tool available: Bash.</tool_use_error>', true)]
+  ]
+  for (const [name, reply] of cases) {
+    const { result, fake } = await runStream([INIT, callWith('a', 'Bash'), reply, call('Read'), RESULT()])
+    assert.equal(result.ok, false, name)
+    assert.equal(result.why, 'tool-refused', name)
+    assert.equal(result.tool, 'Bash', name)
+    assert.equal(result.how, 'used', name)
+    assert.deepEqual(fake.kills, [[4242, 'SIGKILL']], name)
+  }
+})
+
+test('a call to a tool never offered that is never answered proves nothing: at the result the run fails, and says the refusal was not seen', async () => {
+  const { result, fake } = await runStream([INIT, callWith('a', 'Bash'), call('Read'), RESULT()])
+  assert.equal(result.ok, false)
+  assert.equal(result.why, 'tool-refused')
+  assert.equal(result.tool, 'Bash')
+  assert.equal(result.how, 'unanswered')
+  assert.deepEqual(fake.kills, [[4242, 'SIGKILL']])
+})
+
+test('a run that ends before a call to a tool never offered is answered fails, and names it, however well it says it ended', async () => {
+  const folder = await workFolder()
+  try {
+    const fake = fakeSpawn((child) => {
+      child.stdout.write([INIT, callWith('a', 'Bash')].map(line).join(''))
+      finish(child, 0)
+    })
+    const result = await runClaude(options(folder, fake))
+    assert.equal(result.ok, false)
+    assert.equal(result.why, 'tool-refused')
+    assert.equal(result.how, 'unanswered')
+  } finally {
+    await folder.cleanup()
+  }
+})
+
+test('a refused call is only forgiven where its refusal can be read: before the init, with no id, in a subagent or outside an assistant message it stops the run at once', async () => {
+  const cases = [
+    ['before the init', [callWith('a', 'Bash'), refusalOf('Bash', 'a'), INIT, RESULT()]],
+    ['with no id to match its answer', [INIT, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }, refusalOf('Bash', 'undefined'), RESULT()]],
+    ['in a subagent', [INIT, { ...callWith('a', 'Bash'), parent_tool_use_id: 'toolu_1' }, refusalOf('Bash', 'a'), RESULT()]],
+    ['in a message that is not the assistant\'s', [INIT, { type: 'user', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: {} }] } }, refusalOf('Bash', 'a'), RESULT()]]
+  ]
+  for (const [name, events] of cases) {
+    const { result, fake } = await runStream(events)
+    assert.equal(result.why, 'tool-refused', name)
+    assert.equal(result.how, 'used', name)
+    assert.deepEqual(fake.kills, [[4242, 'SIGKILL']], name)
+  }
+})
+
 /* ---------- time and size limits ----------------------------------------------------------------------------------- */
 
 test('a run that outlasts its time is stopped: the group is told to end, and killed if it does not, after the grace time', async () => {

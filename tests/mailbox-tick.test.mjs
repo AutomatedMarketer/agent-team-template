@@ -257,6 +257,21 @@ test('Claude calls a tool that is not allowed: the order fails with "tool-refuse
   assert.equal(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null)
 }))
 
+// A real job where Claude asks for a shell it was never given: Claude Code answers the call itself, with an error, and runs nothing (the
+// text is the real one, tests/fixtures/claude-unoffered-tool.jsonl). Nothing happened, so the job is not failed for it - failing would be
+// an alarm about a wall that held. What lands is still decided by the change check after the run, as for any other run.
+test('Claude asks for a shell it was not given and Claude Code refuses the call: nothing ran, so the job goes on and lands', () => withWorld(async (w) => {
+  const refusal = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', is_error: true, content: '<tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>' }] } }
+  w.claude.script = async (cwd, args, call) => {
+    const events = await w.claude.good(cwd, args, call)
+    return [events[0], { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'git status' } }] } }, refusal, ...events.slice(1)]
+  }
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  assert.equal(entryFor(await statusIn(w), sent.id).state, 'ok')
+  assert.notEqual(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'the output was pushed')
+}))
+
 test('Claude ends with an error, or writes nothing, or writes no run log: failed, each with its own reason', () => withWorld(async (w) => {
   const cases = [
     ['an error', async () => [w.INIT, { ...w.RESULT, is_error: true, subtype: 'error_max_turns' }], 'claude-failed'],

@@ -215,12 +215,34 @@ export function killTree(pid, signal, { platform = process.platform, spawn, syst
 
 const TOOL_NAME = /^[A-Za-z0-9_*-]{1,64}$/
 
+// What Claude Code answers, itself, to a call of a tool it never offered: an error, and nothing runs. The model can write any tool name it
+// likes - it is told to try a shell in the self-test, and a job's steps can make it reach for one - and this is the whole of the answer.
+// Seen on a real run with the flags above (Windows 11, Claude Code 2.1.300, 2026-10-18; tests/fixtures/claude-unoffered-tool.jsonl):
+//   <tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>
+// The whole answer must be that one error, for that one name: a tool that was there and ran, then failed, answers with an error too.
+const refusalFor = (name) => new RegExp(`^<tool_use_error>Error: No such tool available: ${escapeText(name)}\\.[^<]*</tool_use_error>$`)
+const resultText = (content) => {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((part) => (typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '')).join('\n')
+  return ''
+}
+
 // Claude's output is one JSON message per line. Every one is read for two things: the tools it lists or calls, which
 // must be the allowed ones, and the final result.
-//   { ok: true, calls, denials, exitCode, transcriptBytes }
-//   { ok: false, why: 'claude-failed' | 'timed-out' | 'tool-refused', calls, denials, exitCode, transcriptBytes, tool? }
-// The transcript - every byte it said - is written to `transcriptPath` for the owner alone. A tool outside the list
-// stops the run at once, the whole process group, with no time to finish.
+//   { ok: true, calls, denials, exitCode, transcriptBytes, attempted? }
+//   { ok: false, why: 'claude-failed' | 'timed-out' | 'tool-refused', calls, denials, exitCode, transcriptBytes, tool?, how?, attempted? }
+// The transcript - every byte it said - is written to `transcriptPath` for the owner alone.
+//
+// A tool outside the list is one of two things, and only the first is a wall that is not there:
+//   OFFERED (how: 'offered')   the init - the tools Claude Code says, at start-up, that this run has - names it, or a connector, or cannot be
+//                              read. The run is stopped at once, the whole process group, with no time to finish. Nothing later changes that.
+//   ASKED FOR, never offered   Claude wrote a call to a tool the init did not name. Claude Code answers such a call itself (refusalFor) and runs
+//                              nothing. Answered so, it is counted in `attempted` and the run goes on: the wall held, and failing the job would
+//                              be an alarm about a wall that held - an alarm the owner then learns to ignore. Answered any other way (how: 'used'),
+//                              or not answered by the result or the end of the run (how: 'unanswered'), it stops the run as tool-refused. So
+//                              does a call whose refusal cannot be read for it: before the init, with no id, in a subagent, or outside an
+//                              assistant message. A real tool that ran would be seen at its answer, one message later than at the call itself;
+//                              stopping at the call never stopped that first call either, since Claude Code starts it as it prints it.
 export function runClaude({
   file, argv, cwd, env, timeoutMs, killAfterMs = KILL_AFTER_MS, closeWaitMs = CLOSE_WAIT_MS,
   transcriptPath, stderrPath, maxTranscriptBytes = TRANSCRIPT_MAX_BYTES,
@@ -245,6 +267,11 @@ export function runClaude({
     let transcriptBytes = 0
     let reason = null
     let tool = null
+    let how = null
+    let initSeen = false
+    // Calls of tools the init did not name, waiting for Claude Code's answer: { id, name }, in the order they were made.
+    const asked = []
+    const attempted = new Map()
     let resultMessage = null
     let exitCode = null
     let settled = false
@@ -267,9 +294,9 @@ export function runClaude({
     }
 
     const answer = () => {
-      const base = { calls: Object.fromEntries(calls), denials: Array.isArray(resultMessage?.permission_denials) ? resultMessage.permission_denials.length : 0, exitCode, transcriptBytes }
+      const base = { calls: Object.fromEntries(calls), denials: Array.isArray(resultMessage?.permission_denials) ? resultMessage.permission_denials.length : 0, exitCode, transcriptBytes, ...(attempted.size ? { attempted: Object.fromEntries(attempted) } : {}) }
       if (reason === null && exitCode === 0 && resultMessage?.type === 'result' && resultMessage.is_error === false && resultMessage.subtype === 'success') return { ok: true, ...base }
-      return { ok: false, why: reason ?? 'claude-failed', ...base, ...(tool !== null ? { tool } : {}) }
+      return { ok: false, why: reason ?? 'claude-failed', ...base, ...(tool !== null ? { tool, how } : {}) }
     }
 
     const finalize = (code) => {
@@ -281,6 +308,12 @@ export function runClaude({
       clearTimeout(closeTimer)
       exitCode = typeof code === 'number' ? code : null
       read(pending)
+      // The run ended with a call to a tool it was never offered still unanswered: nobody saw it refused.
+      if (reason === null && asked.length) {
+        reason = 'tool-refused'
+        tool = asked[0].name
+        how = 'unanswered'
+      }
       stderrFile?.end()
       transcript.end(() => resolve(answer()))
     }
@@ -292,8 +325,9 @@ export function runClaude({
       closeTimer ??= setTimeout(() => finalize(null), closeWaitMs)
     }
 
-    const refuseTool = (name) => {
+    const refuseTool = (name, kind) => {
       tool = typeof name === 'string' && TOOL_NAME.test(name) ? name : 'unknown'
+      how = kind
       hardStop('tool-refused')
     }
 
@@ -306,11 +340,29 @@ export function runClaude({
       }
     }
 
-    const audit = (name) => {
-      if (!allowedNames.has(name)) return refuseTool(name)
-      calls.set(name, (calls.get(name) ?? 0) + 1)
-      report({ type: 'tool', name })
+    const audit = (event, block) => {
+      const { name } = block
+      if (allowedNames.has(name)) {
+        calls.set(name, (calls.get(name) ?? 0) + 1)
+        report({ type: 'tool', name })
+        return undefined
+      }
+      const answerable = initSeen && event.type === 'assistant' && (event.parent_tool_use_id ?? null) === null &&
+        typeof block.id === 'string' && block.id !== '' && typeof name === 'string' && TOOL_NAME.test(name)
+      if (!answerable) return refuseTool(name, 'used')
+      asked.push({ id: block.id, name })
       return undefined
+    }
+
+    const answered = (block) => {
+      const at = asked.findIndex((call) => call.id === block.tool_use_id)
+      if (at === -1) return undefined
+      const [{ name }] = asked.splice(at, 1)
+      if (block.is_error === true && refusalFor(name).test(resultText(block.content))) {
+        attempted.set(name, (attempted.get(name) ?? 0) + 1)
+        return undefined
+      }
+      return refuseTool(name, 'used')
     }
 
     function read(text) {
@@ -322,19 +374,22 @@ export function runClaude({
       }
       if (reason === 'tool-refused') return
       if (event?.type === 'system' && event.subtype === 'init') {
-        if (!Array.isArray(event.tools)) return refuseTool('unknown')
+        if (!Array.isArray(event.tools)) return refuseTool('unknown', 'offered')
         for (const name of event.tools) {
-          if (!allowedNames.has(name)) return refuseTool(name)
+          if (!allowedNames.has(name)) return refuseTool(name, 'offered')
         }
-        if (Array.isArray(event.mcp_servers) && event.mcp_servers.length) return refuseTool('mcp')
+        if (Array.isArray(event.mcp_servers) && event.mcp_servers.length) return refuseTool('mcp', 'offered')
+        initSeen = true
         report({ type: 'started' })
       } else if (Array.isArray(event?.message?.content)) {
         for (const block of event.message.content) {
-          if (block?.type === 'tool_use') audit(block.name)
+          if (block?.type === 'tool_use') audit(event, block)
+          else if (block?.type === 'tool_result') answered(block)
           if (reason === 'tool-refused') return
         }
       } else if (event?.type === 'result') {
         resultMessage = event
+        if (asked.length) return refuseTool(asked[0].name, 'unanswered')
         report({ type: 'finishing' })
       }
     }

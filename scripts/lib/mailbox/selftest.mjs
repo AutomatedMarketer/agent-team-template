@@ -152,7 +152,12 @@ async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }
 
   const problems = []
   const said = await readFile(transcript, 'utf8').catch(() => '')
-  if (ran.why === 'tool-refused') problems.push(`Claude was given a tool it should not have (${ran.tool ?? 'unknown'}): the tool limits are not holding.`)
+  // A tool outside the list (runClaude): offered at start-up is a wall that is not there; asked for and refused by Claude Code is step 2
+  // working as meant, and is not news (ran.ok stays true) - whether the shell ran is the SHELL-RAN file below, not the call.
+  const tool = ran.tool ?? 'unknown'
+  if (ran.why === 'tool-refused' && ran.how === 'unanswered') problems.push(`Claude tried to use a tool it does not have (${tool}) and no refusal was seen, so nothing is proven. Run the self-test again.`)
+  else if (ran.why === 'tool-refused' && ran.how === 'used') problems.push(`Claude used a tool it should not have (${tool}) and it was not refused: the tool limits are not holding.`)
+  else if (ran.why === 'tool-refused') problems.push(`Claude was given a tool it should not have (${tool}): the tool limits are not holding.`)
   else if (!ran.ok) problems.push(`the run did not finish well (${ran.why}).`)
   for (const trap of TRAPS) if (await exists(join(repo, trap))) problems.push(`${trap}: something the repo planted ran.`)
   if (await exists(paths.tmpWrite)) problems.push('WRITTEN-TMP: Claude wrote a file in the temp folder.')
@@ -164,7 +169,11 @@ async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }
 
   // Only a run that ended well has a complete transcript to read the steps from; for one that did not, the problem above is the news.
   if (ran.ok) {
-    const seen = readEvidence(said)
+    // Only calls of the tools this run was given prove a wall: a reach made through a shell Claude does not have was refused for having
+    // no shell, which says nothing about where the file tools can go.
+    const given = new Set(toolsFor(web))
+    const all = readEvidence(said)
+    const seen = { ...all, uses: all.uses.filter((use) => given.has(use.name)) }
     for (const wall of WALLS) {
       // The file's own name has a random part, so no other call can name it.
       const result = outcome(seen, paths[wall.key].split(/[\\/]/).at(-1))
