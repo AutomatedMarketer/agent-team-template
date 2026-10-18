@@ -769,6 +769,15 @@ test('a connector tool is never forgiven, even with Claude Code\'s own refusal w
   }
 })
 
+test('a connector name in other capitals (MCP__, Mcp__) is a connector too: stopped at the call, never forgiven', async () => {
+  for (const name of ['MCP__evil__run', 'Mcp__evil__run']) {
+    const reply = `<tool_use_error>Error: No such tool available: ${name}</tool_use_error>`
+    const { result } = await runStream([INIT, callWith('a', name), answer('a', reply, true), RESULT()])
+    assert.equal(result.ok, false, name)
+    assert.equal(result.how, 'connector', name)
+  }
+})
+
 test('a call to a tool never offered that is never answered proves nothing: at the result the run fails, and says the refusal was not seen', async () => {
   const { result, fake } = await runStream([INIT, callWith('a', 'Bash'), call('Read'), RESULT()])
   assert.equal(result.ok, false)

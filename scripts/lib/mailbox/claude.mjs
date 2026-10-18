@@ -354,7 +354,7 @@ export function runClaude({
         report({ type: 'tool', name })
         return undefined
       }
-      if (typeof name === 'string' && name.startsWith(CONNECTOR_PREFIX)) return refuseTool(name, 'connector')
+      if (typeof name === 'string' && name.toLowerCase().startsWith(CONNECTOR_PREFIX)) return refuseTool(name, 'connector')
       const answerable = initSeen && event.type === 'assistant' && (event.parent_tool_use_id ?? null) === null &&
         typeof block.id === 'string' && block.id !== '' && typeof name === 'string' && TOOL_NAME.test(name)
       if (!answerable) return refuseTool(name, 'used')
