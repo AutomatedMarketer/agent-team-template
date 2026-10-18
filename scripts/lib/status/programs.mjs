@@ -113,7 +113,8 @@ function failure(code, extra = {}) {
 
 // The runner machine.mjs hands to every source as deps.exec(file, args, options). It answers
 // { stdout, code } and rejects with a code: ETIMEDOUT, ECAP (too much output), EXIT (a failing
-// exit, unless acceptAnyExit), ESPAWN, or ENOTABSOLUTE.
+// exit, unless acceptAnyExit), ESPAWN, or ENOTABSOLUTE. With `stderr: true` the error stream is kept too (capped the same way) and
+// answered as `stderr`: only for a program that prints its one useful line there (codex login status), matched by the caller and never printed.
 export function createRunner({ spawn, platform, env }) {
   const ownGroup = platform !== 'win32'
   const systemRoot = env?.SystemRoot || env?.SYSTEMROOT || 'C:\\Windows'
@@ -123,7 +124,7 @@ export function createRunner({ spawn, platform, env }) {
       reject(failure('ENOTABSOLUTE', { message: 'a program must be given as an absolute path' }))
       return
     }
-    const { cwd, timeout = VERSION_TIMEOUT_MS, maxOutput = PROGRAM_OUTPUT_CAP, acceptAnyExit = false } = options
+    const { cwd, timeout = VERSION_TIMEOUT_MS, maxOutput = PROGRAM_OUTPUT_CAP, acceptAnyExit = false, stderr: keepStderr = false } = options
     let child
     try {
       child = spawn(file, args, {
@@ -203,12 +204,19 @@ export function createRunner({ spawn, platform, env }) {
       if (size > maxOutput) settle(failure('ECAP'))
       else chunks.push(chunk)
     })
-    // Read and dropped: an error stream can name paths, and nothing here prints it.
-    child.stderr.on('data', () => {})
+    // Read and dropped (unless asked for): an error stream can name paths, and nothing here prints it.
+    const errors = []
+    let errorSize = 0
+    child.stderr.on('data', (chunk) => {
+      if (!keepStderr || errorSize > maxOutput) return
+      errorSize += chunk.length
+      if (errorSize <= maxOutput) errors.push(chunk)
+    })
     child.on('error', () => settle(failure('ESPAWN')))
     child.on('close', (code) => {
       const stdout = Buffer.concat(chunks).toString('utf8')
-      if (code === 0 || acceptAnyExit) settle(null, { stdout, code })
+      const answer = keepStderr ? { stdout, stderr: Buffer.concat(errors).toString('utf8'), code } : { stdout, code }
+      if (code === 0 || acceptAnyExit) settle(null, answer)
       else settle(failure('EXIT', { exitCode: code }))
     })
   })

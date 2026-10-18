@@ -1,0 +1,69 @@
+# The ONLY Codex settings a mailbox run has. The runner copies this file to config.toml in its own Codex home
+# (a folder next to the state folder, never ~/.codex) before every start of Codex, and starts Codex with
+# CODEX_HOME pointing there and --strict-config, so a key this Codex does not know stops it instead of being ignored.
+# Read with scripts/lib/mailbox/codex.mjs, which says where each line comes from. Checked against Codex CLI 0.160.0.
+
+# Never ask: nobody is there to answer.
+approval_policy = "never"
+
+# The sandbox is this permission profile, NOT --sandbox workspace-write: workspace-write lets commands read the
+# whole disk. No sandbox_mode may appear anywhere, or Codex falls back to the old settings.
+default_permissions = "mailbox-work"
+
+# No web search tool at all (the hosted one is a way out of the sandbox).
+web_search = "disabled"
+
+# The team repo's AGENTS.md is not read as instructions (0 bytes of it).
+project_doc_max_bytes = 0
+
+# No skill catalogue: a budget of one token leaves every skill out (the repo's, the owner's, the bundled ones).
+skills.max_context_tokens = 1
+
+# The login is a file in this Codex home, a ChatGPT login only (no API key, no per-token bill).
+cli_auth_credentials_store = "file"
+forced_login_method = "chatgpt"
+
+# Nothing kept, sent or updated behind the runner's back.
+check_for_update_on_startup = false
+history.persistence = "none"
+analytics.enabled = false
+feedback.enabled = false
+
+# No sub-agents.
+agents.enabled = false
+
+[features]
+apps = false
+plugins = false
+remote_plugin = false
+hooks = false
+skill_mcp_dependency_install = false
+tool_suggest = false
+multi_agent = false
+memories = false
+goals = false
+browser_use = false
+browser_use_external = false
+in_app_browser = false
+computer_use = false
+image_generation = false
+view_image = false
+daemon_auto_start = false
+in_app_updates = false
+
+# Windows: only Microsoft's container sandbox. Named here, it fails closed where the computer does not have it.
+[windows]
+sandbox = "mxc"
+
+# Read and write inside the work copy; read what programs need to start; nothing else. No network.
+[permissions.mailbox-work]
+extends = ":workspace"
+
+[permissions.mailbox-work.filesystem]
+":root" = "deny"
+":minimal" = "read"
+":tmpdir" = "deny"
+":slash_tmp" = "deny"
+
+[permissions.mailbox-work.network]
+enabled = false
