@@ -317,7 +317,8 @@ test('every word in the troubleshooting table is a word the code prints', async 
     board: await read('scripts/lib/mailbox/board.mjs'),
     keys: await read('scripts/lib/mailbox/keys.mjs'),
     places: await read('scripts/lib/mailbox/places.mjs'),
-    cli: await read('scripts/lib/mailbox/command.mjs')
+    cli: await read('scripts/lib/mailbox/command.mjs'),
+    workcopy: await read('scripts/lib/mailbox/workcopy.mjs')
   }
   // [the words in the guide (null: a reason the guide shows inside another), the file that makes them, what to find there]
   const words = [
@@ -330,6 +331,8 @@ test('every word in the troubleshooting table is a word the code prints', async 
     ['not-ready (origin-mismatch)', 'tick', "'origin-mismatch'"],
     ['not-ready (origin-has-login)', 'tick', "'origin-has-login'"],
     ['not-ready (work-...)', 'tick', 'work-${'],
+    ['not-ready (work-points-elsewhere)', 'workcopy', "why: 'points-elsewhere'"],
+    ['not-ready (work-copy-stuck)', 'tick', "'work-copy-stuck'"],
     ['board-failed (board-refused)', 'board', "'board-refused'"],
     ['board-failed (board-unreachable)', 'board', "'board-unreachable'"],
     ['board-failed (board-bad-answer)', 'board', "'board-bad-answer'"],

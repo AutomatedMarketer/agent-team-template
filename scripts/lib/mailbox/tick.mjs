@@ -43,7 +43,7 @@ import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
 import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
 import { proofHolds, proofKept } from './proof.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
-import { gitUnchanged, remakeWorkCopy, snapshotGit } from './gitguard.mjs'
+import { gitUnchanged, remakeWorkCopy, snapshotGit, sweepAside, unstickWorkCopy, workCopyStuck } from './gitguard.mjs'
 import { commitPaths, landedCommit, pinnedGit, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
 import { buildMailbox, readMailboxStatus, writeMailboxStatus } from './status.mjs'
 import { ordersFromClaims, reconcile } from './ledger.mjs'
@@ -187,8 +187,13 @@ async function locked(ctx, { orders, end, log }) {
     s.notReady = [...s.notReady, 'selftest-needed']
   }
 
+  // Old folders a remake moved aside and could not delete then are swept; a work copy left stuck by an earlier remake (it could not be
+  // moved aside) is made again now if it can be moved, and otherwise no git is run in it and the tick stops (gitguard.mjs).
+  await sweepAside(places.workDir)
+  if ((await unstickWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, stateDir: places.stateDir, originAccepted: s.originAccepted })).stuck) return end('not-ready', 'work-copy-stuck')
+
   // The clone's own config is written again before git is first run in it, then orders lost track of are settled by reading.
-  const level = await resetWorkCopy({ git: ctx.git, work: places.workDir, emptyHooks: hooks, originAccepted: s.originAccepted })
+  const level = await resetWork(s)
   if (!level.ok && level.why !== 'unreachable') return end('not-ready', `work-${level.why}`)
   await reconcile({
     stateDir: places.stateDir,
@@ -363,7 +368,7 @@ async function execute(s, { id, action, fields, minutes }) {
   const { workDir } = ctx.places
   const startedMs = ctx.now()
   const fail = (why) => settle(s, id, action, { state: 'failed', why, startedAt: action === 'run' ? isoSeconds(startedMs) : null })
-  const level = () => resetWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, originAccepted: s.originAccepted })
+  const level = () => resetWork(s)
 
   let reset = await level()
   if (!reset.ok) {
@@ -456,7 +461,7 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.
   if (!(await gitUnchanged(workDir, before))) {
     s.log('mailbox: a run changed the git settings of the work copy, so the order failed and the work copy was made again')
-    await remakeWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, before })
+    await remakeWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, before, stateDir: ctx.places.stateDir, originAccepted: s.originAccepted })
     return fail('change-refused')
   }
   if (!ran.ok) return fail(ran.why)
@@ -574,11 +579,19 @@ const withoutTime = (doc) => JSON.stringify({ ...doc, takenAt: null })
 // Bring the status file in the team repo level with the claims: pushed when it differs from what is there, and once in a
 // while when it does not - so the board can tell a runner that is idle from one that is gone. Best effort: if the team
 // repo cannot be reached the next tick does it.
+// Every reset of the work copy in a tick goes through here: while a remake has marked it stuck (it could not be moved aside), no git is
+// run in it - not for the next order, not for the status file.
+async function resetWork(s) {
+  const { ctx } = s
+  if (await workCopyStuck(ctx.places.stateDir)) return { ok: false, why: 'copy-stuck' }
+  return resetWorkCopy({ git: ctx.git, work: ctx.places.workDir, emptyHooks: s.hooks, originAccepted: s.originAccepted })
+}
+
 async function syncStatus(s) {
   const { ctx } = s
   const { workDir } = ctx.places
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const reset = await resetWorkCopy({ git: ctx.git, work: workDir, emptyHooks: s.hooks, originAccepted: s.originAccepted })
+    const reset = await resetWork(s)
     if (!reset.ok) return
     const doc = await statusDoc(s)
     const existing = await readMailboxStatus({ root: workDir, runner: s.allow.runner, identity: ctx.identity })

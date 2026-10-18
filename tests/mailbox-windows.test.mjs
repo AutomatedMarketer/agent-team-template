@@ -727,6 +727,35 @@ test('git is started by its absolute path from System32, told where to work with
   assert.equal(finds.length, 1, 'the PATH is searched once')
 })
 
+test('git on Windows never sees GIT_DEFAULT_HASH or GIT_DEFAULT_REF_FORMAT, and neither does the git of the runner\'s entry file', async () => {
+  const { git, runs } = gitWith({ env: { SystemRoot: SYSTEM_ROOT, PATH: String.raw`C:\x`, GIT_DEFAULT_HASH: 'sha256', GIT_DEFAULT_REF_FORMAT: 'reftable' } })
+  await git(['init', '--quiet'], WORK)
+  assert.equal(runs[0].options.env.GIT_DEFAULT_HASH, undefined)
+  assert.equal(runs[0].options.env.GIT_DEFAULT_REF_FORMAT, undefined)
+  assert.equal(runs[0].options.env.PATH, String.raw`C:\x`)
+  const entry = await readFile(join(repoRoot, 'scripts', 'mailbox-runner.mjs'), 'utf8')
+  assert.match(entry, /env: gitEnv\(process\.env\)/, 'the Mac\'s git is given gitEnv too')
+})
+
+test('a time-out whose program has already exited sends no taskkill: its process number may belong to another program by then', async () => {
+  const calls = []
+  const spawn = (file, args, options) => {
+    calls.push({ file, args, options })
+    const child = new EventEmitter()
+    child.pid = 4242
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    // It has exited, but its pipes have not closed yet (a program it started still holds them).
+    child.exitCode = 0
+    child.signalCode = null
+    return child
+  }
+  const exec = createRunner({ spawn, platform: 'win32', env: { SystemRoot: SYSTEM_ROOT } })
+  await assert.rejects(exec(String.raw`C:\x\slow.exe`, [], { timeout: 20 }), (error) => error.code === 'ETIMEDOUT')
+  assert.deepEqual(calls.filter((call) => /taskkill\.exe$/i.test(call.file)), [])
+})
+
 test('a git program inside the runner\'s own code, or inside the folder git was asked to work in, is never run', async () => {
   const inside = (folder) => async (path, outer) => path.startsWith(folder) && outer === folder
   // The first git on PATH is in the runner's code: the next one is used.
@@ -799,7 +828,8 @@ test('the real git, through windowsGit, works in a folder given with -C: a repo 
 
 test('the entry file uses the Windows git and the folder lock only on Windows, and keeps the Mac\'s git as it was', async () => {
   const text = await readFile(join(repoRoot, 'scripts', 'mailbox-runner.mjs'), 'utf8')
-  assert.ok(text.includes("const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })"), 'the Mac\'s git line is unchanged')
+  // The Mac's git as it was, but for gitEnv: the same environment and no prompt, without GIT_DEFAULT_HASH / GIT_DEFAULT_REF_FORMAT.
+  assert.ok(text.includes("const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: gitEnv(process.env) })"), 'the Mac\'s git line is unchanged but for gitEnv')
   assert.ok(text.includes('git: windows ? windowsGit('), 'Windows gets the absolute-path git')
   assert.ok(text.includes('...(windows ? { privatePlaces: privatePlaces('), 'Windows gets the folder lock, others get no such key')
   assert.ok(text.includes('avoid: [RUNNER_ROOT]'), 'a git inside the runner\'s own code is never used')

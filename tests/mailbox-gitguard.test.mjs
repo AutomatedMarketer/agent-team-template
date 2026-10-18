@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { git } from './helpers/git.mjs'
-import { gitUnchanged, remakeWorkCopy, snapshotGit } from '../scripts/lib/mailbox/gitguard.mjs'
+import { STUCK_FILE, gitUnchanged, remakeWorkCopy, snapshotGit, sweepAside, unstickWorkCopy, workCopyStuck } from '../scripts/lib/mailbox/gitguard.mjs'
 import { configText, originUrl, readOrigin, resetWorkCopy } from '../scripts/lib/mailbox/workcopy.mjs'
 
 /* After Claude has run, git is run in the work copy as the owner. Anything in .git that git reads as configuration, changed by Claude,
@@ -119,7 +120,7 @@ test('the work copy is made again from the address the runner knew before Claude
     await mkdir(empty)
     const calls = []
     assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before }), { ok: true })
-    assert.deepEqual(calls.map((one) => one.verb), ['init', 'fetch', 'checkout'])
+    assert.deepEqual(calls.map((one) => one.verb), ['init', 'remote', 'remote', 'fetch', 'checkout'], 'git is asked which addresses it will use (no network) before it fetches')
     assert.equal(calls[0].cwd, c.work)
     assert.equal(calls[0].empty, true, 'the first git runs in a fresh, empty folder: the old one is gone before any git is run')
     assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n')
@@ -259,6 +260,147 @@ test('a commondir or config.worktree that shows up in the fresh .git (from an in
     }
   }
 })
+
+/* ---------- a work copy that cannot be moved aside ------------------------------------------------------------------------------------ */
+
+// On Windows a folder cannot be renamed while a program has its current folder inside it (a terminal is enough). A delete in place
+// then stops part way and can leave exactly what made the copy untrusted - a commondir, say - behind. So nothing is deleted in place:
+// a marker in the state folder keeps every tick away from the folder until it can be moved.
+const refuseRename = async () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) }
+
+async function plantCommondir(c) {
+  const evil = join(c.work, '.git', 'evil')
+  await mkdir(evil)
+  await writeFile(join(evil, 'config'), '[core]\n\tbare = false\n')
+  await writeFile(join(c.work, '.git', 'commondir'), 'evil\n')
+}
+
+test('a work copy that cannot be moved aside is not deleted in place: it is left whole, no git runs, and a marker in the state folder says it is stuck', async () => {
+  const c = await clone()
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    const state = join(c.root, 'state')
+    await mkdir(empty)
+    await mkdir(state)
+    await plantCommondir(c)
+    const calls = []
+    assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before, stateDir: state, rename: refuseRename }), { ok: false, stuck: true })
+    assert.deepEqual(calls, [], 'no git was run')
+    // (Read as a line: this test's own clone was made with the computer's line-end setting.)
+    assert.equal((await readFile(join(c.work, 'a.txt'), 'utf8')).trim(), 'a', 'nothing was deleted in place')
+    assert.equal(await readFile(join(c.work, '.git', 'commondir'), 'utf8'), 'evil\n')
+    assert.equal(await workCopyStuck(state), true)
+    assert.ok(!(await readFile(join(state, STUCK_FILE), 'utf8')).includes('evil'), 'the marker holds the runner\'s own address, nothing from the folder')
+  } finally {
+    await c.done()
+  }
+})
+
+test('a stuck work copy stays stuck while it cannot be moved, with no git run; once it can be, the marker goes and the copy is made again', async () => {
+  const c = await clone()
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    const state = join(c.root, 'state')
+    await mkdir(empty)
+    await mkdir(state)
+    await plantCommondir(c)
+    await remakeWorkCopy({ git, work: c.work, emptyHooks: empty, before, stateDir: state, rename: refuseRename })
+    const calls = []
+    assert.deepEqual(await unstickWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, stateDir: state, rename: refuseRename }), { stuck: true })
+    assert.deepEqual(calls, [], 'no git was run while it is stuck')
+    assert.deepEqual(await unstickWorkCopy({ git, work: c.work, emptyHooks: empty, stateDir: state }), { stuck: false })
+    assert.equal(await workCopyStuck(state), false, 'the marker is gone')
+    assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n')
+    await assert.rejects(lstat(join(c.work, '.git', 'commondir')), 'what was planted is gone')
+    assert.deepEqual(await unstickWorkCopy({ git, work: c.work, emptyHooks: empty, stateDir: state }), { stuck: false }, 'with no marker there is nothing to do')
+  } finally {
+    await c.done()
+  }
+})
+
+test('a planted commondir in a work copy a terminal is sitting in: the remake leaves it whole and stuck, and the next reset runs no git, so the planted settings never run (this computer)', async (t) => {
+  if (process.platform !== 'win32') return t.skip('a folder in use cannot be renamed only on Windows')
+  const c = await clone()
+  let sitter = null
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    const state = join(c.root, 'state')
+    await mkdir(empty)
+    await mkdir(state)
+    // The reviewer's attack: a common dir with its own config, whose upload-pack writes a file when git fetches.
+    const evil = join(c.work, '.git', 'evil')
+    await mkdir(evil)
+    await git(['init', '-q', '--bare', evil], c.root)
+    const pwned = join(c.root, 'PWNED.txt').replaceAll('\\', '/')
+    await writeFile(join(evil, 'config'), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote "origin"]\n\turl = ${c.origin.replaceAll('\\', '/')}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tuploadpack = "echo owned > '${pwned}'; git-upload-pack"\n`)
+    await writeFile(join(c.work, '.git', 'commondir'), 'evil\n')
+    assert.equal(await gitUnchanged(c.work, before), false)
+    sitter = spawn(join(process.env.SystemRoot, 'System32', 'PING.EXE'), ['-n', '60', '127.0.0.1'], { cwd: join(c.work, '.git'), stdio: 'ignore', windowsHide: true })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    assert.deepEqual(await remakeWorkCopy({ git, work: c.work, emptyHooks: empty, before, stateDir: state }), { ok: false, stuck: true })
+    assert.equal(await workCopyStuck(state), true)
+    assert.equal(await readFile(join(c.work, '.git', 'commondir'), 'utf8'), 'evil\n', 'left whole, not half-deleted')
+    assert.deepEqual(await resetWorkCopy({ git, work: c.work, emptyHooks: empty, originAccepted: () => true }), { ok: false, why: 'points-elsewhere' })
+    await assert.rejects(readFile(join(c.root, 'PWNED.txt')), 'the planted settings never ran')
+  } finally {
+    if (sitter?.pid) {
+      try {
+        process.kill(sitter.pid)
+      } catch {
+        // Already gone.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    await c.done()
+  }
+})
+
+test('old folders moved aside and left behind are swept: only the runner\'s own name pattern beside the work copy, and a link is removed without following it', async () => {
+  const c = await clone()
+  try {
+    const leftover = join(c.root, '.work.old-0123456789ab')
+    await mkdir(join(leftover, '.git'), { recursive: true })
+    await writeFile(join(leftover, 'x.txt'), 'x')
+    const outside = join(c.root, 'outside')
+    await mkdir(outside)
+    await writeFile(join(outside, 'precious.txt'), 'keep')
+    await symlink(outside, join(c.root, '.work.old-ba9876543210'), 'junction')
+    for (const keep of ['.work.old-notours', '.work.old-0123456789abc', 'work.old-0123456789ab', '.other.old-0123456789ab']) await mkdir(join(c.root, keep))
+    await sweepAside(c.work)
+    const left = (await readdir(c.root)).sort()
+    assert.ok(!left.includes('.work.old-0123456789ab') && !left.includes('.work.old-ba9876543210'), left.join(', '))
+    for (const keep of ['.work.old-notours', '.work.old-0123456789abc', 'work.old-0123456789ab', '.other.old-0123456789ab', 'work', 'outside']) assert.ok(left.includes(keep), keep)
+    assert.equal(await readFile(join(outside, 'precious.txt'), 'utf8'), 'keep', 'the link was not followed')
+  } finally {
+    await c.done()
+  }
+})
+
+test('a remake whose address git would rewrite to carry a token (a global insteadOf) fetches nothing', async () => {
+  const c = await clone()
+  const global = join(c.root, 'global.gitconfig')
+  const saved = process.env.GIT_CONFIG_GLOBAL
+  try {
+    const empty = join(c.root, 'empty-hooks')
+    await mkdir(empty)
+    const address = 'https://github.com/ExampleOwner/example-team.git'
+    await writeFile(join(c.work, '.git', 'config'), configText({ url: address, emptyHooks: empty }))
+    const before = await snapshotGit(c.work)
+    await writeFile(global, `[url "${['https://x-access-token', 'abc123@github.com/'].join(':')}"]\n\tinsteadOf = https://github.com/\n`)
+    process.env.GIT_CONFIG_GLOBAL = global
+    const calls = []
+    assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before }), { ok: false })
+    assert.deepEqual(calls.filter((one) => one.verb === 'fetch'), [], 'nothing was fetched')
+  } finally {
+    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL
+    else process.env.GIT_CONFIG_GLOBAL = saved
+    await c.done()
+  }
+})
+
 
 test('when the copy cannot be made again the old folder is gone all the same, and nothing of it is left to trust', async () => {
   const c = await clone()

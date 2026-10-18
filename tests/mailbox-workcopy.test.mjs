@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile, stat, readdir, rename, symlink
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { git } from './helpers/git.mjs'
-import { PINS, pinnedGit, configText, resetWorkCopy, commitPaths, pushCommits, landedCommit, originUrl, readOrigin } from '../scripts/lib/mailbox/workcopy.mjs'
+import { PINS, pinnedGit, configText, resetWorkCopy, commitPaths, pushCommits, landedCommit, originUrl, readOrigin, gitEnv } from '../scripts/lib/mailbox/workcopy.mjs'
 
 /* The work copy is the Mac's own clone of the team repo. Other people and cloud routines push to that repo, so nothing in
    the clone is trusted: before every order it is brought level with the team repo's main and everything else in it -
@@ -182,6 +182,109 @@ test('a reset of a clone whose origin holds a login (a token or a password) runs
   } finally {
     await w.cleanup()
   }
+})
+
+// What sends git to another folder's settings or objects. A .git that holds one is not reset: rewriting .git/config does not reach
+// the settings a commondir points at, and git reads those on the very next fetch.
+const ELSEWHERE_FILES = [
+  ['a commondir', async (git) => writeFile(join(git, 'commondir'), 'evil\n')],
+  ['a config.worktree', async (git) => writeFile(join(git, 'config.worktree'), '[core]\n\tfsmonitor = x\n')],
+  ['an alternates file', async (git) => {
+    await mkdir(join(git, 'objects', 'info'), { recursive: true })
+    await writeFile(join(git, 'objects', 'info', 'alternates'), '/elsewhere/objects\n')
+  }]
+]
+
+for (const [what, plant] of ELSEWHERE_FILES) {
+  test(`a reset of a clone whose .git holds ${what} runs no git at all and says so`, async () => {
+    const w = await world()
+    try {
+      await plant(join(w.work, '.git'))
+      const calls = []
+      const watching = async (args, cwd) => { calls.push(args); return git(args, cwd) }
+      assert.deepEqual(await resetWorkCopy({ git: watching, work: w.work, emptyHooks: w.empty, originAccepted: ORIGIN_OK }), { ok: false, why: 'points-elsewhere' })
+      assert.deepEqual(calls, [], 'no git was run')
+    } finally {
+      await w.cleanup()
+    }
+  })
+}
+
+test('a reset of a clone whose .git is a link to a folder runs no git at all', async () => {
+  const w = await world()
+  try {
+    const real = join(w.root, 'real-git')
+    await rename(join(w.work, '.git'), real)
+    await symlink(real, join(w.work, '.git'), 'junction')
+    const calls = []
+    const watching = async (args, cwd) => { calls.push(args); return git(args, cwd) }
+    const result = await resetWorkCopy({ git: watching, work: w.work, emptyHooks: w.empty, originAccepted: ORIGIN_OK })
+    assert.equal(result.ok, false)
+    assert.deepEqual(calls, [], 'no git was run')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+// git's url.<base>.insteadOf and pushInsteadOf, set in the user's or the system's config (which the runner does not rewrite), change the
+// address at the moment git connects. So the address git WILL use is asked of git itself (git remote get-url, which reads config and
+// touches no network) before anything is fetched.
+async function withGlobalConfig(text, fn) {
+  const dir = await mkdtemp(join(tmpdir(), 'mailbox-global-'))
+  const saved = process.env.GIT_CONFIG_GLOBAL
+  try {
+    await writeFile(join(dir, 'gitconfig'), text)
+    process.env.GIT_CONFIG_GLOBAL = join(dir, 'gitconfig')
+    return await fn()
+  } finally {
+    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL
+    else process.env.GIT_CONFIG_GLOBAL = saved
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+const TEAM = 'https://github.com/ExampleOwner/example-team.git'
+const LOGIN_BASE = ['https://x-access-token', 'abc123@github.com/'].join(':')
+const isTeam = (url) => /^(?:https:\/\/github\.com\/|git@github\.com:)ExampleOwner\/example-team(?:\.git)?$/.test(url)
+
+for (const [what, config, why] of [
+  ['an insteadOf that puts a token into every fetch', `[url "${LOGIN_BASE}"]\n\tinsteadOf = https://github.com/\n`, 'origin-has-login'],
+  ['a pushInsteadOf that puts a token into every push', `[url "${LOGIN_BASE}"]\n\tpushInsteadOf = https://github.com/\n`, 'origin-has-login'],
+  ['an insteadOf that sends fetches to another repo', '[url "https://github.com/Other/"]\n\tinsteadOf = https://github.com/ExampleOwner/\n', 'origin-mismatch'],
+  ['a pushInsteadOf that sends pushes to another host', '[url "https://evil.example/"]\n\tpushInsteadOf = https://github.com/\n', 'origin-mismatch']
+]) {
+  test(`a reset refuses ${what} (set outside the clone) before anything is fetched, and never says the address`, async () => {
+    const w = await world()
+    try {
+      await git(['remote', 'set-url', 'origin', TEAM], w.work)
+      const calls = []
+      const watching = async (args, cwd) => { calls.push(args.join(' ')); return git(args, cwd) }
+      const result = await withGlobalConfig(config, () => resetWorkCopy({ git: watching, work: w.work, emptyHooks: w.empty, originAccepted: isTeam }))
+      assert.deepEqual(result, { ok: false, why })
+      assert.deepEqual(calls.filter((line) => !line.includes('remote get-url') && /\b(fetch|push|ls-remote|checkout|clean)\b/.test(line)), [], 'nothing was fetched')
+      assert.ok(calls.some((line) => line.includes('remote get-url --all origin')) && calls.some((line) => line.includes('remote get-url --push --all origin')))
+      assert.ok(!JSON.stringify(result).includes('abc123'))
+    } finally {
+      await w.cleanup()
+    }
+  })
+}
+
+test('an insteadOf that only turns the https address into the SSH one (a common setting) is still the team repo', async () => {
+  const w = await world()
+  try {
+    await git(['remote', 'set-url', 'origin', TEAM], w.work)
+    // It cannot be fetched here (no network), so the reset ends at "unreachable" - after the address check passed.
+    const result = await withGlobalConfig('[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n[core]\n\tsshCommand = false\n', () => resetWorkCopy({ git, work: w.work, emptyHooks: w.empty, originAccepted: isTeam }))
+    assert.deepEqual(result, { ok: false, why: 'unreachable' })
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('git never sees GIT_DEFAULT_HASH or GIT_DEFAULT_REF_FORMAT (they would beat the formats the remake asks for)', () => {
+  const env = gitEnv({ PATH: '/bin', HOME: '/h', GIT_DEFAULT_HASH: 'sha256', GIT_DEFAULT_REF_FORMAT: 'reftable', GIT_TERMINAL_PROMPT: '1' })
+  assert.deepEqual(env, { PATH: '/bin', HOME: '/h', GIT_TERMINAL_PROMPT: '0' })
 })
 
 test('a reset says "unreachable" when the team repo cannot be fetched, and leaves the clone as it was', async () => {

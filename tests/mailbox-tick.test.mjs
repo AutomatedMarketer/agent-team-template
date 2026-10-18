@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFile, access, mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { STUCK_FILE, workCopyStuck } from '../scripts/lib/mailbox/gitguard.mjs'
+import { originUrl } from '../scripts/lib/mailbox/workcopy.mjs'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { git } from './helpers/git.mjs'
@@ -498,6 +501,56 @@ test('a work copy whose origin holds a token stops the runner before any git tal
   assert.equal(w.board.polls, 0)
   assert.deepEqual(calls.filter((line) => /\b(fetch|push|ls-remote|clone|pull)\b/.test(line)), [], 'nothing was fetched or pushed')
   assert.ok(!w.logs.join('\n').includes('abc123'), 'the token is not logged')
+}))
+
+test('a work copy left stuck by an earlier remake is made again at the start of the next tick that can move it, and the tick goes on', () => withWorld(async (w) => {
+  const card = w.send({ action: 'task', title: 'Chase the invoice' })
+  await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+  await writeFile(join(w.places.stateDir, STUCK_FILE), JSON.stringify({ address: await originUrl(w.places.workDir) }))
+  const result = await runTick(w.ctx({ force: true }))
+  assert.equal(result.state, 'done')
+  assert.equal(entryFor(await statusIn(w), card.id).state, 'ok')
+  assert.equal(await workCopyStuck(w.places.stateDir), false, 'the marker is gone')
+  assert.equal(existsSync(join(w.places.workDir, '.git', 'commondir')), false, 'the old folder is gone')
+}))
+
+test('while a stuck work copy cannot be moved, every tick is "not-ready (work-copy-stuck)", asks no board and runs no git in it (this computer)', async (t) => {
+  if (process.platform !== 'win32') return t.skip('a folder in use cannot be renamed only on Windows')
+  await withWorld(async (w) => {
+    w.send({ action: 'task', title: 'Chase the invoice' })
+    await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+    await writeFile(join(w.places.stateDir, STUCK_FILE), JSON.stringify({ address: await originUrl(w.places.workDir) }))
+    const sitter = spawn(join(process.env.SystemRoot, 'System32', 'PING.EXE'), ['-n', '60', '127.0.0.1'], { cwd: w.places.workDir, stdio: 'ignore', windowsHide: true })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const inWork = []
+      const watching = async (args, cwd) => {
+        if (typeof cwd === 'string' && cwd.startsWith(w.places.workDir)) inWork.push(args.join(' '))
+        return git(args, cwd)
+      }
+      const result = await runTick(w.ctx({ git: watching, force: true }))
+      assert.deepEqual([result.state, result.why], ['not-ready', 'work-copy-stuck'])
+      assert.equal(w.board.polls, 0)
+      assert.deepEqual(inWork, [], 'no git ran in the stuck folder')
+      assert.equal(await workCopyStuck(w.places.stateDir), true)
+    } finally {
+      try {
+        process.kill(sitter.pid)
+      } catch {
+        // Already gone.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    const freed = await runTick(w.ctx({ force: true }))
+    assert.equal(freed.state, 'done', 'once whatever sat in the folder is closed, the next tick heals it')
+  })
+})
+
+test('an old work copy moved aside and left behind is swept at the start of a tick', () => withWorld(async (w) => {
+  const leftover = join(dirname(w.places.workDir), `.${basename(w.places.workDir)}.old-0123456789ab`)
+  await mkdir(join(leftover, '.git'), { recursive: true })
+  await runTick(w.ctx({ force: true }))
+  assert.equal(existsSync(leftover), false)
 }))
 
 test('a login or settings problem blocks the runs and nothing else: a card order still lands, a run is refused as "not ready"', () => withWorld(async (w) => {
@@ -1178,9 +1231,10 @@ test('a team repo that goes out of reach after the order is claimed fails the or
 
 test('a work copy that stops being the team repo\'s after the order is claimed refuses the order as "not ready", without doing it', () => withWorld(async (w) => {
   const sent = w.send({ action: 'task', title: 'Chase the invoice' })
-  // The daily check asks twice (fetch and push address), the start of the tick once; the order's own level-up is the fourth.
+  // The daily check asks twice (fetch and push address); the start of the tick three times (the address in the config, then the fetch and
+  // push addresses git says it will use); the order's own level-up is the sixth.
   let asked = 0
-  const result = await runTick(w.ctx({ originAccepted: () => (asked += 1) <= 3 }))
+  const result = await runTick(w.ctx({ originAccepted: () => (asked += 1) <= 5 }))
   assert.equal(result.orders.refused, 1)
   const final = await w.claimFile(sent.id, 'final.json')
   assert.deepEqual([final.state, final.why], ['refused', 'not-ready'])

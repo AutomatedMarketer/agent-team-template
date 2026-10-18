@@ -158,6 +158,8 @@ export function createRunner({ spawn, platform, env }) {
         killChild()
         return
       }
+      // A program that has already exited is not looked for by its number: that number may belong to another program by now.
+      if ((child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null) return
       // taskkill /T finds the tree through the program itself: killed first, the program is gone, taskkill finds nothing (exit 128) and
       // what it started runs on. So the program is killed only once taskkill has ended - or after a while, if taskkill never says so.
       let fallback = null
