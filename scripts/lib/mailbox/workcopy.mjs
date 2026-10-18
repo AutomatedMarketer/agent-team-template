@@ -140,6 +140,14 @@ export async function pointsElsewhere(work) {
 // config (which the runner does not rewrite) changes the address at the moment git connects, and could add a login or point elsewhere.
 // `git remote get-url` reads config and touches no network. null when they are fine, or the problem's word. The addresses are never
 // returned or written anywhere.
+// A folder on this computer (C:\... on Windows, /... elsewhere), as an address git WILL use: git reads it itself, with no program that
+// talks to a server and nothing on a network. Never a network path: not \\host\share, \\?\UNC\..., //host/... or file://host/....
+// (The board's end-to-end test points the GitHub address at a local bare repo with an insteadOf.) The same rule, character for
+// character, as the board's (agent-cockpit api/_repo.js, isLocalFolder): the two must stay the same.
+export function isLocalFolder(address, platform = process.platform) {
+  return platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(address) : /^\/(?!\/)/.test(address)
+}
+
 export async function addressProblem(run, work, originAccepted) {
   let addresses
   try {
@@ -151,7 +159,9 @@ export async function addressProblem(run, work, originAccepted) {
   }
   if (addresses.length === 0) return 'origin-mismatch'
   if (addresses.some(addressHasLogin)) return 'origin-has-login'
-  if (typeof originAccepted === 'function' && !addresses.every((address) => originAccepted(address))) return 'origin-mismatch'
+  // The written origin was already held to the team repo (originAccepted) before this is asked; an address git will use may also be a
+  // folder on this computer, as the board allows (isLocalFolder). A login anywhere was refused just above.
+  if (typeof originAccepted === 'function' && !addresses.every((address) => originAccepted(address) || isLocalFolder(address))) return 'origin-mismatch'
   return null
 }
 

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile, stat, readdir, rename, symlink
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { git } from './helpers/git.mjs'
-import { PINS, pinnedGit, configText, resetWorkCopy, commitPaths, pushCommits, landedCommit, originUrl, readOrigin, gitEnv } from '../scripts/lib/mailbox/workcopy.mjs'
+import { PINS, pinnedGit, configText, resetWorkCopy, commitPaths, pushCommits, landedCommit, originUrl, readOrigin, gitEnv, isLocalFolder } from '../scripts/lib/mailbox/workcopy.mjs'
 
 /* The work copy is the Mac's own clone of the team repo. Other people and cloud routines push to that repo, so nothing in
    the clone is trusted: before every order it is brought level with the team repo's main and everything else in it -
@@ -269,6 +269,64 @@ for (const [what, config, why] of [
     }
   })
 }
+
+// A folder on this computer, as an address git will use: git reads it itself, with no program that talks to a server and nothing on a
+// network. The board allows the same (agent-cockpit api/_repo.js, isLocalFolder) - its end-to-end test points the GitHub address at a
+// local bare repo with an insteadOf - and the two rules must stay the same. Never a network path.
+test('a folder on this computer is a drive path on Windows and a single leading slash elsewhere - never a network path', () => {
+  for (const address of [String.raw`C:\repos\team.git`, 'C:/repos/team.git', String.raw`d:\x`]) assert.equal(isLocalFolder(address, 'win32'), true, address)
+  for (const address of [String.raw`\\host\share\team.git`, String.raw`\\?\UNC\host\share\team.git`, String.raw`\\?\C:\team.git`, '//host/share/team.git', 'file://host/share/team.git', 'file:///C:/team.git', '/repos/team.git', 'C:team.git', 'https://github.com/ExampleOwner/example-team.git', '']) {
+    assert.equal(isLocalFolder(address, 'win32'), false, address)
+  }
+  for (const address of ['/repos/team.git', '/x']) assert.equal(isLocalFolder(address, 'darwin'), true, address)
+  for (const address of ['//host/share/team.git', 'file://host/share/team.git', 'file:///repos/team.git', String.raw`C:\repos\team.git`, 'repos/team.git', '']) {
+    assert.equal(isLocalFolder(address, 'linux'), false, address)
+  }
+})
+
+test('an insteadOf that sends the team repo\'s GitHub address to a folder on this computer is accepted: the written origin is still the team repo', async () => {
+  const w = await world()
+  try {
+    await git(['remote', 'set-url', 'origin', TEAM], w.work)
+    const result = await withGlobalConfig(`[url "${w.origin.replaceAll('\\', '/')}"]\n\tinsteadOf = ${TEAM}\n`, () => resetWorkCopy({ git, work: w.work, emptyHooks: w.empty, originAccepted: isTeam }))
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.equal(await readFile(join(w.work, 'README.md'), 'utf8'), '# team\n')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+for (const [what, target] of [
+  ['a Windows network share', String.raw`\\host\share\team.git`],
+  ['a long-form network share', String.raw`\\?\UNC\host\share\team.git`],
+  ['a //host address', '//host/share/team.git'],
+  ['a file://host address', 'file://host/share/team.git']
+]) {
+  test(`an insteadOf that sends the team repo to ${what} is refused before anything is fetched`, async () => {
+    const w = await world()
+    try {
+      await git(['remote', 'set-url', 'origin', TEAM], w.work)
+      const calls = []
+      const watching = async (args, cwd) => { calls.push(args.join(' ')); return git(args, cwd) }
+      const result = await withGlobalConfig(`[url "${target.replaceAll('\\', '\\\\')}"]\n\tinsteadOf = ${TEAM}\n`, () => resetWorkCopy({ git: watching, work: w.work, emptyHooks: w.empty, originAccepted: isTeam }))
+      assert.deepEqual(result, { ok: false, why: 'origin-mismatch' })
+      assert.deepEqual(calls.filter((line) => !line.includes('remote get-url') && /\b(fetch|push|ls-remote|checkout|clean)\b/.test(line)), [], 'nothing was fetched')
+    } finally {
+      await w.cleanup()
+    }
+  })
+}
+
+test('a written origin that is a folder on this computer is still not the team repo: only an address git will use may be one', async () => {
+  const w = await world()
+  try {
+    // The world's origin is a local folder; the allowlist check says what the team repo is, and a folder is not it.
+    const result = await resetWorkCopy({ git, work: w.work, emptyHooks: w.empty, originAccepted: isTeam })
+    assert.deepEqual(result, { ok: false, why: 'origin-mismatch' })
+  } finally {
+    await w.cleanup()
+  }
+})
 
 test('an insteadOf that only turns the https address into the SSH one (a common setting) is still the team repo', async () => {
   const w = await world()
