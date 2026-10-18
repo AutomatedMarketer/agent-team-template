@@ -224,6 +224,26 @@ test('a time-out on Windows ends the tree with taskkill (asked politely, then fo
   }
 })
 
+test('a program the runner\'s exec gives up on is ended by taskkill started with SystemRoot alone, not with the environment the exec was given (which can hold keys)', async () => {
+  const calls = []
+  const spawn = (file, args, options) => {
+    calls.push({ file, args, options })
+    const child = new EventEmitter()
+    child.pid = calls.length === 1 ? 4242 : undefined
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    return child
+  }
+  const env = { SYSTEMROOT: SYSTEM_ROOT, Path: 'C:\\bin', OPENAI_API_KEY: 'sk-test', GITHUB_TOKEN: 'ghp_test', MAILBOX_KEY: 'k'.repeat(40) }
+  const exec = createRunner({ spawn, platform: 'win32', env })
+  await assert.rejects(exec('C:\\x\\slow.exe', [], { timeout: 20 }), (error) => error.code === 'ETIMEDOUT')
+  const taskkills = calls.filter((call) => /taskkill\.exe$/i.test(call.file))
+  assert.equal(taskkills.length, 1)
+  assert.equal(taskkills[0].file, win32.join(SYSTEM_ROOT, 'System32', 'taskkill.exe'))
+  assert.deepEqual(taskkills[0].options.env, { SystemRoot: SYSTEM_ROOT, NoDefaultCurrentDirectoryInExePath: '1' })
+})
+
 test('a real program and the program IT started are both ended by killTree on Windows (this computer)', async (t) => {
   if (!onWindows) return t.skip('this is the Windows way of ending a tree')
   const alive = (pid) => {
@@ -251,6 +271,42 @@ test('a real program and the program IT started are both ended by killTree on Wi
     assert.equal(alive(childPid), false, 'and so is the one it started')
   } finally {
     for (const pid of [parent.pid, childPid]) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+})
+
+test('a real program the runner\'s exec gives up on is ended with everything it started: taskkill runs before the program itself is killed (this computer)', async (t) => {
+  if (!onWindows) return t.skip('this is the Windows way of ending a tree')
+  const system = win32.join(process.env.SystemRoot, 'System32')
+  // cmd starts ping and waits for it. Killing cmd first would leave ping running: taskkill /T then finds no tree to end.
+  const address = `127.0.0.${20 + (process.pid % 200)}`
+  const pings = async () => {
+    const { stdout } = await execFileP(win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -like '*${address}*' }).ProcessId`], { encoding: 'utf8', windowsHide: true })
+    return (stdout.match(/\d+/g) ?? []).map(Number)
+  }
+  const exec = createRunner({ spawn: realSpawn, platform: 'win32', env: process.env })
+  let seen = []
+  try {
+    const running = exec(win32.join(system, 'cmd.exe'), ['/d', '/c', `ping -n 60 ${address}`], { timeout: 5000 })
+    const started = Date.now() + 4500
+    while (seen.length === 0 && Date.now() < started) seen = await pings()
+    assert.ok(seen.length > 0, 'ping is running before the time-out')
+    await assert.rejects(running, (error) => error.code === 'ETIMEDOUT')
+    const deadline = Date.now() + 10_000
+    let left = await pings()
+    while (left.length && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      left = await pings()
+    }
+    assert.deepEqual(left, [], 'the program cmd started is gone too')
+  } finally {
+    for (const pid of [...seen, ...(await pings().catch(() => []))]) {
       try {
         process.kill(pid, 'SIGKILL')
       } catch {
@@ -671,6 +727,35 @@ test('git is started by its absolute path from System32, told where to work with
   assert.equal(finds.length, 1, 'the PATH is searched once')
 })
 
+test('git on Windows never sees GIT_DEFAULT_HASH or GIT_DEFAULT_REF_FORMAT, and neither does the git of the runner\'s entry file', async () => {
+  const { git, runs } = gitWith({ env: { SystemRoot: SYSTEM_ROOT, PATH: String.raw`C:\x`, GIT_DEFAULT_HASH: 'sha256', GIT_DEFAULT_REF_FORMAT: 'reftable' } })
+  await git(['init', '--quiet'], WORK)
+  assert.equal(runs[0].options.env.GIT_DEFAULT_HASH, undefined)
+  assert.equal(runs[0].options.env.GIT_DEFAULT_REF_FORMAT, undefined)
+  assert.equal(runs[0].options.env.PATH, String.raw`C:\x`)
+  const entry = await readFile(join(repoRoot, 'scripts', 'mailbox-runner.mjs'), 'utf8')
+  assert.match(entry, /env: gitEnv\(process\.env\)/, 'the Mac\'s git is given gitEnv too')
+})
+
+test('a time-out whose program has already exited sends no taskkill: its process number may belong to another program by then', async () => {
+  const calls = []
+  const spawn = (file, args, options) => {
+    calls.push({ file, args, options })
+    const child = new EventEmitter()
+    child.pid = 4242
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    // It has exited, but its pipes have not closed yet (a program it started still holds them).
+    child.exitCode = 0
+    child.signalCode = null
+    return child
+  }
+  const exec = createRunner({ spawn, platform: 'win32', env: { SystemRoot: SYSTEM_ROOT } })
+  await assert.rejects(exec(String.raw`C:\x\slow.exe`, [], { timeout: 20 }), (error) => error.code === 'ETIMEDOUT')
+  assert.deepEqual(calls.filter((call) => /taskkill\.exe$/i.test(call.file)), [])
+})
+
 test('a git program inside the runner\'s own code, or inside the folder git was asked to work in, is never run', async () => {
   const inside = (folder) => async (path, outer) => path.startsWith(folder) && outer === folder
   // The first git on PATH is in the runner's code: the next one is used.
@@ -743,7 +828,8 @@ test('the real git, through windowsGit, works in a folder given with -C: a repo 
 
 test('the entry file uses the Windows git and the folder lock only on Windows, and keeps the Mac\'s git as it was', async () => {
   const text = await readFile(join(repoRoot, 'scripts', 'mailbox-runner.mjs'), 'utf8')
-  assert.ok(text.includes("const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })"), 'the Mac\'s git line is unchanged')
+  // The Mac's git as it was, but for gitEnv: the same environment and no prompt, without GIT_DEFAULT_HASH / GIT_DEFAULT_REF_FORMAT.
+  assert.ok(text.includes("const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: gitEnv(process.env) })"), 'the Mac\'s git line is unchanged but for gitEnv')
   assert.ok(text.includes('git: windows ? windowsGit('), 'Windows gets the absolute-path git')
   assert.ok(text.includes('...(windows ? { privatePlaces: privatePlaces('), 'Windows gets the folder lock, others get no such key')
   assert.ok(text.includes('avoid: [RUNNER_ROOT]'), 'a git inside the runner\'s own code is never used')

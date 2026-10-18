@@ -14,6 +14,7 @@ import { resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as realFs from 'node:fs/promises'
 import { isInsideFolder } from '../status/commit.mjs'
+import { gitEnv } from './workcopy.mjs'
 
 // The runner's own code folder (the repo this file is in). A git program inside it is never used.
 export const RUNNER_ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
@@ -58,7 +59,7 @@ export function windowsGit({ run, findAll, env, avoid = [], isInside = isInsideF
       encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
-      env: { ...env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', ...NO_CURRENT_FOLDER }
+      env: { ...gitEnv(env), GCM_INTERACTIVE: 'never', ...NO_CURRENT_FOLDER }
     })
   }
 }

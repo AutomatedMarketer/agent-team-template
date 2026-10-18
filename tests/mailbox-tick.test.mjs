@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFile, access, mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { STUCK_FILE, workCopyStuck } from '../scripts/lib/mailbox/gitguard.mjs'
+import { originUrl } from '../scripts/lib/mailbox/workcopy.mjs'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { git } from './helpers/git.mjs'
@@ -484,6 +487,70 @@ test('a set API key, or a work copy whose origin is another repo, stops the runn
   const origin = await runTick(w.ctx({ originAccepted: () => false }))
   assert.deepEqual([origin.state, origin.why], ['not-ready', 'origin-mismatch'])
   assert.equal(w.board.polls, 0)
+}))
+
+test('a work copy whose origin holds a token stops the runner before any git talks to the team repo: git would put the address on a command line', () => withWorld(async (w) => {
+  w.send({ action: 'task', title: 'Chase the invoice' })
+  const token = ['x-access-token', 'abc123'].join(':')
+  await git(['remote', 'set-url', 'origin', `https://${token}@github.com/ExampleOwner/example-team.git`], w.places.workDir)
+  const calls = []
+  const watching = async (args, cwd) => { calls.push(args.join(' ')); return git(args, cwd) }
+  // The world accepts any origin (originAccepted: () => true): the login is refused on its own.
+  const result = await runTick(w.ctx({ git: watching, force: true }))
+  assert.deepEqual([result.state, result.why], ['not-ready', 'origin-has-login'])
+  assert.equal(w.board.polls, 0)
+  assert.deepEqual(calls.filter((line) => /\b(fetch|push|ls-remote|clone|pull)\b/.test(line)), [], 'nothing was fetched or pushed')
+  assert.ok(!w.logs.join('\n').includes('abc123'), 'the token is not logged')
+}))
+
+test('a work copy left stuck by an earlier remake is made again at the start of the next tick that can move it, and the tick goes on', () => withWorld(async (w) => {
+  const card = w.send({ action: 'task', title: 'Chase the invoice' })
+  await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+  await writeFile(join(w.places.stateDir, STUCK_FILE), JSON.stringify({ address: await originUrl(w.places.workDir) }))
+  const result = await runTick(w.ctx({ force: true }))
+  assert.equal(result.state, 'done')
+  assert.equal(entryFor(await statusIn(w), card.id).state, 'ok')
+  assert.equal(await workCopyStuck(w.places.stateDir), false, 'the marker is gone')
+  assert.equal(existsSync(join(w.places.workDir, '.git', 'commondir')), false, 'the old folder is gone')
+}))
+
+test('while a stuck work copy cannot be moved, every tick is "not-ready (work-copy-stuck)", asks no board and runs no git in it (this computer)', async (t) => {
+  if (process.platform !== 'win32') return t.skip('a folder in use cannot be renamed only on Windows')
+  await withWorld(async (w) => {
+    w.send({ action: 'task', title: 'Chase the invoice' })
+    await writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n')
+    await writeFile(join(w.places.stateDir, STUCK_FILE), JSON.stringify({ address: await originUrl(w.places.workDir) }))
+    const sitter = spawn(join(process.env.SystemRoot, 'System32', 'PING.EXE'), ['-n', '60', '127.0.0.1'], { cwd: w.places.workDir, stdio: 'ignore', windowsHide: true })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const inWork = []
+      const watching = async (args, cwd) => {
+        if (typeof cwd === 'string' && cwd.startsWith(w.places.workDir)) inWork.push(args.join(' '))
+        return git(args, cwd)
+      }
+      const result = await runTick(w.ctx({ git: watching, force: true }))
+      assert.deepEqual([result.state, result.why], ['not-ready', 'work-copy-stuck'])
+      assert.equal(w.board.polls, 0)
+      assert.deepEqual(inWork, [], 'no git ran in the stuck folder')
+      assert.equal(await workCopyStuck(w.places.stateDir), true)
+    } finally {
+      try {
+        process.kill(sitter.pid)
+      } catch {
+        // Already gone.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    const freed = await runTick(w.ctx({ force: true }))
+    assert.equal(freed.state, 'done', 'once whatever sat in the folder is closed, the next tick heals it')
+  })
+})
+
+test('an old work copy moved aside and left behind is swept at the start of a tick', () => withWorld(async (w) => {
+  const leftover = join(dirname(w.places.workDir), `.${basename(w.places.workDir)}.old-0123456789ab`)
+  await mkdir(join(leftover, '.git'), { recursive: true })
+  await runTick(w.ctx({ force: true }))
+  assert.equal(existsSync(leftover), false)
 }))
 
 test('a login or settings problem blocks the runs and nothing else: a card order still lands, a run is refused as "not ready"', () => withWorld(async (w) => {
@@ -1164,9 +1231,10 @@ test('a team repo that goes out of reach after the order is claimed fails the or
 
 test('a work copy that stops being the team repo\'s after the order is claimed refuses the order as "not ready", without doing it', () => withWorld(async (w) => {
   const sent = w.send({ action: 'task', title: 'Chase the invoice' })
-  // The daily check asks twice (fetch and push address), the start of the tick once; the order's own level-up is the fourth.
+  // The daily check asks twice (fetch and push address); the start of the tick three times (the address in the config, then the fetch and
+  // push addresses git says it will use); the order's own level-up is the sixth.
   let asked = 0
-  const result = await runTick(w.ctx({ originAccepted: () => (asked += 1) <= 3 }))
+  const result = await runTick(w.ctx({ originAccepted: () => (asked += 1) <= 5 }))
   assert.equal(result.orders.refused, 1)
   const final = await w.claimFile(sent.id, 'final.json')
   assert.deepEqual([final.state, final.why], ['refused', 'not-ready'])
@@ -1597,7 +1665,7 @@ for (const [what, tamper] of TAMPERS) {
     }
     const afterClaude = []
     const watching = async (args, cwd) => {
-      if (w.claude.calls.length > 0) afterClaude.push({ verb: args.find((one) => ['clone', 'diff', 'add', 'commit', 'push', 'status', 'fetch', 'checkout', 'clean', 'rev-parse', 'show'].includes(one)), cwd })
+      if (w.claude.calls.length > 0) afterClaude.push({ verb: args.find((one) => ['clone', 'init', 'diff', 'add', 'commit', 'push', 'status', 'fetch', 'checkout', 'clean', 'rev-parse', 'show'].includes(one)), cwd, empty: (await readdir(cwd).catch(() => null))?.length === 0 })
       return git(args, cwd)
     }
     const result = await runTick(w.ctx({ git: watching }))
@@ -1605,8 +1673,8 @@ for (const [what, tamper] of TAMPERS) {
     assert.deepEqual([final.state, final.why], ['failed', 'change-refused'])
     assert.equal(result.orders.failed, 1)
     assert.equal(w.claude.calls.length, 1)
-    // The first git command after Claude is the clone that makes the copy again, run beside the old folder and not in it.
-    assert.deepEqual([afterClaude[0].verb, afterClaude[0].cwd], ['clone', dirname(w.places.workDir)])
+    // The first git command after Claude is the init that makes the copy again, in a fresh empty folder: the old one is gone before any git runs.
+    assert.deepEqual([afterClaude[0].verb, afterClaude[0].cwd, afterClaude[0].empty], ['init', w.places.workDir, true])
     assert.equal(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'nothing of the run was pushed')
     assert.equal((await w.inOrigin.log()).some((subject) => subject.startsWith('Mailbox order')), false)
     // The fresh copy has none of it.
@@ -1622,7 +1690,7 @@ test('a run whose Claude changes nothing in .git is not disturbed by the check: 
   w.claude.script = w.claude.good
   const cloned = []
   const watching = async (args, cwd) => {
-    if (args.includes('clone')) cloned.push(cwd)
+    if (args.includes('clone') || args.includes('init')) cloned.push(cwd)
     return git(args, cwd)
   }
   await runTick(w.ctx({ git: watching }))
@@ -1637,11 +1705,11 @@ test('Claude plants a hook and the run also failed: git still does not run in th
     await writeFile(join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ntouch /tmp/pwned\n')
     return []
   }
-  // Every git command from the moment Claude has started until the fresh copy is cloned: none may be run in the old folder.
+  // Every git command from the moment Claude has started until the fresh copy is begun (git init in an empty folder): none may be run in the old folder.
   const beforeRemade = []
   let remade = false
   const watching = async (args, cwd) => {
-    if (args.includes('clone')) remade = true
+    if (args.includes('init')) remade = true
     else if (w.claude.calls.length > 0 && !remade) beforeRemade.push(args)
     return git(args, cwd)
   }

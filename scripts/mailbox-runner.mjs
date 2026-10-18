@@ -9,11 +9,12 @@ import { promisify } from 'node:util'
 import { createRunner, findEveryProgram, findProgram } from './lib/status/programs.mjs'
 import { main } from './lib/mailbox/command.mjs'
 import { RUNNER_ROOT, privatePlaces, windowsGit } from './lib/mailbox/windows.mjs'
+import { gitEnv } from './lib/mailbox/workcopy.mjs'
 
 const execFileP = promisify(execFile)
 
 // git never asks for a password here: an unattended run waiting on a prompt never finishes.
-const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
+const git = (args, cwd) => execFileP('git', args, { cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, env: gitEnv(process.env) })
 
 const home = os.homedir()
 let username = null

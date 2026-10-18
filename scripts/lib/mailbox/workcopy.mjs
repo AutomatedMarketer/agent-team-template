@@ -46,6 +46,17 @@ export const pinnedGit = (git, emptyHooks) => (args, cwd) => git([...PINS(emptyH
 
 /* ---------- the config the clone is given -------------------------------------------------------------------------- */
 
+// Whether an address carries a login: a user name, a password or a token before the host (https://user:token@github.com/...), or a
+// password in an ssh:// address. git hands the WHOLE address to the program that talks to the server (git-remote-https) on its command
+// line, on every fetch, push and ls-remote, and a command line can be read by any program on the computer. So the runner never runs
+// git against such an address. The SSH forms (git@github.com:..., ssh://git@github.com/...) name a user and no secret, and are fine.
+export function addressHasLogin(url) {
+  if (typeof url !== 'string') return false
+  const login = /^([a-z][a-z0-9+.-]*):\/\/([^/?#\s]*)@/i.exec(url)
+  if (login === null) return false
+  return /^(?:git\+)?ssh$/i.test(login[1]) ? login[2].includes(':') : true
+}
+
 const oneLine = (value) => typeof value === 'string' && value !== '' && !/[\r\n]/.test(value)
 
 // A value as git's config file spells it: plain when it can be, in quotes with the backslash and the quote escaped when it
@@ -113,9 +124,49 @@ async function originFacts(work) {
 
 /* ---------- bringing the clone level ------------------------------------------------------------------------------- */
 
+// Files in .git that send git to another folder's settings or objects: commondir (git then reads THAT folder's config, which rewriting
+// .git/config does not reach), config.worktree (settings of its own), objects/info/alternates (objects from elsewhere). A clone the
+// owner made has none of them, so one there was put there by someone else. Looked at with lstat, never followed.
+export const ELSEWHERE_FILES = ['commondir', 'config.worktree', 'objects/info/alternates']
+
+export async function pointsElsewhere(work) {
+  for (const name of ELSEWHERE_FILES) {
+    if (await lstat(join(work, '.git', ...name.split('/'))).then(() => true, () => false)) return true
+  }
+  return false
+}
+
+// The addresses git WILL use for origin, asked of git itself: a url.<base>.insteadOf or pushInsteadOf in the user's or the system's
+// config (which the runner does not rewrite) changes the address at the moment git connects, and could add a login or point elsewhere.
+// `git remote get-url` reads config and touches no network. null when they are fine, or the problem's word. The addresses are never
+// returned or written anywhere.
+export async function addressProblem(run, work, originAccepted) {
+  let addresses
+  try {
+    const fetches = (await run(['remote', 'get-url', '--all', 'origin'], work)).stdout
+    const pushes = (await run(['remote', 'get-url', '--push', '--all', 'origin'], work)).stdout
+    addresses = `${fetches}\n${pushes}`.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  } catch {
+    return 'origin-mismatch'
+  }
+  if (addresses.length === 0) return 'origin-mismatch'
+  if (addresses.some(addressHasLogin)) return 'origin-has-login'
+  if (typeof originAccepted === 'function' && !addresses.every((address) => originAccepted(address))) return 'origin-mismatch'
+  return null
+}
+
+// The environment git is started with: the given one, never prompting, and without the two variables that would choose the formats of
+// a new repo over what the remake asks for (GIT_DEFAULT_HASH, GIT_DEFAULT_REF_FORMAT beat init.default* settings).
+export function gitEnv(env) {
+  const { GIT_DEFAULT_HASH, GIT_DEFAULT_REF_FORMAT, ...rest } = env ?? {}
+  return { ...rest, GIT_TERMINAL_PROMPT: '0' }
+}
+
 // { ok: true, head } with the team repo's main as the clone now has it, or { ok: false, why }:
-//   not-a-clone       the folder is not a git clone of its own
-//   origin-mismatch   its origin is not the team repo (originAccepted says what that is); nothing was changed
+//   not-a-clone       the folder is not a git clone of its own (.git is not a folder: a file or a link is never followed)
+//   points-elsewhere  its .git holds a commondir, a config.worktree or an alternates file (pointsElsewhere); no git was run
+//   origin-mismatch   its origin is not the team repo (originAccepted says what that is), or git would use another address; nothing was fetched
+//   origin-has-login  its origin holds a user name, a password or a token (addressHasLogin), as written or as git would use it; nothing was fetched
 //   unreachable       the team repo could not be fetched
 export async function resetWorkCopy({ git, work, emptyHooks, originAccepted }) {
   try {
@@ -123,10 +174,14 @@ export async function resetWorkCopy({ git, work, emptyHooks, originAccepted }) {
   } catch {
     return { ok: false, why: 'not-a-clone' }
   }
+  if (await pointsElsewhere(work)) return { ok: false, why: 'points-elsewhere' }
   const url = await originUrl(work)
+  if (addressHasLogin(url)) return { ok: false, why: 'origin-has-login' }
   if (url === null || !originAccepted(url)) return { ok: false, why: url === null ? 'not-a-clone' : 'origin-mismatch' }
   await writeFile(join(work, '.git', 'config'), configText({ url, emptyHooks }))
   const run = pinnedGit(git, emptyHooks)
+  const problem = await addressProblem(run, work, originAccepted)
+  if (problem !== null) return { ok: false, why: problem }
   try {
     await run(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', BRANCH], work)
   } catch {

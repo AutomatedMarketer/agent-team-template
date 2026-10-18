@@ -848,8 +848,7 @@ test('a version is read from the first three numbers Claude prints, and compared
 test('the team repo is the allowlisted one only when origin is that repo on GitHub, written any of the usual ways', () => {
   for (const url of [
     'https://github.com/ExampleOwner/example-team', 'https://github.com/ExampleOwner/example-team.git', 'https://github.com/ExampleOwner/example-team/',
-    'https://github.com/exampleowner/Example-Team.git', 'git@github.com:ExampleOwner/example-team.git', 'ssh://git@github.com/ExampleOwner/example-team.git',
-    'https://x-access-token:abc123@github.com/ExampleOwner/example-team.git', 'https://someuser@github.com/ExampleOwner/example-team.git'
+    'https://github.com/exampleowner/Example-Team.git', 'git@github.com:ExampleOwner/example-team.git', 'ssh://git@github.com/ExampleOwner/example-team.git'
   ]) assert.equal(originMatches(url, 'ExampleOwner/example-team'), true, url)
   for (const url of [
     'https://github.com/ExampleOwner/other-team', 'https://github.com/Other/example-team', 'https://github.com/ExampleOwner/example-team-fork', 'https://github.com/ExampleOwner/example-team/extra',
@@ -857,6 +856,36 @@ test('the team repo is the allowlisted one only when origin is that repo on GitH
     'git@evil.example:ExampleOwner/example-team.git', 'file:///tmp/ExampleOwner/example-team', '/tmp/ExampleOwner/example-team', '../example-team', 'http://github.com/ExampleOwner/example-team.git',
     'https://github.com/ExampleOwner/example-team.git?x=1', 'https://github.com/ExampleOwner/example-team.git#x', 'https://github.com/ExampleOwner/example-team.git\nhttps://evil', '', undefined, 7
   ]) assert.equal(originMatches(url, 'ExampleOwner/example-team'), false, String(url))
+})
+
+// git hands the whole address, login and all, to the program that talks to GitHub (git-remote-https) on its command line, on every
+// fetch and push - where any program on the computer can read it. So an address that carries a login is never the team repo.
+const LOGIN_ADDRESSES = [
+  'https://x-access-token:abc123@github.com/ExampleOwner/example-team.git', 'https://someuser@github.com/ExampleOwner/example-team.git',
+  'https://someuser:password@github.com/ExampleOwner/example-team', 'HTTPS://ghx_abc@github.com/ExampleOwner/example-team.git',
+  'ssh://git:password@github.com/ExampleOwner/example-team.git'
+]
+
+test('an https address with a user name, a password or a token in it is not the team repo; the SSH addresses (git@github.com) still are', () => {
+  for (const url of LOGIN_ADDRESSES) assert.equal(originMatches(url, 'ExampleOwner/example-team'), false, url)
+  for (const url of ['git@github.com:ExampleOwner/example-team.git', 'ssh://git@github.com/ExampleOwner/example-team.git', 'https://github.com/ExampleOwner/example-team.git']) {
+    assert.equal(originMatches(url, 'ExampleOwner/example-team'), true, url)
+  }
+})
+
+test('an origin that holds a login is named as that, not as "another repo", whatever else accepts it - and its login is never repeated', async () => {
+  const good = 'https://github.com/ExampleOwner/example-team.git'
+  const anything = () => true
+  for (const login of LOGIN_ADDRESSES) {
+    for (const origin of [{ fetch: login, push: login }, { fetch: good, push: login }, { fetch: login, push: good }]) {
+      const problems = await localProblems({ env: { HOME: '/h' }, origin: async () => origin, originAccepted: anything })
+      assert.deepEqual(problems, ['origin-has-login'], JSON.stringify(origin))
+      assert.ok(!JSON.stringify(problems).includes('abc123') && !JSON.stringify(problems).includes('password'))
+    }
+  }
+  for (const ssh of ['git@github.com:ExampleOwner/example-team.git', 'ssh://git@github.com/ExampleOwner/example-team.git']) {
+    assert.deepEqual(await localProblems({ env: { HOME: '/h' }, origin: async () => ({ fetch: ssh, push: ssh }), originAccepted: anything }), [])
+  }
 })
 
 test('the repo name is matched as written: its dots are dots, and a repo that is not a repo name matches nothing (and breaks nothing)', () => {
@@ -978,7 +1007,8 @@ const PROBLEMS = [
   ['the login answer has no method', { auth: { loggedIn: true } }, 'wrong-login'],
   ['a key is set in the environment', { env: { HOME: '/h', ANTHROPIC_API_KEY: 'sk-x' } }, 'key-in-environment'],
   ['origin is another repo', { origin: 'https://github.com/Other/example-team.git' }, 'origin-mismatch'],
-  ['origin is not set', { origin: null }, 'origin-mismatch']
+  ['origin is not set', { origin: null }, 'origin-mismatch'],
+  ['origin holds a token', { origin: 'https://x-access-token:abc123@github.com/ExampleOwner/example-team.git' }, 'origin-has-login']
 ]
 
 for (const [name, change, problem] of PROBLEMS) {
@@ -1022,7 +1052,29 @@ test('on Windows a program and everything it started are ended by the system\'s 
     return new EventEmitter()
   }
   killTree(4242, 'SIGKILL', { platform: 'win32', spawn, systemRoot: 'C:\Windows' })
-  assert.deepEqual(started, [{ file: join('C:\Windows', 'System32', 'taskkill.exe'), args: ['/PID', '4242', '/T', '/F'], options: { stdio: 'ignore', windowsHide: true } }])
+  assert.deepEqual(started, [{ file: join('C:\Windows', 'System32', 'taskkill.exe'), args: ['/PID', '4242', '/T', '/F'], options: { stdio: 'ignore', windowsHide: true, env: { SystemRoot: 'C:\Windows', NoDefaultCurrentDirectoryInExePath: '1' } } }])
   for (const pid of [0, -5, 1.5, NaN, undefined, '4242', null]) killTree(pid, 'SIGKILL', { platform: 'win32', spawn })
   assert.equal(started.length, 1)
+})
+
+test('taskkill is started with SystemRoot alone, never with the runner\'s whole environment and the keys a computer may keep there', () => {
+  const started = []
+  const spawn = (file, args, options) => {
+    started.push(options)
+    return new EventEmitter()
+  }
+  const planted = { OPENAI_API_KEY: 'sk-test', GITHUB_TOKEN: 'ghp_test', MAILBOX_SECRET_k1: 's'.repeat(40) }
+  const saved = Object.fromEntries(Object.keys(planted).map((name) => [name, process.env[name]]))
+  Object.assign(process.env, planted)
+  try {
+    killTree(4242, 'SIGKILL', { platform: 'win32', spawn, systemRoot: String.raw`C:\Windows` })
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+  assert.equal(started.length, 1)
+  assert.ok(started[0].env, 'with no env of its own, taskkill inherits all of the runner\'s')
+  assert.deepEqual(started[0].env, { SystemRoot: String.raw`C:\Windows`, NoDefaultCurrentDirectoryInExePath: '1' })
 })

@@ -5,6 +5,7 @@ import { access, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { read, fromRoot } from './helpers/repo.mjs'
+import { gitEnv } from '../scripts/lib/mailbox/workcopy.mjs'
 
 /* The file a LaunchAgent runs is thin: it only wires the real computer into the tested parts. These start it for real, in a
    home folder of its own, down the paths that never reach Claude, git or the network - the real Claude is never run on a
@@ -59,8 +60,10 @@ test('a tick on a computer with no allowlist says so in one line and exits 1 - a
 
 test('the entry file reaches the machine only through the tested parts: git never asks for a password, and nothing else is imported', async () => {
   const text = await read('scripts/mailbox-runner.mjs')
-  assert.ok(text.includes("GIT_TERMINAL_PROMPT: '0'"), 'git could stop to ask a question nobody is there to answer')
+  // gitEnv (workcopy.mjs) gives git GIT_TERMINAL_PROMPT=0 and leaves out the two variables that choose a new repo's formats.
+  assert.ok(text.includes('env: gitEnv(process.env)'), 'git could stop to ask a question nobody is there to answer')
+  assert.equal(gitEnv({}).GIT_TERMINAL_PROMPT, '0')
   const imports = [...text.matchAll(/^import .* from '([^']+)'$/gm)].map((match) => match[1]).sort()
-  assert.deepEqual(imports, ['./lib/mailbox/command.mjs', './lib/mailbox/windows.mjs', './lib/status/programs.mjs', 'node:child_process', 'node:os', 'node:util'])
+  assert.deepEqual(imports, ['./lib/mailbox/command.mjs', './lib/mailbox/windows.mjs', './lib/mailbox/workcopy.mjs', './lib/status/programs.mjs', 'node:child_process', 'node:os', 'node:util'])
   assert.ok(!/ANTHROPIC|MAILBOX_(KEY|SECRET)/.test(text), 'the entry file reads no secret itself')
 })

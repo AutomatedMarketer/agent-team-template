@@ -109,6 +109,7 @@ const PROBLEM_WORDS = {
   'wrong-login': 'Claude Code is not logged in with your own Claude account (a subscription login).',
   'key-in-environment': 'An API key or address for Claude is set in the environment (ANTHROPIC_API_KEY and the like); take it out.',
   'origin-mismatch': 'The work copy\'s origin is not the team repo the allowlist names.',
+  'origin-has-login': 'The team repo\'s address holds a user name, password or token. git puts the whole address on a command line while it runs, where any program on this computer can read it. Clone it with a plain https://github.com/... address and let Git\'s sign-in helper hold the login (Git Credential Manager on Windows, the keychain on a Mac).',
   'selftest-needed': 'not passed for this Claude Code version and these settings. Run `node scripts/mailbox-runner.mjs --selftest` (a few minutes, with the real Claude); no job runs until it passes.'
 }
 
@@ -164,7 +165,8 @@ async function report(ctx, places, out) {
     say(proof.holds, proof.holds ? `self-test: passed on ${proof.at.slice(0, 10)} for this Claude and these settings` : `self-test: ${PROBLEM_WORDS['selftest-needed']}`)
   }
   say(!has('key-in-environment'), has('key-in-environment') ? `API key: ${PROBLEM_WORDS['key-in-environment']}` : 'API key: none set')
-  say(!has('origin-mismatch'), has('origin-mismatch') ? `team repo: ${PROBLEM_WORDS['origin-mismatch']}` : 'team repo: the work copy\'s origin is the team repo')
+  const originProblem = ['origin-has-login', 'origin-mismatch'].find(has)
+  say(originProblem === undefined, originProblem !== undefined ? `team repo: ${PROBLEM_WORDS[originProblem]}` : 'team repo: the work copy\'s origin is the team repo')
 
   for (const line of lines) out(line)
   out(ready ? 'Everything is ready.' : 'Not everything is ready. Fix the lines marked PROBLEM and run this again.')

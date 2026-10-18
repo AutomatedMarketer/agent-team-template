@@ -40,6 +40,7 @@ import { createWriteStream } from 'node:fs'
 import { isAbsolute, join, win32 } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { REPO_SHAPE } from './contract.mjs'
+import { addressHasLogin } from './workcopy.mjs'
 
 export const FILE_TOOLS = Object.freeze(['Read', 'Edit', 'Write', 'Glob', 'Grep'])
 export const WEB_TOOLS = Object.freeze(['WebSearch', 'WebFetch'])
@@ -192,7 +193,8 @@ export function killTree(pid, signal, { platform = process.platform, spawn, syst
   if (!Number.isInteger(pid) || pid <= 0) return
   if (platform === 'win32') {
     try {
-      spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+      // SystemRoot alone: with no env of its own taskkill would inherit the runner's whole environment, and the keys a computer may keep there.
+      spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, env: { SystemRoot: systemRoot, NoDefaultCurrentDirectoryInExePath: '1' } }).on('error', () => {})
     } catch {
       // Nothing more can be done from here.
     }
@@ -389,11 +391,12 @@ export function runClaude({
 const escapeText = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Whether a git address is the team repo on GitHub, written any of the usual ways. Anything else - another host, a
-// look-alike host, another repo, a repo with something after its name, a path on this computer - is not.
+// look-alike host, another repo, a repo with something after its name, a path on this computer - is not. Nor is an https
+// address with a user name, a password or a token in it (addressHasLogin): git would put it on a command line.
 export function originMatches(url, repo) {
   if (typeof url !== 'string' || typeof repo !== 'string' || !REPO_SHAPE.test(repo)) return false
   const [owner, name] = repo.split('/')
-  const address = new RegExp(`^(?:https://(?:[^@/\\s]+@)?github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${escapeText(owner)}/${escapeText(name)}(?:\\.git)?/?$`, 'i')
+  const address = new RegExp(`^(?:https://github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${escapeText(owner)}/${escapeText(name)}(?:\\.git)?/?$`, 'i')
   return address.test(url)
 }
 
@@ -417,6 +420,8 @@ async function originProblems({ origin, originAccepted }) {
   } catch {
     addresses = null
   }
+  // A login in either address is named on its own, whatever else accepts the address: it has a fix of its own (a plain address and git's sign-in helper).
+  if (addresses && (addressHasLogin(addresses.fetch) || addressHasLogin(addresses.push))) return ['origin-has-login']
   return !addresses || !originAccepted(addresses.fetch) || !originAccepted(addresses.push) ? ['origin-mismatch'] : []
 }
 
