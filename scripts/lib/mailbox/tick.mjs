@@ -3,7 +3,9 @@
 // The order of things is the plan's, and each step is a promise the tests hold:
 //   1. the folders do not overlap, there is no PAUSE file, and no other tick is running (a lock)
 //   2. the Mac's allowlist and secrets are readable; the claim store is open
-//   3. once a day: Claude is found, new enough, logged in with the owner's own login; no key is set; origin is the team repo
+//   3. once a day: Claude is found, new enough, logged in with the owner's own login; no key is set; origin is the team repo.
+//      And only when the allowlist gives a job to Codex (worker: codex): Codex is found, new enough, signed in with ChatGPT in the
+//      runner's own Codex home, and its sandbox starts (codex.mjs) - a computer with no Codex job never looks for Codex at all
 //   4. orders the runner lost track of part way are settled by READING the team repo, never run again
 //   5. at the board's pace, one GET for the pending orders
 //   6. each order, oldest first: verified (signature first), then its fields, then the Mac's own allowlist and day limits,
@@ -40,9 +42,10 @@ import { CEILINGS, addCount, readAllowedOrders, readCounts, decide, runnableJobs
 import { CLAIMS_STORE, claimExists, claimOrder, openStore, writeClaimFile } from './claims.mjs'
 import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
-import { JOBS, knownJobs, planRun, runPrompt } from './jobs.mjs'
-import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
-import { proofHolds, proofKept } from './proof.mjs'
+import { JOBS, codexMayRun, knownJobs, planRun, runPrompt } from './jobs.mjs'
+import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, parseVersion, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
+import { codexProofHolds, codexProofKept, proofHolds, proofKept } from './proof.mjs'
+import { buildCodexArgv, codexEnv, codexPreflight, runCodex, unsafeCodexEnv, writeCodexHome, CODEX_MINIMUM_VERSION } from './codex.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { gitUnchanged, remakeWorkCopy, snapshotGit, sweepAside, unstickWorkCopy, workCopyStuck } from './gitguard.mjs'
 import { commitPaths, landedCommit, pinnedGit, pointsElsewhere, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
@@ -170,9 +173,12 @@ async function locked(ctx, { orders, end, log }) {
     ctx, orders, log, allow: allowed.allow, keys: secrets.secrets, key: secrets.key, claimsSince: store.since, hooks,
     git: pinnedGit(ctx.git, hooks),
     originAccepted: ctx.originAccepted ?? ((url) => originMatches(url, allowed.allow.repo)),
-    runnable: runnableJobs(allowed.allow, knownJobs()),
-    claudeReady: false, claudePath: null, notReady: [], emptyCwd
+    // A job the allowlist gives to Codex runs only if Codex may do it (no web, jobs.mjs); otherwise it is not offered at all.
+    runnable: runnableJobs(allowed.allow, knownJobs()).filter((slug) => allowed.allow.workers?.get(slug) !== 'codex' || codexMayRun(slug)),
+    claudeReady: false, claudePath: null, notReady: [], emptyCwd,
+    codexJobs: [], codexReady: false, codexPath: null, codexNotReady: []
   }
+  s.codexJobs = s.runnable.filter((slug) => allowed.allow.workers?.get(slug) === 'codex')
 
   // The work copy's own state comes before the origin check, which reads the folder's config: after a run that changed .git, what that
   // config says is Claude's, and an origin problem reported from it would hide the real one - and would send the owner to run git by
@@ -197,6 +203,17 @@ async function locked(ctx, { orders, end, log }) {
   if (checked.ok && !(await proofKept({ stateDir: places.stateDir, codeDir: places.codeDir, version: checked.version })).holds) {
     s.claudeReady = false
     s.notReady = [...s.notReady, 'selftest-needed']
+  }
+  // Codex, only for a computer that gives it a job. Its problems never stop the tick: they only make a Codex job "not ready".
+  if (s.codexJobs.length) {
+    const codex = await codexDailyCheck(s, emptyCwd)
+    s.codexReady = codex.ok
+    s.codexPath = codex.codexPath
+    s.codexNotReady = codex.problems
+    if (codex.ok && !(await codexProofKept({ stateDir: places.stateDir, codeDir: places.codeDir, version: codex.version })).holds) {
+      s.codexReady = false
+      s.codexNotReady = [...s.codexNotReady, 'codex-selftest-needed']
+    }
   }
 
   // The clone's own config is written again before git is first run in it, then orders lost track of are settled by reading.
@@ -265,6 +282,23 @@ async function dailyCheck(s, emptyCwd) {
   return { ...result, claudePath: (await ctx.find('claude')).path ?? null }
 }
 
+// The same for Codex, remembered in its own file: a good answer for the day; a key in the environment is looked at on every tick.
+async function codexDailyCheck(s, emptyCwd) {
+  const { ctx } = s
+  const path = join(ctx.places.stateDir, 'codex-preflight.json')
+  const today = dayOf(ctx.now())
+  const keyed = unsafeCodexEnv(ctx.env).length ? ['codex-key-in-environment'] : []
+  const cached = await readJson(path)
+  if (cached?.day === today && cached.ok === true && Array.isArray(cached.version) && atLeast(cached.version, CODEX_MINIMUM_VERSION)) {
+    const found = await ctx.find('codex')
+    if (found.state === 'found') return { ok: keyed.length === 0, version: cached.version, problems: keyed, codexPath: found.path }
+  }
+  const result = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, emptyDir: emptyCwd, env: ctx.env, platform: ctx.platform })
+  if (result.ok) await keepJson(path, { day: today, ok: true, version: result.version })
+  else await rm(path, { force: true })
+  return { ...result, codexPath: result.ok ? (await ctx.find('codex')).path ?? null : null }
+}
+
 /* ---------- the orders ---------------------------------------------------------------------------------------------- */
 
 // Returns a reason to stop the tick, or null.
@@ -299,6 +333,7 @@ async function handleOrder(s, entry) {
   let fields
   let refusal = verdict.ok ? null : (REFUSAL_FOR[verdict.verdict] ?? 'not-valid')
   let minutes
+  let worker = 'claude'
   if (refusal === null) {
     const payload = validatePayload(verdict.order.payload)
     if (!payload.ok) {
@@ -310,12 +345,19 @@ async function handleOrder(s, entry) {
       const counts = await readCounts(stateDir, ctx.now(), ctx.fs)
       const decision = decide(allow, counts, action, fields, s.runnable)
       if (!decision.ok) refusal = decision.why
-      else if (action === 'run' && !s.claudeReady) {
+      else if (action === 'run' && decision.worker === 'codex' && !s.codexReady) {
+        refusal = 'not-ready'
+        s.log(`mailbox: a Codex run was refused as not ready (${s.codexNotReady.join(', ') || 'unknown'})`)
+      }
+      else if (action === 'run' && decision.worker !== 'codex' && !s.claudeReady) {
         refusal = 'not-ready'
         // The status file gives only the fixed word; the owner's own log says which check it was.
         s.log(`mailbox: a run was refused as not ready (${s.notReady.join(', ') || 'unknown'})`)
       }
-      else minutes = decision.minutes
+      else {
+        minutes = decision.minutes
+        worker = decision.worker ?? 'claude'
+      }
     }
   }
 
@@ -338,7 +380,7 @@ async function handleOrder(s, entry) {
   if (claimed.state === 'failed') return { stop: 'claim-failed' }
   s.orders.claimed += 1
   if (action === 'run') await addCount(stateDir, ctx.now(), 'runs', ctx.fs)
-  await execute(s, { id, action, fields, minutes })
+  await execute(s, { id, action, fields, minutes, worker })
   return { ran: action === 'run' }
 }
 
@@ -374,7 +416,7 @@ async function settle(s, id, action, change) {
 
 /* ---------- doing one order ----------------------------------------------------------------------------------------- */
 
-async function execute(s, { id, action, fields, minutes }) {
+async function execute(s, { id, action, fields, minutes, worker = 'claude' }) {
   const { ctx } = s
   const { workDir } = ctx.places
   const startedMs = ctx.now()
@@ -395,7 +437,7 @@ async function execute(s, { id, action, fields, minutes }) {
   if (earlier.state === 'found') return settle(s, id, action, { state: 'ok', commit: earlier.commit.slice(0, 12), startedAt: null })
   if (earlier.state === 'unknown') return fail('push-failed')
 
-  if (action === 'run') return executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level })
+  if (action === 'run') return executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level, worker })
 
   // A card action: the runner's own code, with no model - and it can be done again exactly, on top of a newer main.
   const redo = async () => {
@@ -429,7 +471,26 @@ async function versionToRun(s) {
   return proof.holds ? { ok: true, file } : { ok: false, why: 'selftest-needed', words: `Claude Code ${version.join('.')} is not the version the self-test passed for, so it needs a new self-test.` }
 }
 
-async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level }) {
+// The same for Codex: the link followed once, the version asked of that file in the runner's Codex home, and a Codex proof for that very
+// file and version (codex-selftest.mjs). The settings file is written again into the Codex home just before, so what runs is pinned.
+async function codexToRun(s) {
+  const { ctx } = s
+  const file = await followToFile(s.codexPath, ctx.realpath ?? realpath)
+  if (file === null) return { ok: false, why: 'codex-missing', words: 'The Codex program could not be found, so no job was started.' }
+  const home = await writeCodexHome({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir })
+  if (!home.ok) return { ok: false, why: 'codex-home-failed', words: 'The Codex home could not be written, so no job was started.' }
+  let version = null
+  try {
+    version = parseVersion((await ctx.exec(file, ['--version'], { cwd: s.emptyCwd, env: codexEnv(ctx.env, ctx.platform, home.home), timeout: 15_000 })).stdout)
+  } catch {
+    version = null
+  }
+  if (version === null) return { ok: false, why: 'codex-selftest-needed', words: 'Codex did not say which version it is, so it needs a new --codex-selftest.' }
+  const proof = await codexProofHolds({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, version, file })
+  return proof.holds ? { ok: true, file, home: home.home } : { ok: false, why: 'codex-selftest-needed', words: `Codex ${version.join('.')} is not the version the Codex self-test passed for, so it needs a new --codex-selftest.` }
+}
+
+async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fail, level, worker = 'claude' }) {
   const { ctx } = s
   const { workDir, stateDir, codeDir } = ctx.places
   const planned = await planRun({ root: workDir, slug: fields.workflow, now: startedMs, timeZone: ctx.timeZone, git: s.git })
@@ -444,9 +505,10 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   if (!reset.ok) return fail('push-failed')
 
   const claimDir = join(stateDir, CLAIMS_STORE.folder, `${id}.claim`)
-  const prompt = await runPrompt(plan, { codeDir })
-  // The last thing before Claude starts: which version is it now? Not the one the daily check saw.
-  const fit = await versionToRun(s)
+  const codex = worker === 'codex'
+  const prompt = await runPrompt(plan, { codeDir, worker })
+  // The last thing before Claude (or Codex) starts: which version is it now? Not the one the daily check saw.
+  const fit = codex ? await codexToRun(s) : await versionToRun(s)
   if (!fit.ok) {
     s.log(`mailbox: a run was refused as not ready (${fit.why}): ${fit.words}`)
     return settle(s, id, action, { state: 'refused', why: 'not-ready' })
@@ -464,7 +526,20 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
   ctx.live?.cleanups.add(closeProgress)
   let ran
   try {
-    ran = await runClaude({
+    ran = codex ? await runCodex({
+      file: fit.file,
+      argv: buildCodexArgv({ prompt, workDir }),
+      cwd: workDir,
+      env: codexEnv(ctx.env, ctx.platform, fit.home),
+      timeoutMs: minutes * 60_000,
+      transcriptPath: join(claimDir, 'transcript.jsonl'),
+      stderrPath: join(claimDir, 'stderr.txt'),
+      spawn: ctx.spawn,
+      kill: ctx.kill,
+      platform: ctx.platform,
+      live: ctx.live,
+      onEvent: progress.onEvent
+    }) : await runClaude({
       file: fit.file,
       argv: buildArgv({ prompt, model: plan.model, codeDir, web: plan.web }),
       cwd: workDir,
@@ -603,7 +678,12 @@ async function statusDoc(s) {
     computer: allow.computer,
     runner: allow.runner,
     takenAt,
-    allows: { actions: allow.actions, jobs: s.runnable },
+    allows: {
+      actions: allow.actions,
+      jobs: s.runnable,
+      // Only for a computer whose allowlist gives a job to Codex: who is ready now, and which jobs are Codex's (the contract's status.workers).
+      ...(s.codexJobs.length ? { workers: [...(s.claudeReady ? ['claude'] : []), ...(s.codexReady ? ['codex'] : [])], codexJobs: s.codexJobs } : {})
+    },
     orders: await ordersFromClaims({ stateDir: ctx.places.stateDir, takenAt, fs: ctx.fs })
   })
 }

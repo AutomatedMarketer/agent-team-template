@@ -20,6 +20,8 @@ import { readRepoFile, todayIn } from './cards.mjs'
 
 export const RUN_PROMPT_FILE = '.agent-team/mailbox/prompts/run.md'
 export const MAC_NOTE_FILE = '.agent-team/mailbox/prompts/mac-note.md'
+// The note a Codex run gets in place of the one above: it has a shell, inside the work copy only, with no network (codex.mjs).
+export const CODEX_NOTE_FILE = '.agent-team/mailbox/prompts/codex-note.md'
 const MOST_STEPS = 12
 // The run log's model field takes only these two; a lighter owner runs as sonnet so the log can say what ran.
 const RUN_MODELS = ['opus', 'sonnet']
@@ -46,6 +48,10 @@ export const JOBS = freeze({
 })
 
 export const knownJobs = () => Object.keys(JOBS)
+
+// Whether Codex may be a job's worker: only a job with no web. Codex never has the network (its sandbox has none, and its web search is
+// off), so a job that needs the news is Claude's whatever the allowlist says.
+export const codexMayRun = (slug) => typeof slug === 'string' && Object.hasOwn(JOBS, slug) && JOBS[slug].web === false
 
 const refused = (why) => ({ ok: false, state: 'refused', why })
 const LINKED = { ok: false, state: 'failed', why: 'change-refused' }
@@ -119,8 +125,8 @@ function assertPlan(plan) {
 }
 
 // The prompt for a run: the pinned template with the plan's checked values in it. { codeDir } is the runner's own
-// checkout, where the prompt files live.
-export async function runPrompt(plan, { codeDir }) {
+// checkout, where the prompt files live; `worker` picks the note at its end (Claude's unless it is 'codex').
+export async function runPrompt(plan, { codeDir, worker = 'claude' }) {
   assertPlan(plan)
   const values = {
     workflow: plan.slug,
@@ -132,7 +138,7 @@ export async function runPrompt(plan, { codeDir }) {
     model: plan.model,
     stamps: plan.stamps.join(', '),
     logs: JOBS[plan.slug].logsSentence,
-    macNote: (await readFile(join(codeDir, MAC_NOTE_FILE), 'utf8')).trim()
+    macNote: (await readFile(join(codeDir, worker === 'codex' ? CODEX_NOTE_FILE : MAC_NOTE_FILE), 'utf8')).trim()
   }
   const template = await readFile(join(codeDir, RUN_PROMPT_FILE), 'utf8')
   return template.replace(/\{\{([A-Za-z]+)\}\}/g, (placeholder, name) => {
