@@ -348,6 +348,37 @@ test('--selftest says honestly when a call for a tool Claude does not have was n
   }
 })
 
+// The Mac runs another Claude Code version. If its refusal is worded differently, the runner does not recognise it and fails safe - and the
+// self-test says that honestly, not that a wall gave way.
+test('--selftest says honestly when Claude Code refuses the shell in words this runner does not recognise: nothing is proven, update or run again', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const odd = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', is_error: true, content: '<tool_use_error>Error: Bash is not available in this session.</tool_use_error>' }] } }
+    w.claude.script = async () => [w.INIT, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Bash', input: {} }] } }, odd, w.RESULT]
+    const result = await selftest(w)
+    assert.equal(result.code, 1)
+    assert.match(result.text, /Claude Code answered a refused tool \(Bash\) in a way this runner does not recognise; nothing is proven\. Update the runner or run the self-test again\./)
+    assert.ok(!/tool limits are not holding|was given a tool/.test(result.text))
+    assert.equal((await proofFor(w)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('--selftest fails when Claude calls a connector tool, refused or not: no run may call one', async () => {
+  const w = await mailboxWorld({ proof: false })
+  try {
+    const refusal = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: '<tool_use_error>Error: No such tool available: mcp__evil__run</tool_use_error>' }] } }
+    w.claude.script = async () => [w.INIT, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__evil__run', input: {} }] } }, refusal, w.RESULT]
+    const result = await selftest(w)
+    assert.equal(result.code, 1)
+    assert.match(result.text, /Claude called a connector tool \(mcp__evil__run\)\. No run may call one, refused or not, so nothing is proven\./)
+    assert.equal((await proofFor(w)).holds, false)
+  } finally {
+    await w.cleanup()
+  }
+})
+
 test('a wall tried only through the shell Claude does not have proves nothing about the file tools: that step is "never seen tried"', async () => {
   const w = await mailboxWorld({ proof: false })
   try {

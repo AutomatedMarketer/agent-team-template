@@ -585,6 +585,13 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
     // Capped at what the status file allows, so the final word, the status file and the progress file all say the same number.
     const steps = Math.min(MAILBOX_MAX_STEPS, Object.values(ran.calls ?? {}).reduce((sum, count) => sum + count, 0))
     const failed = (why) => settle(s, id, action, { state: 'failed', why, startedAt, steps })
+    // Calls Claude made to tools it was never given, each refused by Claude Code itself (runClaude). Nothing ran, so the order is not failed for
+    // them, but the owner is told: tool names (checked plain by runClaude) and counts only, never what a call asked for. The status file's
+    // contract (mailbox-schema.mjs, shared with the board) has no key for this, so it is the log alone.
+    if (ran.attempted && typeof ran.attempted === 'object') {
+      const told = Object.entries(ran.attempted).map(([name, count]) => `${name} ×${count}`).join(', ')
+      s.log(`mailbox: Claude asked for tools it does not have (${told}); Claude Code refused each`)
+    }
     // Before anything else, and whether or not the run went well: git must not run in a folder where Claude changed what git reads. The order fails
     // with a fixed reason, the folder is thrown away and made again from the team repo's address the runner wrote itself, and nothing in it is trusted.
     if (!(await gitUnchanged(workDir, before))) {

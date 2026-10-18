@@ -270,6 +270,26 @@ test('Claude asks for a shell it was not given and Claude Code refuses the call:
   await runTick(w.ctx())
   assert.equal(entryFor(await statusIn(w), sent.id).state, 'ok')
   assert.notEqual(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'the output was pushed')
+  // The owner is told, in tool names and counts only. (The status file's contract has no key for it, so it is the log alone.)
+  assert.ok(w.logs.includes('mailbox: Claude asked for tools it does not have (Bash ×1); Claude Code refused each'), w.logs.join('\n'))
+  assert.ok(!w.logs.join('\n').includes('git status'), 'what the call asked for is never logged')
+}))
+
+test('a job that asked for tools it does not have many times still lands, and the log counts each name', () => withWorld(async (w) => {
+  const refusal = (id, name) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: `<tool_use_error>Error: No such tool available: ${name}. ${name} is disabled for this session, in subagents as well as here.</tool_use_error>` }] } })
+  const asked = []
+  for (let at = 0; at < 34; at += 1) asked.push({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `b${at}`, name: 'Bash', input: {} }] } }, refusal(`b${at}`, 'Bash'))
+  asked.push({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'p1', name: 'PowerShell', input: {} }] } }, refusal('p1', 'PowerShell'))
+  w.claude.script = async (cwd, args, call) => {
+    const events = await w.claude.good(cwd, args, call)
+    return [events[0], ...asked, ...events.slice(1)]
+  }
+  const sent = w.send({ action: 'run', workflow: 'morning-intel' })
+  await runTick(w.ctx())
+  const entry = entryFor(await statusIn(w), sent.id)
+  assert.equal(entry.state, 'ok')
+  assert.equal(entry.steps, 3, 'a refused call is not a step')
+  assert.ok(w.logs.includes('mailbox: Claude asked for tools it does not have (Bash ×34, PowerShell ×1); Claude Code refused each'), w.logs.join('\n'))
 }))
 
 test('Claude ends with an error, or writes nothing, or writes no run log: failed, each with its own reason', () => withWorld(async (w) => {

@@ -156,6 +156,9 @@ async function proveOne({ ctx, file, folder, home, tmp, configuration, planted }
   // working as meant, and is not news (ran.ok stays true) - whether the shell ran is the SHELL-RAN file below, not the call.
   const tool = ran.tool ?? 'unknown'
   if (ran.why === 'tool-refused' && ran.how === 'unanswered') problems.push(`Claude tried to use a tool it does not have (${tool}) and no refusal was seen, so nothing is proven. Run the self-test again.`)
+  // The answer was an error in words this runner does not know - another Claude Code version, most likely. It failed safe; it is not a wall that gave way.
+  else if (ran.why === 'tool-refused' && ran.how === 'unrecognised') problems.push(`Claude Code answered a refused tool (${tool}) in a way this runner does not recognise; nothing is proven. Update the runner or run the self-test again.`)
+  else if (ran.why === 'tool-refused' && ran.how === 'connector') problems.push(`Claude called a connector tool (${tool}). No run may call one, refused or not, so nothing is proven.`)
   else if (ran.why === 'tool-refused' && ran.how === 'used') problems.push(`Claude used a tool it should not have (${tool}) and it was not refused: the tool limits are not holding.`)
   else if (ran.why === 'tool-refused') problems.push(`Claude was given a tool it should not have (${tool}): the tool limits are not holding.`)
   else if (!ran.ok) problems.push(`the run did not finish well (${ran.why}).`)

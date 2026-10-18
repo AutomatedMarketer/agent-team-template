@@ -217,15 +217,21 @@ const TOOL_NAME = /^[A-Za-z0-9_*-]{1,64}$/
 
 // What Claude Code answers, itself, to a call of a tool it never offered: an error, and nothing runs. The model can write any tool name it
 // likes - it is told to try a shell in the self-test, and a job's steps can make it reach for one - and this is the whole of the answer.
-// Seen on a real run with the flags above (Windows 11, Claude Code 2.1.300, 2026-10-18; tests/fixtures/claude-unoffered-tool.jsonl):
-//   <tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>
-// The whole answer must be that one error, for that one name: a tool that was there and ran, then failed, answers with an error too.
-const refusalFor = (name) => new RegExp(`^<tool_use_error>Error: No such tool available: ${escapeText(name)}\\.[^<]*</tool_use_error>$`)
-const resultText = (content) => {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) return content.map((part) => (typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '')).join('\n')
-  return ''
-}
+// Seen on real runs with the flags above (Windows 11, Claude Code 2.1.300, 2026-10-18; tests/fixtures/claude-unoffered-tool.jsonl and
+// claude-refusals-2.1.300.json), in exactly two forms:
+//   a tool Claude Code has and this run turned off (Bash, PowerShell, Agent, ToolSearch, WebFetch in a sweep, ...):
+//     <tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>
+//   a name it does not know at all:
+//     <tool_use_error>Error: No such tool available: FooBarTool</tool_use_error>
+// The answer must be one of these, as the whole text, word for word, for the very name that was called. A tool that was there and ran, then
+// failed, answers with an error too; so could a look-alike. Any other wording - an older or newer Claude Code's included - is not recognised,
+// and the run fails safe. A connector tool (mcp__) is never forgiven, whatever the answer: its answer is written by a program the runner does
+// not control, so a refusal from it proves nothing.
+const refusalsFor = (name) => [
+  `<tool_use_error>Error: No such tool available: ${name}. ${name} is disabled for this session, in subagents as well as here.</tool_use_error>`,
+  `<tool_use_error>Error: No such tool available: ${name}</tool_use_error>`
+]
+const CONNECTOR_PREFIX = 'mcp__'
 
 // Claude's output is one JSON message per line. Every one is read for two things: the tools it lists or calls, which
 // must be the allowed ones, and the final result.
@@ -236,12 +242,13 @@ const resultText = (content) => {
 // A tool outside the list is one of two things, and only the first is a wall that is not there:
 //   OFFERED (how: 'offered')   the init - the tools Claude Code says, at start-up, that this run has - names it, or a connector, or cannot be
 //                              read. The run is stopped at once, the whole process group, with no time to finish. Nothing later changes that.
-//   ASKED FOR, never offered   Claude wrote a call to a tool the init did not name. Claude Code answers such a call itself (refusalFor) and runs
+//   ASKED FOR, never offered   Claude wrote a call to a tool the init did not name. Claude Code answers such a call itself (refusalsFor) and runs
 //                              nothing. Answered so, it is counted in `attempted` and the run goes on: the wall held, and failing the job would
-//                              be an alarm about a wall that held - an alarm the owner then learns to ignore. Answered any other way (how: 'used'),
-//                              or not answered by the result or the end of the run (how: 'unanswered'), it stops the run as tool-refused. So
-//                              does a call whose refusal cannot be read for it: before the init, with no id, in a subagent, or outside an
-//                              assistant message. A real tool that ran would be seen at its answer, one message later than at the call itself;
+//                              be an alarm about a wall that held - an alarm the owner then learns to ignore. It stops the run as tool-refused when
+//                              it is answered without an error (how: 'used'), with an error that is not one of the two refusals (how: 'unrecognised'),
+//                              or not by the result or the end of the run (how: 'unanswered'). So does a call whose refusal cannot be read for it:
+//                              before the init, with no id, in a subagent, or outside an assistant message (how: 'used'); and a connector tool, at
+//                              the call (how: 'connector'). A real tool that ran would be seen at its answer, one message later than at the call;
 //                              stopping at the call never stopped that first call either, since Claude Code starts it as it prints it.
 export function runClaude({
   file, argv, cwd, env, timeoutMs, killAfterMs = KILL_AFTER_MS, closeWaitMs = CLOSE_WAIT_MS,
@@ -347,6 +354,7 @@ export function runClaude({
         report({ type: 'tool', name })
         return undefined
       }
+      if (typeof name === 'string' && name.startsWith(CONNECTOR_PREFIX)) return refuseTool(name, 'connector')
       const answerable = initSeen && event.type === 'assistant' && (event.parent_tool_use_id ?? null) === null &&
         typeof block.id === 'string' && block.id !== '' && typeof name === 'string' && TOOL_NAME.test(name)
       if (!answerable) return refuseTool(name, 'used')
@@ -358,11 +366,12 @@ export function runClaude({
       const at = asked.findIndex((call) => call.id === block.tool_use_id)
       if (at === -1) return undefined
       const [{ name }] = asked.splice(at, 1)
-      if (block.is_error === true && refusalFor(name).test(resultText(block.content))) {
+      if (block.is_error !== true) return refuseTool(name, 'used')
+      if (typeof block.content === 'string' && refusalsFor(name).includes(block.content)) {
         attempted.set(name, (attempted.get(name) ?? 0) + 1)
         return undefined
       }
-      return refuseTool(name, 'used')
+      return refuseTool(name, 'unrecognised')
     }
 
     function read(text) {

@@ -1,0 +1,149 @@
+{
+  "source": "Real runs of Claude Code 2.1.300 on Windows 11, 2026-10-18, started with the runner flags (buildArgv). One answer per tool name asked for; the tools the init offered are listed with each.",
+  "answers": [
+    {
+      "name": "ToolSearch",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: ToolSearch. ToolSearch is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "Bash",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "PowerShell",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: PowerShell. PowerShell is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "Task",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: Task. Task is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "Agent",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "mcp__evil__run",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: mcp__evil__run</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "Monitor",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: Monitor. Monitor is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "TodoWrite",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: TodoWrite. TodoWrite is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "NotebookEdit",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: NotebookEdit. NotebookEdit is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "Skill",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: Skill. Skill is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "WebFetch",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: WebFetch. WebFetch is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    },
+    {
+      "name": "FooBarTool",
+      "is_error": true,
+      "content": "<tool_use_error>Error: No such tool available: FooBarTool</tool_use_error>",
+      "offered": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Write"
+      ]
+    }
+  ]
+}
