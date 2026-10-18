@@ -413,6 +413,18 @@ test('the guide marks Windows as not tested and lists what a real Mac still has 
   }
 })
 
+// The runner's own Windows places (places.mjs) are for the runner run on its own. The student board hands in its own (runnerPlacesFor in the
+// board's local/runner.mjs): the code in <board folder>\runner-code, state in state\runner. The guide once said the board's code was under the profile.
+test('on Windows the guide gives the runner\'s own folders as the code has them, and the board\'s runner code as <board folder>\\runner-code', async () => {
+  const windows = flat(section(await guide(), '## On a Windows computer', '## Not yet verified'))
+  const own = defaultPlaces('C:\\Users\\s', { platform: 'win32', env: { LOCALAPPDATA: 'C:\\Users\\s\\AppData\\Local' } })
+  assert.equal(own.codeDir, 'C:\\Users\\s\\Agent Board\\runner-code')
+  assert.ok(windows.includes('`%USERPROFILE%\\Agent Board\\runner-code`'), 'the runner\'s own code folder')
+  assert.ok(windows.includes('`<board folder>\\runner-code`'), 'the board\'s runner code folder')
+  assert.ok(windows.includes('`%LOCALAPPDATA%\\Agent Board\\state\\runner\\`'), 'the board\'s state folder for the runner')
+  assert.match(windows, /Run on its own without switches/, 'the profile folder is said to be the runner-on-its-own one, not the board\'s')
+})
+
 test('the guide names the oldest Claude Code it will run, and that is the floor in the code', async () => {
   const doc = await guide()
   assert.ok(doc.includes(`The protections need Claude Code ${MINIMUM_VERSION.join('.')} or later`), 'the troubleshooting table does not give the floor')

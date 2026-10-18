@@ -334,7 +334,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | Nobody else can give it orders | Every order is signed with a secret only Vercel and your Mac hold. The signature is checked before the order is even read |
 | An order cannot run twice | The claim is a new folder, saved to the disk **before anything is done**. It is kept for ever. The claims folder also records the day it began, and refuses any order made before that |
 | The Mac decides what is allowed, not the board and not the repo | `allowed-orders.yml` in the state folder. The team repo can never widen it |
-| Claude has no shell and no connectors | `--restricted` takes away the tools that run commands or code. `--tools` names only built-in tools and Bash is not one. `--disallowedTools "mcp__*"` and an empty `--strict-mcp-config` take away every connector. Any call to another tool stops the run on the spot |
+| Claude has no shell and no connectors | `--restricted` takes away the tools that run commands or code. `--tools` names only built-in tools and Bash is not one. `--disallowedTools "mcp__*"` and an empty `--strict-mcp-config` take away every connector. A tool outside the list in the start-up list stops the run on the spot. A call Claude makes to a tool it was never given is answered by Claude Code itself, "No such tool available", and nothing runs. That call is counted and the run goes on. Any other answer to it, or none, stops the run |
 | Claude cannot read or write outside the work copy | Four layers. `--restricted` confines the built-in file tools to the folder Claude starts in. The settings file sets `blockReadsOutsideWorkingDirectories`, so a read outside it is refused in every mode. The only file permissions given are `Read(/**)` and `Edit(/**)`, which on the command line mean "inside this folder" (a tool name with no path would mean everywhere), and `--permission-mode dontAsk` denies everything else. Last, a deny list names the places a Mac keeps secrets: `~/.ssh`, `~/.aws`, `~/.config`, `~/.hermes`, `~/.codex`, `~/Library`, `~/.claude`, the state folder and the runner's own code |
 | The walls are proven on this Mac before any job runs | `--selftest` runs the real Claude in each job's exact setup and checks it cannot read or write outside the work copy. The proof is saved with the Claude Code version and a short code worked out from the settings. When either changes, jobs are refused until it passes again |
 | Claude cannot update itself between the test and a job | Every program the runner starts gets `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`. The runner also asks Claude Code which version it is just before each job. It follows the link to the program once, asks that file which version it is and starts that same file, so a link moved in between changes nothing. It refuses the job if that is not the version the self-test passed for |
@@ -437,9 +437,12 @@ What is different from a Mac, and why:
   The [native installer](https://code.claude.com/docs/en/setup) puts it at `%USERPROFILE%\.local\bin\claude.exe`.
   An npm install leaves a `claude.cmd` file instead. That needs a shell to start, and the runner never uses a shell.
   So `--preflight` tells you to install the native version.
-- **Folders.** Without switches, state and the work copy live under `%LOCALAPPDATA%\Agent Board\` (`state\` and `work\`).
+- **Folders.** Run on its own without switches, the runner keeps state and the work copy under `%LOCALAPPDATA%\Agent Board\` (`state\` and `work\`).
   The secrets file is `state\runner.env`. The runner's code is under `%USERPROFILE%\Agent Board\runner-code`.
   The four must still not overlap. A program that runs the runner in-process (the student board) hands in its own four folders as `places`.
+  The board's are different. Its runner code is in `<board folder>\runner-code`, inside the folder the board itself is in, not under `%USERPROFILE%`.
+  Its state and secrets are in `%LOCALAPPDATA%\Agent Board\state\runner\` (with `runner.env` inside), and its work copy is `%LOCALAPPDATA%\Agent Board\work`.
+  These come from `runnerPlacesFor` in the board's `local/runner.mjs`.
 - **File modes do not exist.** Instead the state folder (claims, allowlist, secrets) is given to your account alone, using `icacls` by its full path.
   It is then read back. If any other account still has access, or the lock cannot be set, no tick starts.
   The secrets file must be inside the state folder, so that one lock covers both.
@@ -460,8 +463,8 @@ These are checked on the Mac at steps 6 and 7, and the guide will be corrected f
 - That `Read(/**)` and `Edit(/**)` on the command line mean the folder Claude starts in, and that the walls hold on a real Mac. The docs say so. `--selftest` is the first real proof, and no job runs without it.
 - That `--settings` with `disableAllHooks` also stops hooks from your own plugins in a `-p` run.
 - That an empty `--strict-mcp-config` also keeps out claude.ai connectors and plugin servers.
-- Which closing tool calls Claude Code makes on its own. Any call to a tool outside the list stops the run.
-  A harmless tool that is not on the list would stop a good run. `--selftest` and the first runs show it.
+- Which closing tool calls Claude Code makes on its own. A tool outside the list in the start-up list stops the run.
+  A harmless tool that Claude Code lists there would stop a good run. `--selftest` and the first runs show it.
 - That Claude Code leaves no files of its own in the work copy. Any file it left would fail the changed-file check.
 - That the board's address answers a plain request from the Mac. If Vercel's Deployment Protection is on for the
   production address, the Mac gets a sign-in page, not orders. Then `--once` says `board-failed (board-bad-answer)`.

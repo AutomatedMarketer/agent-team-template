@@ -14,7 +14,8 @@
 import { isAbsolute, join, win32 } from 'node:path'
 import { isInsideFolder } from '../status/commit.mjs'
 
-// On Windows (the same layout the student board uses, "Agent Board"): state and the work copy under %LOCALAPPDATA%, the runner's code under the profile.
+// On Windows, for the runner run on its own: state and the work copy under %LOCALAPPDATA%\Agent Board, the runner's code under the profile. The student
+// board does not use these: it hands in its own places (its runnerPlacesFor), with the code in <board folder>\runner-code and state in state\runner.
 // The secrets file sits inside the state folder, which is allowed and is what lets one private folder (windows.mjs) cover state and secrets.
 // `platform` is left out on a Mac and in every call that predates Windows, which keeps their answer exactly as it was.
 export function defaultPlaces(home, { platform, env } = {}) {
