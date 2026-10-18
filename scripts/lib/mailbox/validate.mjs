@@ -22,6 +22,10 @@ export const FIELDS = Object.freeze({
   arm: { required: ['workflow'], optional: [] }
 })
 
+// The contract's payload.worker: which worker does a run. Its own key in the contract (not in FIELDS), so a board that has not learned it
+// reads FIELDS exactly as before. Left out, a run is Claude's (allow.mjs, decide).
+export const WORKER_FIELD = Object.freeze({ actions: Object.freeze(['run']), values: Object.freeze(['claude', 'codex']), default: 'claude' })
+
 export const MODEL_TIERS = ['opus', 'sonnet', 'haiku']
 export const TASK_STATUSES = ['todo', 'doing', 'done']
 const SLUG_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -112,7 +116,8 @@ export function validatePayload(payload) {
   // FIELDS has exactly the contract's actions (tests/mailbox-contract.test.mjs), so it is the list.
   if (typeof action !== 'string' || !Object.hasOwn(FIELDS, action)) return { ok: false }
   const { required, optional } = FIELDS[action]
-  const allowed = new Set(['source', 'action', 'instruction', ...required, ...optional])
+  const worker = WORKER_FIELD.actions.includes(action) ? ['worker'] : []
+  const allowed = new Set(['source', 'action', 'instruction', ...required, ...optional, ...worker])
   for (const name of Object.keys(payload)) {
     if (!allowed.has(name)) return { ok: false }
   }
@@ -125,6 +130,10 @@ export function validatePayload(payload) {
     }
     if (!fieldOk(action, name, payload[name])) return { ok: false }
     fields[name] = payload[name]
+  }
+  if (worker.length && Object.hasOwn(payload, 'worker')) {
+    if (!WORKER_FIELD.values.includes(payload.worker)) return { ok: false }
+    fields.worker = payload.worker
   }
   return { ok: true, action, fields }
 }

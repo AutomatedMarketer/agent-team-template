@@ -77,6 +77,7 @@ test('a good allowlist reads as the board\'s address, the team repo, this comput
     computer: 'Mac Mini',
     actions: ['task', 'move', 'approve', 'pause', 'run', 'arm', 'skill', 'agent'],
     jobs: new Map([['morning-intel', 20], ['task-sweep', 30]]),
+    workers: new Map(),
     perDay: { orders: 40, runs: 6 }
   })
 })
@@ -445,8 +446,8 @@ const RUNNABLE = ['morning-intel', 'task-sweep']
 
 test('decide: an action on the list is done, and a run carries its time limit', () => {
   assert.deepEqual(decide(ALLOW, NONE_YET, 'task', { title: 'Chase the invoice' }, RUNNABLE), { ok: true })
-  assert.deepEqual(decide(ALLOW, NONE_YET, 'run', { workflow: 'morning-intel' }, RUNNABLE), { ok: true, minutes: 20 })
-  assert.deepEqual(decide(ALLOW, NONE_YET, 'run', { workflow: 'task-sweep' }, RUNNABLE), { ok: true, minutes: 30 })
+  assert.deepEqual(decide(ALLOW, NONE_YET, 'run', { workflow: 'morning-intel' }, RUNNABLE), { ok: true, minutes: 20, worker: 'claude' })
+  assert.deepEqual(decide(ALLOW, NONE_YET, 'run', { workflow: 'task-sweep' }, RUNNABLE), { ok: true, minutes: 30, worker: 'claude' })
 })
 
 test('decide: every one of the contract\'s actions can be allowed, and one that is not listed is not-allowed', () => {

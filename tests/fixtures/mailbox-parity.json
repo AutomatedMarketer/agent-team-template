@@ -552,7 +552,171 @@
         },
         "verdict": "refused"
       }
-    ]
+    ],
+    "worker": {
+      "rule": "A run order may say which worker does the job: \"claude\" or \"codex\". Left out, it means \"claude\". Only `run` has the field; on any other action it makes the payload not valid. The value is exactly one of `values`. The runner does a run only when this word is the job's worker in the computer's own allowlist (a job with no worker there is \"claude\"); otherwise the order is refused as worker-not-allowed. The board offers Codex for a job only when the status file lists the job in allows.codexJobs and \"codex\" in allows.workers (status.workers).",
+      "actions": [
+        "run"
+      ],
+      "values": [
+        "claude",
+        "codex"
+      ],
+      "default": "claude",
+      "cases": [
+        {
+          "name": "run, codex",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": "codex"
+          },
+          "verdict": "ok"
+        },
+        {
+          "name": "run, claude",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": "claude"
+          },
+          "verdict": "ok"
+        },
+        {
+          "name": "run, no worker",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep"
+          },
+          "verdict": "ok"
+        },
+        {
+          "name": "run, a worker with a capital",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": "Codex"
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "run, a worker with a space",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": "codex "
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "run, an empty worker",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": ""
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "run, a null worker",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": null
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "run, a worker nobody knows",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": "gpt"
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "run, a list of workers",
+          "payload": {
+            "action": "run",
+            "workflow": "task-sweep",
+            "worker": [
+              "codex"
+            ]
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "pause with a worker",
+          "payload": {
+            "action": "pause",
+            "workflow": "task-sweep",
+            "worker": "codex"
+          },
+          "verdict": "refused"
+        },
+        {
+          "name": "task with a worker",
+          "payload": {
+            "action": "task",
+            "title": "Chase the invoice",
+            "worker": "claude"
+          },
+          "verdict": "refused"
+        }
+      ],
+      "allowRule": "jobWorker is the worker the computer's allowlist gives the job (null: the job names none, which means claude). orderWorker is the order's worker field (null: left out). The run goes ahead only when the two mean the same worker.",
+      "allowCases": [
+        {
+          "name": "a codex job, a codex order",
+          "jobWorker": "codex",
+          "orderWorker": "codex",
+          "verdict": "ok"
+        },
+        {
+          "name": "a codex job, an order with no worker",
+          "jobWorker": "codex",
+          "orderWorker": null,
+          "verdict": "worker-not-allowed"
+        },
+        {
+          "name": "a codex job, a claude order",
+          "jobWorker": "codex",
+          "orderWorker": "claude",
+          "verdict": "worker-not-allowed"
+        },
+        {
+          "name": "a job with no worker, a codex order",
+          "jobWorker": null,
+          "orderWorker": "codex",
+          "verdict": "worker-not-allowed"
+        },
+        {
+          "name": "a job with no worker, an order with no worker",
+          "jobWorker": null,
+          "orderWorker": null,
+          "verdict": "ok"
+        },
+        {
+          "name": "a job with no worker, a claude order",
+          "jobWorker": null,
+          "orderWorker": "claude",
+          "verdict": "ok"
+        },
+        {
+          "name": "a claude job, a codex order",
+          "jobWorker": "claude",
+          "orderWorker": "codex",
+          "verdict": "worker-not-allowed"
+        },
+        {
+          "name": "a claude job, an order with no worker",
+          "jobWorker": "claude",
+          "orderWorker": null,
+          "verdict": "ok"
+        }
+      ]
+    }
   },
   "claims": {
     "rule": "What the runner must do with its claims. These are rules of the contract, not advice: each one closes a way for one signed order to run twice.",
@@ -1427,6 +1591,347 @@
           "landed": null
         }
       }
-    ]
+    ],
+    "workers": {
+      "rule": "Optional keys of allows, added for the Codex worker. A file without them is as valid as ever, and a board that does not know them shows the file as before. The runner writes both, or neither: only when its allowlist gives at least one job to Codex. workers lists the workers that are ready now, from `values`, each once (\"codex\" only when Codex was found, is new enough, is signed in with ChatGPT, its sandbox started and its self-test passed). codexJobs lists the jobs in allows.jobs that the allowlist gives to Codex, each once; every other job in allows.jobs is a Claude job. The board offers Codex for a job only when it is in codexJobs and \"codex\" is in workers, and then sends worker \"codex\" (payload.worker).",
+      "values": [
+        "claude",
+        "codex"
+      ],
+      "allowsOptional": [
+        "workers",
+        "codexJobs"
+      ],
+      "reasons": {
+        "refused": {
+          "worker-not-allowed": "that job is set to another worker on that computer"
+        },
+        "failed": {
+          "codex-failed": "Codex stopped with an error"
+        }
+      },
+      "reasonsRule": "These words join reasons.refused and reasons.failed for a runner that knows the Codex worker. tool-refused, timed-out and the rest keep their meaning for a Codex run (tool-refused: Codex used a tool or item it may not use, such as an MCP tool or a web search).",
+      "sampleAllows": {
+        "actions": [
+          "task",
+          "move",
+          "approve",
+          "pause",
+          "run",
+          "arm",
+          "skill",
+          "agent"
+        ],
+        "jobs": [
+          "morning-intel",
+          "task-sweep"
+        ],
+        "workers": [
+          "claude",
+          "codex"
+        ],
+        "codexJobs": [
+          "task-sweep"
+        ]
+      },
+      "allowsRefuse": [
+        {
+          "why": "a worker nobody knows",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude",
+              "gpt"
+            ],
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "a worker twice",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "codex",
+              "codex"
+            ],
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "workers is not a list",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": "codex",
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "a Codex job that is not in jobs",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude",
+              "codex"
+            ],
+            "codexJobs": [
+              "weekly-review"
+            ]
+          }
+        },
+        {
+          "why": "a Codex job twice",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude",
+              "codex"
+            ],
+            "codexJobs": [
+              "task-sweep",
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "a Codex job that is not a slug",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude",
+              "codex"
+            ],
+            "codexJobs": [
+              "Task Sweep"
+            ]
+          }
+        },
+        {
+          "why": "workers without codexJobs",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude"
+            ]
+          }
+        },
+        {
+          "why": "codexJobs without workers",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "another key in allows",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude",
+              "codex"
+            ],
+            "codexJobs": [
+              "task-sweep"
+            ],
+            "models": [
+              "opus"
+            ]
+          }
+        }
+      ],
+      "allowsAccept": [
+        {
+          "why": "no worker ready yet",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [],
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "only Claude ready",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ],
+            "workers": [
+              "claude"
+            ],
+            "codexJobs": [
+              "task-sweep"
+            ]
+          }
+        },
+        {
+          "why": "neither key (a runner with no Codex job, or one that does not know them)",
+          "allows": {
+            "actions": [
+              "task",
+              "move",
+              "approve",
+              "pause",
+              "run",
+              "arm",
+              "skill",
+              "agent"
+            ],
+            "jobs": [
+              "morning-intel",
+              "task-sweep"
+            ]
+          }
+        }
+      ]
+    }
   }
 }

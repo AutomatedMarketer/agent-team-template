@@ -13,6 +13,9 @@
 //   jobs:                                        the jobs a run order may start, and the most minutes each gets
 //     - slug: morning-intel
 //       minutes: 20
+//     - slug: task-sweep                         a job may name its worker: claude (the same as naming none) or codex.
+//       minutes: 30                              Codex runs ONLY a job named here as worker: codex (codex.mjs)
+//       worker: codex
 //   per_day:                                     the most it will do in one New York day
 //     orders: 40
 //     runs: 6
@@ -41,7 +44,8 @@ export const ALLOWED_ORDERS = Object.freeze({ file: 'allowed-orders.yml', maxByt
 export const CEILINGS = Object.freeze({ orders: 40, runs: 6, refused: 100, minutes: 30, jobs: 40 })
 
 const TOP_KEYS = new Set(['board', 'repo', 'runner', 'computer', 'actions', 'jobs', 'per_day'])
-const NESTED_KEYS = new Set(['slug', 'minutes', 'orders', 'runs'])
+const NESTED_KEYS = new Set(['slug', 'minutes', 'worker', 'orders', 'runs'])
+const WORKERS = ['claude', 'codex']
 const TOP_LINE = /^([a-z_]+):(?:[ \t].*)?$/
 const NESTED_LINE = /^[ \t]+([a-z_]+):(?:[ \t].*)?$/
 const DASH_LINE = /^[ \t]+-[ \t]+(\S.*)$/
@@ -98,15 +102,24 @@ function boardOrigin(value) {
   return url.origin
 }
 
+// { jobs: slug -> minutes, workers: slug -> worker } (a job that names no worker is not in workers: it is Claude's), or null.
 function readJobs(list) {
   if (!Array.isArray(list) || list.length > CEILINGS.jobs) return null
   const jobs = new Map()
+  const named = new Map()
+  const explicit = new Set()
   for (const item of list) {
-    if (!hasExactly(item, ['slug', 'minutes']) || !isSlug(item.slug) || !wholeNumber(item.minutes, 1, CEILINGS.minutes)) return null
+    const shaped = hasExactly(item, ['slug', 'minutes']) || (hasExactly(item, ['slug', 'minutes', 'worker']) && WORKERS.includes(item.worker))
+    if (!shaped || !isSlug(item.slug) || !wholeNumber(item.minutes, 1, CEILINGS.minutes)) return null
     // The same job twice gets the shorter time: when two lines disagree, the one that allows less is the one believed.
     jobs.set(item.slug, Math.min(jobs.get(item.slug) ?? Infinity, item.minutes))
+    // And Claude, unless every line of it says codex: Claude has no shell at all, so it is the one that allows less.
+    const said = item.worker ?? 'claude'
+    named.set(item.slug, named.has(item.slug) && named.get(item.slug) !== said ? 'claude' : said)
+    if (Object.hasOwn(item, 'worker')) explicit.add(item.slug)
   }
-  return jobs
+  const workers = new Map([...named].filter(([slug]) => explicit.has(slug)))
+  return { jobs, workers }
 }
 
 function parseAllowed(source, identity) {
@@ -123,8 +136,9 @@ function parseAllowed(source, identity) {
   if (typeof doc.runner !== 'string' || !RUNNER_SHAPE.test(doc.runner)) return broken('runner')
   if (typeof doc.computer !== 'string' || checkComputerLabel(doc.computer, identity).length) return broken('computer')
   if (!Array.isArray(doc.actions) || !doc.actions.every((action) => ACTIONS.includes(action))) return broken('actions')
-  const jobs = readJobs(doc.jobs)
-  if (jobs === null) return broken('jobs')
+  const read = readJobs(doc.jobs)
+  if (read === null) return broken('jobs')
+  const { jobs, workers } = read
   const perDay = doc.per_day
   if (!hasExactly(perDay, ['orders', 'runs']) || !wholeNumber(perDay.orders, 0, CEILINGS.orders) || !wholeNumber(perDay.runs, 0, CEILINGS.runs)) return broken('per_day')
 
@@ -137,6 +151,7 @@ function parseAllowed(source, identity) {
       computer: doc.computer,
       actions: [...new Set(doc.actions)],
       jobs,
+      workers,
       perDay: { orders: perDay.orders, runs: perDay.runs }
     }
   }
@@ -221,15 +236,19 @@ export async function addCount(stateDir, now, kind, fs = realFs) {
 
 /* ---------- may this order be done --------------------------------------------------------------------------------- */
 
-// { ok: true } (and `minutes` for a run: its time limit) or { ok: false, why } with a reason from the contract's
-// refused list. The action is checked first, then the job, then the day. Only a run needs its job on the list:
-// pausing a schedule or asking for one is a card or one line of a workflow file, not a start of Claude.
+// { ok: true } (and for a run `minutes`, its time limit, and `worker`, who does it) or { ok: false, why } with a reason from the
+// contract's refused list. The action is checked first, then the job, then the worker, then the day. Only a run needs its job on the
+// list: pausing a schedule or asking for one is a card or one line of a workflow file, not a start of Claude.
+// The worker (the contract's payload.worker): the order's (claude when left out) must be the job's in this allowlist (claude when it
+// names none). So Codex runs only a job this computer gave it, and only when the order asked for Codex.
 export function decide(allow, counts, action, fields, runnable) {
   if (!allow.actions.includes(action)) return { ok: false, why: 'not-allowed' }
   const job = fields?.workflow
   if (action === 'run' && (!runnable.includes(job) || !allow.jobs.has(job))) return { ok: false, why: 'job-not-allowed' }
+  const worker = action === 'run' ? (allow.workers?.get(job) ?? 'claude') : null
+  if (action === 'run' && (fields?.worker ?? 'claude') !== worker) return { ok: false, why: 'worker-not-allowed' }
   if (counts.orders >= allow.perDay.orders) return { ok: false, why: 'daily-limit' }
   if (action !== 'run') return { ok: true }
   if (counts.runs >= allow.perDay.runs) return { ok: false, why: 'daily-limit' }
-  return { ok: true, minutes: allow.jobs.get(job) }
+  return { ok: true, minutes: allow.jobs.get(job), worker }
 }

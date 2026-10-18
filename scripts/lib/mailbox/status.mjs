@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { isoSeconds } from '../status/util.mjs'
 import { writeSnapshot } from '../status/write.mjs'
 import { checkMailbox, GateError } from '../status/safe.mjs'
-import { MAILBOX_SCHEMA, MAILBOX_MAX_ORDERS, MAILBOX_MAX_FILE_BYTES, mailboxPath } from '../status/mailbox-schema.mjs'
+import { MAILBOX_SCHEMA, MAILBOX_MAX_ORDERS, MAILBOX_MAX_FILE_BYTES, MAILBOX_WORKERS, mailboxPath } from '../status/mailbox-schema.mjs'
 import { readSmallFile } from './small-file.mjs'
 
 // The orders with `entry` added, or put in the place of the one with its id. The list given is not changed.
@@ -22,7 +22,14 @@ export function buildMailbox({ computer, runner, takenAt, allows, orders }) {
     takenAt: isoSeconds(takenAt),
     computer,
     runner,
-    allows: { actions: [...allows.actions], jobs: [...allows.jobs].sort() },
+    allows: {
+      actions: [...allows.actions],
+      jobs: [...allows.jobs].sort(),
+      // Only for a computer whose allowlist gives a job to Codex, and then both (the contract's status.workers).
+      ...(Array.isArray(allows.workers) && Array.isArray(allows.codexJobs)
+        ? { workers: MAILBOX_WORKERS.filter((name) => allows.workers.includes(name)), codexJobs: [...new Set(allows.codexJobs)].sort() }
+        : {})
+    },
     orders: [...orders].sort(byNewest).slice(0, MAILBOX_MAX_ORDERS)
   }
 }

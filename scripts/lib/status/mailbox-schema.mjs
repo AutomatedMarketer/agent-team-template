@@ -32,9 +32,21 @@ export const MAILBOX_REASONS = {
   failed: ['change-refused', 'tool-refused', 'claude-failed', 'timed-out', 'run-log-refused', 'push-failed']
 }
 
+// The Codex worker's words and keys (the contract's status.workers). Kept apart from the lists above, which are the contract's older
+// keys word for word: a board that has not learned these reads those exactly as before.
+export const MAILBOX_WORKERS = ['claude', 'codex']
+export const MAILBOX_WORKER_REASONS = {
+  refused: ['worker-not-allowed'],
+  failed: ['codex-failed']
+}
+const ALL_REFUSED = [...MAILBOX_REASONS.refused, ...MAILBOX_WORKER_REASONS.refused]
+const ALL_FAILED = [...MAILBOX_REASONS.failed, ...MAILBOX_WORKER_REASONS.failed]
+
 export const MAILBOX_KEYS = {
   file: ['schema', 'takenAt', 'computer', 'runner', 'allows', 'orders'],
   allows: ['actions', 'jobs'],
+  // Allowed and never required, and only both together: the workers ready now and the jobs the allowlist gives to Codex.
+  allowsOptional: ['workers', 'codexJobs'],
   order: ['id', 'action', 'state', 'at', 'startedAt', 'finishedAt', 'commit', 'why', 'landed'],
   // Allowed and never required: a run that ended says how many tool calls it made. A file from a runner that does not know the key has none, and is as valid as ever.
   orderOptional: ['steps']
@@ -69,9 +81,9 @@ function stateRules(order) {
     case 'ok':
       return [...some('commit', 'finishedAt'), ...none('why', 'landed')]
     case 'refused':
-      return [...none('commit', 'landed'), ...(MAILBOX_REASONS.refused.includes(order.why) ? [] : [['why', 'is not a reason for an order that was refused']])]
+      return [...none('commit', 'landed'), ...(ALL_REFUSED.includes(order.why) ? [] : [['why', 'is not a reason for an order that was refused']])]
     case 'failed':
-      return [...none('commit', 'landed'), ...(MAILBOX_REASONS.failed.includes(order.why) ? [] : [['why', 'is not a reason for an order that failed']])]
+      return [...none('commit', 'landed'), ...(ALL_FAILED.includes(order.why) ? [] : [['why', 'is not a reason for an order that failed']])]
     case 'unknown':
       return [...none('why'), ...(order.landed === true ? some('commit') : none('commit'))]
     default:
@@ -89,12 +101,25 @@ const orderShape = {
     startedAt: nullable(second),
     finishedAt: nullable(second),
     commit: nullable({ type: 'pattern', pattern: MAILBOX_COMMIT }),
-    why: nullable(enumOf([...MAILBOX_REASONS.refused, ...MAILBOX_REASONS.failed])),
+    why: nullable(enumOf([...ALL_REFUSED, ...ALL_FAILED])),
     landed: nullable({ type: 'boolean' }),
     steps: { type: 'int', min: 0, max: MAILBOX_MAX_STEPS }
   },
   required: MAILBOX_KEYS.order,
   rule: stateProblems
+}
+
+// workers and codexJobs come together or not at all, and every Codex job is one of the jobs.
+function workersRule(file) {
+  const allows = file?.allows
+  if (allows === null || typeof allows !== 'object') return []
+  const hasWorkers = Object.hasOwn(allows, 'workers')
+  const hasCodexJobs = Object.hasOwn(allows, 'codexJobs')
+  if (hasWorkers !== hasCodexJobs) return [['allows', 'has workers and codexJobs together or neither']]
+  if (hasCodexJobs && Array.isArray(allows.codexJobs) && Array.isArray(allows.jobs) && allows.codexJobs.some((slug) => !allows.jobs.includes(slug))) {
+    return [['allows.codexJobs', 'names a job that is not in allows.jobs']]
+  }
+  return []
 }
 
 // No time is later than the moment the file was made: a time in the future is a clock gone wrong, or a made-up one.
@@ -121,12 +146,14 @@ export const MAILBOX_SHAPE = {
       type: 'object',
       keys: {
         actions: { type: 'array', of: enumOf(ACTIONS), min: 0, max: ACTIONS.length, unique: [] },
-        jobs: { type: 'array', of: { type: 'slug', pattern: MAILBOX_JOB }, min: 0, max: MAILBOX_MAX_JOBS, unique: [] }
+        jobs: { type: 'array', of: { type: 'slug', pattern: MAILBOX_JOB }, min: 0, max: MAILBOX_MAX_JOBS, unique: [] },
+        workers: { type: 'array', of: enumOf(MAILBOX_WORKERS), min: 0, max: MAILBOX_WORKERS.length, unique: [] },
+        codexJobs: { type: 'array', of: { type: 'slug', pattern: MAILBOX_JOB }, min: 0, max: MAILBOX_MAX_JOBS, unique: [] }
       },
       required: MAILBOX_KEYS.allows
     },
     orders: { type: 'array', of: orderShape, min: 0, max: MAILBOX_MAX_ORDERS, unique: ['id'] }
   },
   required: MAILBOX_KEYS.file,
-  rule: timesNotAfterTakenAt
+  rule: (file) => [...timesNotAfterTakenAt(file), ...workersRule(file)]
 }
