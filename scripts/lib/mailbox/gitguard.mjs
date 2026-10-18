@@ -16,9 +16,9 @@
 // folder: a plain file there is a pointer to some other folder (gitdir:).
 
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile, readlink, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { BRANCH, originUrl, pinnedGit } from './workcopy.mjs'
+import { lstat, mkdir, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { BRANCH, configText, originUrl, pinnedGit } from './workcopy.mjs'
 
 const SINGLE_FILES = ['config', 'config.worktree', 'commondir', 'HEAD', 'shallow']
 const FOLDERS = ['info', 'hooks', 'objects/info']
@@ -65,16 +65,30 @@ export async function gitUnchanged(work, before) {
   return now.ok && now.fingerprint === before.fingerprint
 }
 
-// Throw the work copy away and clone the team repo again into the same place, with the address the runner itself wrote into .git/config
-// before Claude started (never the one in the folder now). No git command is run in the old folder. { ok: true } or { ok: false }; when it
-// is false the folder is simply not there, and the next tick says "not a clone" until the owner makes one (the guide's step 3, "The work copy").
+// Throw the work copy away and make it again from the team repo, in the same place, with the address the runner itself wrote into
+// .git/config before Claude started (never the one in the folder now). No git command is run in the old folder: it is removed first, and
+// git first runs in the fresh, empty one. { ok: true } or { ok: false }; when it is false the folder is simply not there, and the next tick
+// says "not a clone" until the owner makes one (the guide's step 3, "The work copy").
+//
+// It is not a `git clone <address>`: the address would be on git's command line, and an address can carry a token
+// (https://x-access-token:...@github.com/...) that other programs on the computer can read there. Instead an empty repo is made, its
+// config is written as a file - the very text resetWorkCopy writes before every order - and git fetches and checks out `origin` by name,
+// as every tick does. What comes out is what the clone gave: main, at the team repo's main, everything checked out. Fetching `origin`
+// uses the same address and the same credential helper or SSH key that a clone of that address would.
 export async function remakeWorkCopy({ git, work, emptyHooks, before }) {
   await rm(work, { recursive: true, force: true })
   if (typeof before?.address !== 'string' || before.address === '') return { ok: false }
+  const run = pinnedGit(git, emptyHooks)
   try {
-    await pinnedGit(git, emptyHooks)(['clone', '--quiet', '--no-tags', '--branch', BRANCH, '--', before.address, work], dirname(work))
+    const config = configText({ url: before.address, emptyHooks })
+    await mkdir(work, { recursive: true })
+    await run(['init', '--quiet'], work)
+    await writeFile(join(work, '.git', 'config'), config)
+    await run(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', BRANCH], work)
+    await run(['checkout', '--quiet', '--force', '-B', BRANCH, `refs/remotes/origin/${BRANCH}`], work)
     return { ok: true }
   } catch {
+    // Nothing half-made is left (an empty folder, or a repo with a config and no files): the folder is gone, as the line above says.
     await rm(work, { recursive: true, force: true }).catch(() => {})
     return { ok: false }
   }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFile, access, mkdir, writeFile, readFile, readdir, realpath, rm, chmod, rename, symlink } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { git } from './helpers/git.mjs'
@@ -1597,7 +1597,7 @@ for (const [what, tamper] of TAMPERS) {
     }
     const afterClaude = []
     const watching = async (args, cwd) => {
-      if (w.claude.calls.length > 0) afterClaude.push({ verb: args.find((one) => ['clone', 'diff', 'add', 'commit', 'push', 'status', 'fetch', 'checkout', 'clean', 'rev-parse', 'show'].includes(one)), cwd })
+      if (w.claude.calls.length > 0) afterClaude.push({ verb: args.find((one) => ['clone', 'init', 'diff', 'add', 'commit', 'push', 'status', 'fetch', 'checkout', 'clean', 'rev-parse', 'show'].includes(one)), cwd, empty: (await readdir(cwd).catch(() => null))?.length === 0 })
       return git(args, cwd)
     }
     const result = await runTick(w.ctx({ git: watching }))
@@ -1605,8 +1605,8 @@ for (const [what, tamper] of TAMPERS) {
     assert.deepEqual([final.state, final.why], ['failed', 'change-refused'])
     assert.equal(result.orders.failed, 1)
     assert.equal(w.claude.calls.length, 1)
-    // The first git command after Claude is the clone that makes the copy again, run beside the old folder and not in it.
-    assert.deepEqual([afterClaude[0].verb, afterClaude[0].cwd], ['clone', dirname(w.places.workDir)])
+    // The first git command after Claude is the init that makes the copy again, in a fresh empty folder: the old one is gone before any git runs.
+    assert.deepEqual([afterClaude[0].verb, afterClaude[0].cwd, afterClaude[0].empty], ['init', w.places.workDir, true])
     assert.equal(await w.inOrigin.file('inbox/2026-10-12/morning-intel.md'), null, 'nothing of the run was pushed')
     assert.equal((await w.inOrigin.log()).some((subject) => subject.startsWith('Mailbox order')), false)
     // The fresh copy has none of it.
@@ -1622,7 +1622,7 @@ test('a run whose Claude changes nothing in .git is not disturbed by the check: 
   w.claude.script = w.claude.good
   const cloned = []
   const watching = async (args, cwd) => {
-    if (args.includes('clone')) cloned.push(cwd)
+    if (args.includes('clone') || args.includes('init')) cloned.push(cwd)
     return git(args, cwd)
   }
   await runTick(w.ctx({ git: watching }))
@@ -1637,11 +1637,11 @@ test('Claude plants a hook and the run also failed: git still does not run in th
     await writeFile(join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ntouch /tmp/pwned\n')
     return []
   }
-  // Every git command from the moment Claude has started until the fresh copy is cloned: none may be run in the old folder.
+  // Every git command from the moment Claude has started until the fresh copy is begun (git init in an empty folder): none may be run in the old folder.
   const beforeRemade = []
   let remade = false
   const watching = async (args, cwd) => {
-    if (args.includes('clone')) remade = true
+    if (args.includes('init')) remade = true
     else if (w.claude.calls.length > 0 && !remade) beforeRemade.push(args)
     return git(args, cwd)
   }
