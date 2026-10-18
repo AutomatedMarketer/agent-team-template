@@ -288,6 +288,8 @@ export function runCodex({
     }, timeoutMs)
 
     child.stdout?.on('data', (chunk) => {
+      // Whatever comes after the end (a stream that still held a chunk when the program was killed) is not written: the transcript is closed.
+      if (settled) return
       transcriptBytes += chunk.length
       transcript.write(chunk)
       if (transcriptBytes > maxTranscriptBytes) hardStop('codex-failed')

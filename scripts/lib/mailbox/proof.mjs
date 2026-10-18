@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MCP_FILE, SETTINGS_FILE, buildArgv } from './claude.mjs'
+import { CODEX_CONFIG_FILE, buildCodexArgv, sandboxProbeArgv } from './codex.mjs'
 
 export const PROOF_FILE = 'selftest.json'
 
@@ -119,5 +120,68 @@ async function holding({ stateDir, codeDir, version, file }, sameFile) {
   if (kept.version.some((part, index) => part !== version[index])) return none
   if (!isFile(kept.file) || (sameFile && kept.file !== file)) return none
   const fingerprint = await configFingerprint(codeDir)
+  return fingerprint !== null && kept.fingerprint === fingerprint ? { holds: true, at: kept.at } : none
+}
+
+/* ---------- the same, for Codex (codex-selftest.mjs) ------------------------------------------------------------------ */
+
+// Kept in its own file, so a Codex self-test never touches Claude's proof and the other way round. The fingerprint covers what a Codex
+// run is made of: the pinned settings file, the argument list of a run and of the sandbox probe (both systems), the text of the check,
+// and every file of the runner's own code - so a change to any of them needs a new Codex self-test, found with no git, from the disk.
+export const CODEX_PROOF_FILE = 'codex-selftest.json'
+export const CODEX_CHECK_FILES = Object.freeze(['codex-selftest.mjs'])
+
+export async function codexFingerprint(codeDir) {
+  try {
+    const parts = {
+      settings: await text(join(codeDir, ...CODEX_CONFIG_FILE.split('/'))),
+      run: buildCodexArgv({ prompt: 'x', workDir: join(codeDir, 'work') }),
+      probe: [sandboxProbeArgv({ dir: 'p', platform: 'darwin' }), sandboxProbeArgv({ dir: 'p', platform: 'win32' })],
+      check: await Promise.all(CODEX_CHECK_FILES.map((name) => text(own(name)))),
+      code: await codeHashes(codeDir)
+    }
+    return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
+  } catch {
+    return null
+  }
+}
+
+export async function keepCodexProof({ stateDir, codeDir, version, file, now }) {
+  const fingerprint = await codexFingerprint(codeDir)
+  if (fingerprint === null || !isVersion(version) || !isFile(file)) return false
+  const path = join(stateDir, CODEX_PROOF_FILE)
+  const temporary = `${path}.${process.pid}.tmp`
+  try {
+    const at = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z')
+    await writeFile(temporary, `${JSON.stringify({ ok: true, at, version, file, fingerprint }, null, 2)}\n`, { mode: 0o600 })
+    await rename(temporary, path)
+    return true
+  } catch {
+    await rm(temporary, { force: true }).catch(() => {})
+    return false
+  }
+}
+
+export async function dropCodexProof(stateDir) {
+  await rm(join(stateDir, CODEX_PROOF_FILE), { force: true }).catch(() => {})
+}
+
+// { holds, at } for this Codex version, this very file and this setup. The first look of a tick uses codexProofKept (no file yet).
+export const codexProofHolds = (given) => codexHolding(given, true)
+export const codexProofKept = (given) => codexHolding(given, false)
+
+async function codexHolding({ stateDir, codeDir, version, file }, sameFile) {
+  const none = { holds: false, at: null }
+  if (!isVersion(version) || (sameFile && !isFile(file))) return none
+  let kept
+  try {
+    kept = JSON.parse(await readFile(join(stateDir, CODEX_PROOF_FILE), 'utf8'))
+  } catch {
+    return none
+  }
+  if (kept === null || typeof kept !== 'object' || kept.ok !== true || typeof kept.at !== 'string' || !isVersion(kept.version)) return none
+  if (kept.version.some((part, index) => part !== version[index])) return none
+  if (!isFile(kept.file) || (sameFile && kept.file !== file)) return none
+  const fingerprint = await codexFingerprint(codeDir)
   return fingerprint !== null && kept.fingerprint === fingerprint ? { holds: true, at: kept.at } : none
 }
