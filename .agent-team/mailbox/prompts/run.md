@@ -1,4 +1,4 @@
-You are running one job of my agent team, on my own Mac. I tapped Run on my agent-cockpit board and the Mac mailbox started you. This job is the only thing you are here to do.
+You are running one job of my agent team, on my own computer. I tapped Run on my agent-cockpit board and the mailbox on this computer started you. This job is the only thing you are here to do.
 
 The job is `{{workflow}}`, owned by the agent `{{owner}}`. Run it once, like this:
 
@@ -17,7 +17,7 @@ Facts for the run log. You have no shell, so you cannot run `scripts/run-facts.m
 - workflow: {{workflow}}
 - model: {{model}}
 - started_at: {{startedAt}}
-- finished_at: write the same value as started_at. The runner on this Mac replaces it with the true time.
+- finished_at: write the same value as started_at. The runner on this computer replaces it with the true time.
 - run_id: <stamp>-<agent>-{{workflow}}, where <stamp> is one of {{stamps}} (a different one for each log) and <agent> is the agent the log is about. The file is `runs/<YYYY-MM>/<run_id>.json`, with the year and month of its stamp.
 - {{logs}}
 

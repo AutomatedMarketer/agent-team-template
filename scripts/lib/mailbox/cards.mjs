@@ -97,7 +97,7 @@ export function needsYouCard(action, fields) {
   if (action === 'arm') {
     heading = `Set up a Mac schedule for ${fields.workflow}`
     paragraphs = [
-      `${NEEDS_YOU}a new schedule on your Mac has to be set up with you in a session, never unattended.`,
+      `${NEEDS_YOU}a new schedule on your computer has to be set up with you in a session, never unattended.`,
       `You tapped Arm on your board for the job \`${fields.workflow}\`. Nothing has been armed or scheduled.`,
       `To go ahead, open a session in this repo and run \`/arm\`, then choose \`${fields.workflow}\`.`
     ]
@@ -107,7 +107,7 @@ export function needsYouCard(action, fields) {
     const noun = action === 'skill' ? 'skill' : 'agent'
     heading = `Add ${action === 'skill' ? 'a' : 'an'} ${noun}: ${fields.title}`
     paragraphs = [
-      `${NEEDS_YOU}your Mac does not build ${noun}s on its own, because a new ${noun} has to pass this repo's own checks first.`,
+      `${NEEDS_YOU}your computer does not build ${noun}s on its own, because a new ${noun} has to pass this repo's own checks first.`,
       `What you wrote on your board:\n\n${quoted(words)}`,
       `Nothing has been created. To go ahead, open a session in this repo and run \`/new-${noun}\` with that sentence.`
     ]

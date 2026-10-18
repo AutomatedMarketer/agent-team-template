@@ -172,7 +172,7 @@ test('the prompt files are in the runner\'s own code, and the Mac note is the pl
   assert.equal(MAC_NOTE_FILE, '.agent-team/mailbox/prompts/mac-note.md')
   assert.equal(
     read(MAC_NOTE_FILE).trim(),
-    "You are running on the owner's Mac through the Mac mailbox. Everything above still applies. You have no shell: do not try to run commands, tests or git. The mailbox runner on this Mac runs the checks and commits and pushes your changes itself, so when a file tells you to check, commit or push, finish the files and stop. Change only files inside this repo: the runner refuses the whole order if any other file changes. End with one line saying what you changed."
+    "You are running on the owner's computer through the mailbox. Everything above still applies. You have no shell: do not try to run commands, tests or git. The mailbox runner on this computer runs the checks and commits and pushes your changes itself, so when a file tells you to check, commit or push, finish the files and stop. Change only files inside this repo: the runner refuses the whole order if any other file changes. End with one line saying what you changed."
   )
 })
 
