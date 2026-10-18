@@ -192,7 +192,8 @@ export function killTree(pid, signal, { platform = process.platform, spawn, syst
   if (!Number.isInteger(pid) || pid <= 0) return
   if (platform === 'win32') {
     try {
-      spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+      // SystemRoot alone: with no env of its own taskkill would inherit the runner's whole environment, and the keys a computer may keep there.
+      spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, env: { SystemRoot: systemRoot, NoDefaultCurrentDirectoryInExePath: '1' } }).on('error', () => {})
     } catch {
       // Nothing more can be done from here.
     }

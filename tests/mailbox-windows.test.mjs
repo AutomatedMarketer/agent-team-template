@@ -224,6 +224,26 @@ test('a time-out on Windows ends the tree with taskkill (asked politely, then fo
   }
 })
 
+test('a program the runner\'s exec gives up on is ended by taskkill started with SystemRoot alone, not with the environment the exec was given (which can hold keys)', async () => {
+  const calls = []
+  const spawn = (file, args, options) => {
+    calls.push({ file, args, options })
+    const child = new EventEmitter()
+    child.pid = calls.length === 1 ? 4242 : undefined
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    return child
+  }
+  const env = { SYSTEMROOT: SYSTEM_ROOT, Path: 'C:\\bin', OPENAI_API_KEY: 'sk-test', GITHUB_TOKEN: 'ghp_test', MAILBOX_KEY: 'k'.repeat(40) }
+  const exec = createRunner({ spawn, platform: 'win32', env })
+  await assert.rejects(exec('C:\\x\\slow.exe', [], { timeout: 20 }), (error) => error.code === 'ETIMEDOUT')
+  const taskkills = calls.filter((call) => /taskkill\.exe$/i.test(call.file))
+  assert.equal(taskkills.length, 1)
+  assert.equal(taskkills[0].file, win32.join(SYSTEM_ROOT, 'System32', 'taskkill.exe'))
+  assert.deepEqual(taskkills[0].options.env, { SystemRoot: SYSTEM_ROOT, NoDefaultCurrentDirectoryInExePath: '1' })
+})
+
 test('a real program and the program IT started are both ended by killTree on Windows (this computer)', async (t) => {
   if (!onWindows) return t.skip('this is the Windows way of ending a tree')
   const alive = (pid) => {

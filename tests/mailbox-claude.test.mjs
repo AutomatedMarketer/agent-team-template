@@ -1022,7 +1022,29 @@ test('on Windows a program and everything it started are ended by the system\'s 
     return new EventEmitter()
   }
   killTree(4242, 'SIGKILL', { platform: 'win32', spawn, systemRoot: 'C:\Windows' })
-  assert.deepEqual(started, [{ file: join('C:\Windows', 'System32', 'taskkill.exe'), args: ['/PID', '4242', '/T', '/F'], options: { stdio: 'ignore', windowsHide: true } }])
+  assert.deepEqual(started, [{ file: join('C:\Windows', 'System32', 'taskkill.exe'), args: ['/PID', '4242', '/T', '/F'], options: { stdio: 'ignore', windowsHide: true, env: { SystemRoot: 'C:\Windows', NoDefaultCurrentDirectoryInExePath: '1' } } }])
   for (const pid of [0, -5, 1.5, NaN, undefined, '4242', null]) killTree(pid, 'SIGKILL', { platform: 'win32', spawn })
   assert.equal(started.length, 1)
+})
+
+test('taskkill is started with SystemRoot alone, never with the runner\'s whole environment and the keys a computer may keep there', () => {
+  const started = []
+  const spawn = (file, args, options) => {
+    started.push(options)
+    return new EventEmitter()
+  }
+  const planted = { OPENAI_API_KEY: 'sk-test', GITHUB_TOKEN: 'ghp_test', MAILBOX_SECRET_k1: 's'.repeat(40) }
+  const saved = Object.fromEntries(Object.keys(planted).map((name) => [name, process.env[name]]))
+  Object.assign(process.env, planted)
+  try {
+    killTree(4242, 'SIGKILL', { platform: 'win32', spawn, systemRoot: String.raw`C:\Windows` })
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+  assert.equal(started.length, 1)
+  assert.ok(started[0].env, 'with no env of its own, taskkill inherits all of the runner\'s')
+  assert.deepEqual(started[0].env, { SystemRoot: String.raw`C:\Windows`, NoDefaultCurrentDirectoryInExePath: '1' })
 })

@@ -148,7 +148,8 @@ export function createRunner({ spawn, platform, env }) {
         }
       } else {
         try {
-          spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+          // SystemRoot alone, never `env`: that is what the programs are given, and it can hold keys.
+          spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, env: { SystemRoot: systemRoot, NoDefaultCurrentDirectoryInExePath: '1' } }).on('error', () => {})
         } catch {
           // Nothing more can be done from here; the child itself is still killed below.
         }
