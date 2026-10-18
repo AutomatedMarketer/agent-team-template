@@ -328,6 +328,7 @@ test('every word in the troubleshooting table is a word the code prints', async 
     ['not-ready (places-...)', 'tick', 'places-${'],
     ['not-ready (key-in-environment)', 'tick', "'key-in-environment'"],
     ['not-ready (origin-mismatch)', 'tick', "'origin-mismatch'"],
+    ['not-ready (origin-has-login)', 'tick', "'origin-has-login'"],
     ['not-ready (work-...)', 'tick', 'work-${'],
     ['board-failed (board-refused)', 'board', "'board-refused'"],
     ['board-failed (board-unreachable)', 'board', "'board-unreachable'"],

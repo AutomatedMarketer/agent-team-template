@@ -280,6 +280,42 @@ test('a real program and the program IT started are both ended by killTree on Wi
   }
 })
 
+test('a real program the runner\'s exec gives up on is ended with everything it started: taskkill runs before the program itself is killed (this computer)', async (t) => {
+  if (!onWindows) return t.skip('this is the Windows way of ending a tree')
+  const system = win32.join(process.env.SystemRoot, 'System32')
+  // cmd starts ping and waits for it. Killing cmd first would leave ping running: taskkill /T then finds no tree to end.
+  const address = `127.0.0.${20 + (process.pid % 200)}`
+  const pings = async () => {
+    const { stdout } = await execFileP(win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -like '*${address}*' }).ProcessId`], { encoding: 'utf8', windowsHide: true })
+    return (stdout.match(/\d+/g) ?? []).map(Number)
+  }
+  const exec = createRunner({ spawn: realSpawn, platform: 'win32', env: process.env })
+  let seen = []
+  try {
+    const running = exec(win32.join(system, 'cmd.exe'), ['/d', '/c', `ping -n 60 ${address}`], { timeout: 5000 })
+    const started = Date.now() + 4500
+    while (seen.length === 0 && Date.now() < started) seen = await pings()
+    assert.ok(seen.length > 0, 'ping is running before the time-out')
+    await assert.rejects(running, (error) => error.code === 'ETIMEDOUT')
+    const deadline = Date.now() + 10_000
+    let left = await pings()
+    while (left.length && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      left = await pings()
+    }
+    assert.deepEqual(left, [], 'the program cmd started is gone too')
+  } finally {
+    for (const pid of [...seen, ...(await pings().catch(() => []))]) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+})
+
 /* ---------- the private folder ------------------------------------------------------------------------------------ */
 
 const ME = 'PC\\student'

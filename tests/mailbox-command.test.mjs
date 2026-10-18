@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { mailboxWorld, ALLOWLIST, FAKE_API_KEY } from './helpers/mailbox-world.mjs'
 import { main, parseArgs, USAGE } from '../scripts/lib/mailbox/command.mjs'
 import { repoRoot } from './helpers/repo.mjs'
+import { git } from './helpers/git.mjs'
 import { confinedClaude, stepsOf } from './helpers/mailbox-selftest-claude.mjs'
 import { SELFTEST_MARKER } from '../scripts/lib/mailbox/selftest.mjs'
 import { keepProof } from '../scripts/lib/mailbox/proof.mjs'
@@ -142,6 +143,8 @@ const PROBLEMS = [
   ['a Claude Code that is too old', async () => {}, { exec: async (file, args) => (args[0] === 'auth' ? { stdout: JSON.stringify({ authMethod: 'claude.ai' }), code: 0 } : { stdout: '2.1.258 (Claude Code)', code: 0 }) }, /too old.*2\.1\.259/i],
   ['an API key in the environment', async () => {}, { env: { HOME: '/h', ANTHROPIC_API_KEY: FAKE_API_KEY } }, /API key/i],
   ['a different team repo', async () => {}, { originAccepted: () => false }, /team repo/i],
+  ['a team repo address that holds a token', async (w) => git(['remote', 'set-url', 'origin', ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')], w.places.workDir), {},
+    /PROBLEM team repo: The team repo's address holds a password or token, which any program on this computer could read while git runs\. Clone it with a plain https:\/\/github\.com\/\.\.\. address and let Git's sign-in helper hold the login \(Git Credential Manager on Windows, the keychain on a Mac\)\./],
   ['no self-test passed yet', async (w) => rm(join(w.places.stateDir, 'selftest.json')), {}, /PROBLEM self-test: .*--selftest/],
   ['a self-test passed for another Claude version', async () => {}, { exec: async (file, args) => (args[0] === 'auth' ? { stdout: JSON.stringify({ authMethod: 'claude.ai' }), code: 0 } : { stdout: '2.1.300 (Claude Code)', code: 0 }) }, /PROBLEM self-test: .*--selftest/]
 ]
@@ -155,6 +158,7 @@ for (const [name, setup, change, words] of PROBLEMS) {
       assert.equal(result.code, 1)
       assert.match(result.text, words)
       assert.ok(!result.text.includes(FAKE_API_KEY), 'the key is not printed')
+      assert.ok(!result.text.includes('abc123'), 'a token in the address is not printed')
     } finally {
       await w.cleanup()
     }

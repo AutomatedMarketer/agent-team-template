@@ -486,6 +486,20 @@ test('a set API key, or a work copy whose origin is another repo, stops the runn
   assert.equal(w.board.polls, 0)
 }))
 
+test('a work copy whose origin holds a token stops the runner before any git talks to the team repo: git would put the address on a command line', () => withWorld(async (w) => {
+  w.send({ action: 'task', title: 'Chase the invoice' })
+  const token = ['x-access-token', 'abc123'].join(':')
+  await git(['remote', 'set-url', 'origin', `https://${token}@github.com/ExampleOwner/example-team.git`], w.places.workDir)
+  const calls = []
+  const watching = async (args, cwd) => { calls.push(args.join(' ')); return git(args, cwd) }
+  // The world accepts any origin (originAccepted: () => true): the login is refused on its own.
+  const result = await runTick(w.ctx({ git: watching, force: true }))
+  assert.deepEqual([result.state, result.why], ['not-ready', 'origin-has-login'])
+  assert.equal(w.board.polls, 0)
+  assert.deepEqual(calls.filter((line) => /\b(fetch|push|ls-remote|clone|pull)\b/.test(line)), [], 'nothing was fetched or pushed')
+  assert.ok(!w.logs.join('\n').includes('abc123'), 'the token is not logged')
+}))
+
 test('a login or settings problem blocks the runs and nothing else: a card order still lands, a run is refused as "not ready"', () => withWorld(async (w) => {
   const ctx = w.ctx({ exec: async (file, args) => { if (args[0] === 'auth') throw Object.assign(new Error('x'), { code: 'EXIT' }); return { stdout: '2.1.290', code: 0 } } })
   const card = w.send({ action: 'task', title: 'Chase the invoice' })

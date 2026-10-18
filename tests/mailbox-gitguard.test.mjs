@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { git } from './helpers/git.mjs'
 import { gitUnchanged, remakeWorkCopy, snapshotGit } from '../scripts/lib/mailbox/gitguard.mjs'
-import { configText, originUrl, readOrigin } from '../scripts/lib/mailbox/workcopy.mjs'
+import { configText, originUrl, readOrigin, resetWorkCopy } from '../scripts/lib/mailbox/workcopy.mjs'
 
 /* After Claude has run, git is run in the work copy as the owner. Anything in .git that git reads as configuration, changed by Claude,
    would run with the owner's rights. These hold the snapshot to what git reads: a change, an addition or a removal of any of it is seen,
@@ -129,16 +129,15 @@ test('the work copy is made again from the address the runner knew before Claude
     assert.equal((await git(['rev-parse', 'HEAD'], c.work)).stdout.trim(), (await git(['rev-parse', 'refs/heads/main'], c.origin)).stdout.trim())
     assert.equal((await git(['status', '--porcelain'], c.work)).stdout, '', 'everything checked out, nothing left over')
     assert.deepEqual(await readOrigin(c.work), { fetch: before.address, push: before.address })
+    assert.deepEqual((await readdir(c.root)).sort(), ['empty-hooks', 'origin.git', 'seed', 'work'], 'the old folder, moved aside first, is deleted: nothing is left beside the copy')
   } finally {
     await c.done()
   }
 })
 
-test('the team repo\'s address never appears on a git command line while the copy is made again (an address can carry a token, and a command line is visible to other programs)', async () => {
+test('the team repo\'s address is not on a git command line while the copy is made again: git reads it from the config the runner wrote', async () => {
   const c = await clone()
-  // Put together here so the repo's own credential scan (secrets.test.mjs) does not take this made-up one for a real token.
-  const token = ['ghp', 'NotARealTokenButLooksLikeOne1234567'].join('_')
-  const address = `https://x-access-token:${token}@github.com/ExampleOwner/example-team.git`
+  const address = 'https://github.com/ExampleOwner/example-team.git'
   try {
     // The runner wrote this address into .git/config itself before Claude started (resetWorkCopy); the snapshot records it.
     const empty = join(c.root, 'empty-hooks')
@@ -149,10 +148,7 @@ test('the team repo\'s address never appears on a git command line while the cop
     const calls = []
     assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls, { insteadOf: { from: address, to: c.origin } }), work: c.work, emptyHooks: empty, before }), { ok: true })
     assert.ok(calls.length > 0)
-    for (const call of calls) {
-      const line = [...call.args, call.cwd].join(' ')
-      assert.ok(!line.includes(token) && !line.includes('github.com') && !line.includes('x-access-token'), `the address was on a command line: ${call.verb}`)
-    }
+    for (const call of calls) assert.ok(!call.args.join(' ').includes('github.com'), `the address was on a command line: ${call.verb}`)
     assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n', 'the copy was made all the same, from the address in its config')
     assert.equal(await originUrl(c.work), address)
   } finally {
@@ -160,8 +156,43 @@ test('the team repo\'s address never appears on a git command line while the cop
   }
 })
 
-for (const step of ['init', 'fetch', 'checkout']) {
-  test(`a copy that could not be made again (git failed at "${step}") is not left half-made, so the next try makes it`, async () => {
+test('an address that holds a login is never fetched from: git hands the whole address to git-remote-https on its command line, so no git is run at all', async () => {
+  const c = await clone()
+  try {
+    const empty = join(c.root, 'empty-hooks')
+    await mkdir(empty)
+    const before = await snapshotGit(c.work)
+    const calls = []
+    const login = ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')
+    assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before: { ...before, address: login } }), { ok: false })
+    assert.deepEqual(calls, [], 'no git was run')
+    await assert.rejects(lstat(c.work), 'the old folder is gone all the same')
+  } finally {
+    await c.done()
+  }
+})
+
+test('a copy whose git could not even be started (init failed) leaves no folder behind', async () => {
+  const c = await clone()
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    await mkdir(empty)
+    const failing = async (args, cwd) => {
+      if (args.includes('init')) throw new Error('git failed at init')
+      return git(args, cwd)
+    }
+    assert.deepEqual(await remakeWorkCopy({ git: failing, work: c.work, emptyHooks: empty, before }), { ok: false })
+    await assert.rejects(lstat(c.work), 'no folder is left: an empty one would read as "not a clone" for good')
+    assert.deepEqual(await remakeWorkCopy({ git, work: c.work, emptyHooks: empty, before }), { ok: true })
+    assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n')
+  } finally {
+    await c.done()
+  }
+})
+
+for (const step of ['fetch', 'checkout']) {
+  test(`a copy that could not be fetched (git failed at "${step}") is kept as the runner made it - its own config and nothing else - so the next tick's reset heals it`, async () => {
     const c = await clone()
     try {
       const before = await snapshotGit(c.work)
@@ -172,14 +203,62 @@ for (const step of ['init', 'fetch', 'checkout']) {
         return git(args, cwd)
       }
       assert.deepEqual(await remakeWorkCopy({ git: failing, work: c.work, emptyHooks: empty, before }), { ok: false })
-      await assert.rejects(lstat(c.work), 'no folder is left: a half-made one would read as a clone that is not one, or as "not a clone" for good')
-      assert.deepEqual(await remakeWorkCopy({ git, work: c.work, emptyHooks: empty, before }), { ok: true })
+      assert.equal(await readFile(join(c.work, '.git', 'config'), 'utf8'), configText({ url: before.address, emptyHooks: empty }), 'the config is the runner\'s own')
+      assert.deepEqual((await readdir(c.work)).filter((name) => name !== '.git'), [], 'no file of the team repo, and nothing of the old folder')
+      // The next tick: the reset that runs before every order brings it level, with no one stepping in.
+      assert.deepEqual((await resetWorkCopy({ git, work: c.work, emptyHooks: empty, originAccepted: () => true })).ok, true)
       assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n')
     } finally {
       await c.done()
     }
   })
 }
+
+test('a computer whose git makes sha256 or reftable repos by default (global config) still gets the copy made again', async () => {
+  const c = await clone()
+  const global = join(c.root, 'global.gitconfig')
+  const saved = process.env.GIT_CONFIG_GLOBAL
+  try {
+    const before = await snapshotGit(c.work)
+    const empty = join(c.root, 'empty-hooks')
+    await mkdir(empty)
+    await writeFile(global, '[init]\n\tdefaultObjectFormat = sha256\n\tdefaultRefFormat = reftable\n')
+    process.env.GIT_CONFIG_GLOBAL = global
+    assert.deepEqual(await remakeWorkCopy({ git, work: c.work, emptyHooks: empty, before }), { ok: true })
+    assert.equal(await readFile(join(c.work, 'a.txt'), 'utf8'), 'a\n')
+    assert.equal((await git(['rev-parse', 'HEAD'], c.work)).stdout.trim(), (await git(['rev-parse', 'refs/heads/main'], c.origin)).stdout.trim())
+  } finally {
+    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL
+    else process.env.GIT_CONFIG_GLOBAL = saved
+    await c.done()
+  }
+})
+
+test('a commondir or config.worktree that shows up in the fresh .git (from an init template, say) stops the remake before git fetches anything', async () => {
+  for (const planted of ['commondir', 'config.worktree']) {
+    const c = await clone()
+    const global = join(c.root, 'global.gitconfig')
+    const saved = process.env.GIT_CONFIG_GLOBAL
+    try {
+      const before = await snapshotGit(c.work)
+      const empty = join(c.root, 'empty-hooks')
+      await mkdir(empty)
+      const template = join(c.root, 'template')
+      await mkdir(template)
+      await writeFile(join(template, planted), planted === 'commondir' ? `${c.root}\n` : '[core]\n\tfsmonitor = x\n')
+      await writeFile(global, `[init]\n\ttemplateDir = ${template.replaceAll('\\', '/')}\n`)
+      process.env.GIT_CONFIG_GLOBAL = global
+      const calls = []
+      assert.deepEqual(await remakeWorkCopy({ git: watchingGit(calls), work: c.work, emptyHooks: empty, before }), { ok: false }, planted)
+      assert.deepEqual(calls.map((one) => one.verb), ['init'], `${planted}: nothing was fetched`)
+      await assert.rejects(lstat(c.work), `${planted}: the folder is not kept`)
+    } finally {
+      if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL
+      else process.env.GIT_CONFIG_GLOBAL = saved
+      await c.done()
+    }
+  }
+})
 
 test('when the copy cannot be made again the old folder is gone all the same, and nothing of it is left to trust', async () => {
   const c = await clone()

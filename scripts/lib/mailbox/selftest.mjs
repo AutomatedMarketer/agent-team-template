@@ -204,7 +204,8 @@ export async function selftest(ctx) {
     platform: ctx.platform
   })
   const claude = await ctx.find('claude')
-  const blocking = ready.problems.filter((problem) => problem !== 'origin-mismatch')
+  // The self-test never uses the work copy, so neither origin problem stops it.
+  const blocking = ready.problems.filter((problem) => problem !== 'origin-mismatch' && problem !== 'origin-has-login')
   if (blocking.length || claude.state !== 'found') return { ok: false, problems: [`Claude is not ready (${blocking.join(', ') || 'not found'}); run --preflight first.`] }
   if (typeof home !== 'string') return { ok: false, problems: ['the home folder is not known, so the test cannot plant its file there.'] }
   // The link Claude Code is found by is followed to its real file ONCE, here, the way the check before every run does it. That file is asked its

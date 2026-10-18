@@ -168,6 +168,22 @@ test('a reset of a clone whose origin is not the team repo does nothing: the ori
   }
 })
 
+test('a reset of a clone whose origin holds a login (a token or a password) runs no git at all: git would put that address on a command line', async () => {
+  const w = await world()
+  try {
+    const login = ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')
+    await git(['remote', 'set-url', 'origin', login], w.work)
+    const calls = []
+    const watching = async (args, cwd) => { calls.push(args); return git(args, cwd) }
+    // Whatever the allowlist check says: a login in the address is refused on its own.
+    assert.deepEqual(await resetWorkCopy({ git: watching, work: w.work, emptyHooks: w.empty, originAccepted: ORIGIN_OK }), { ok: false, why: 'origin-has-login' })
+    assert.deepEqual(calls, [], 'no git was run')
+    assert.equal(await originUrl(w.work), login, 'the config was left alone')
+  } finally {
+    await w.cleanup()
+  }
+})
+
 test('a reset says "unreachable" when the team repo cannot be fetched, and leaves the clone as it was', async () => {
   const w = await world()
   try {

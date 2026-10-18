@@ -23,6 +23,8 @@ import { isInsideFolder } from './commit.mjs'
 
 export const PROGRAM_OUTPUT_CAP = 256 * 1024
 export const VERSION_TIMEOUT_MS = 10_000
+// How long a time-out waits for taskkill to end the tree before it kills the program on its own (taskkill has not said it is done).
+const TASKKILL_WAIT_MS = 5_000
 export const EMPTY_FOLDER_NAME = 'empty-cwd'
 
 const PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
@@ -138,6 +140,13 @@ export function createRunner({ spawn, platform, env }) {
       return
     }
 
+    const killChild = () => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
     const stopEverything = () => {
       if (!child.pid) return
       if (ownGroup) {
@@ -146,18 +155,26 @@ export function createRunner({ spawn, platform, env }) {
         } catch {
           // The group is already gone.
         }
-      } else {
-        try {
-          // SystemRoot alone, never `env`: that is what the programs are given, and it can hold keys.
-          spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, env: { SystemRoot: systemRoot, NoDefaultCurrentDirectoryInExePath: '1' } }).on('error', () => {})
-        } catch {
-          // Nothing more can be done from here; the child itself is still killed below.
-        }
+        killChild()
+        return
+      }
+      // taskkill /T finds the tree through the program itself: killed first, the program is gone, taskkill finds nothing (exit 128) and
+      // what it started runs on. So the program is killed only once taskkill has ended - or after a while, if taskkill never says so.
+      let fallback = null
+      const thenKill = () => {
+        clearTimeout(fallback)
+        killChild()
       }
       try {
-        child.kill('SIGKILL')
+        // SystemRoot alone, never `env`: that is what the programs are given, and it can hold keys.
+        const killer = spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, env: { SystemRoot: systemRoot, NoDefaultCurrentDirectoryInExePath: '1' } })
+        killer.on('error', thenKill)
+        killer.on('exit', thenKill)
+        fallback = setTimeout(killChild, TASKKILL_WAIT_MS)
+        fallback.unref?.()
       } catch {
-        // Already gone.
+        // taskkill could not be started: the program itself is still ended.
+        killChild()
       }
     }
 

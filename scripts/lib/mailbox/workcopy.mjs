@@ -46,6 +46,17 @@ export const pinnedGit = (git, emptyHooks) => (args, cwd) => git([...PINS(emptyH
 
 /* ---------- the config the clone is given -------------------------------------------------------------------------- */
 
+// Whether an address carries a login: a user name, a password or a token before the host (https://user:token@github.com/...), or a
+// password in an ssh:// address. git hands the WHOLE address to the program that talks to the server (git-remote-https) on its command
+// line, on every fetch, push and ls-remote, and a command line can be read by any program on the computer. So the runner never runs
+// git against such an address. The SSH forms (git@github.com:..., ssh://git@github.com/...) name a user and no secret, and are fine.
+export function addressHasLogin(url) {
+  if (typeof url !== 'string') return false
+  const login = /^([a-z][a-z0-9+.-]*):\/\/([^/?#\s]*)@/i.exec(url)
+  if (login === null) return false
+  return /^(?:git\+)?ssh$/i.test(login[1]) ? login[2].includes(':') : true
+}
+
 const oneLine = (value) => typeof value === 'string' && value !== '' && !/[\r\n]/.test(value)
 
 // A value as git's config file spells it: plain when it can be, in quotes with the backslash and the quote escaped when it
@@ -116,6 +127,7 @@ async function originFacts(work) {
 // { ok: true, head } with the team repo's main as the clone now has it, or { ok: false, why }:
 //   not-a-clone       the folder is not a git clone of its own
 //   origin-mismatch   its origin is not the team repo (originAccepted says what that is); nothing was changed
+//   origin-has-login  its origin holds a password or a token (addressHasLogin); nothing was changed and no git was run
 //   unreachable       the team repo could not be fetched
 export async function resetWorkCopy({ git, work, emptyHooks, originAccepted }) {
   try {
@@ -124,6 +136,7 @@ export async function resetWorkCopy({ git, work, emptyHooks, originAccepted }) {
     return { ok: false, why: 'not-a-clone' }
   }
   const url = await originUrl(work)
+  if (addressHasLogin(url)) return { ok: false, why: 'origin-has-login' }
   if (url === null || !originAccepted(url)) return { ok: false, why: url === null ? 'not-a-clone' : 'origin-mismatch' }
   await writeFile(join(work, '.git', 'config'), configText({ url, emptyHooks }))
   const run = pinnedGit(git, emptyHooks)

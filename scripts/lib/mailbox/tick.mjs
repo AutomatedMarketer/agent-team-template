@@ -173,6 +173,7 @@ async function locked(ctx, { orders, end, log }) {
 
   const checked = await dailyCheck(s, emptyCwd)
   if (checked.problems.includes('key-in-environment')) return end('not-ready', 'key-in-environment')
+  if (checked.problems.includes('origin-has-login')) return end('not-ready', 'origin-has-login')
   if (checked.problems.includes('origin-mismatch')) return end('not-ready', 'origin-mismatch')
   s.claudeReady = checked.ok
   s.claudePath = checked.claudePath

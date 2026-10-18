@@ -15,10 +15,10 @@
 // commondir, HEAD, shallow, info/ (attributes, exclude, sparse-checkout), hooks/, objects/info/ (alternates). .git must itself still be a
 // folder: a plain file there is a pointer to some other folder (gitdir:).
 
-import { createHash } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { BRANCH, configText, originUrl, pinnedGit } from './workcopy.mjs'
+import { createHash, randomBytes } from 'node:crypto'
+import { lstat, mkdir, readdir, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
+import { BRANCH, addressHasLogin, configText, originUrl, pinnedGit } from './workcopy.mjs'
 
 const SINGLE_FILES = ['config', 'config.worktree', 'commondir', 'HEAD', 'shallow']
 const FOLDERS = ['info', 'hooks', 'objects/info']
@@ -66,30 +66,54 @@ export async function gitUnchanged(work, before) {
 }
 
 // Throw the work copy away and make it again from the team repo, in the same place, with the address the runner itself wrote into
-// .git/config before Claude started (never the one in the folder now). No git command is run in the old folder: it is removed first, and
-// git first runs in the fresh, empty one. { ok: true } or { ok: false }; when it is false the folder is simply not there, and the next tick
-// says "not a clone" until the owner makes one (the guide's step 3, "The work copy").
+// .git/config before Claude started (never the one in the folder now). No git command is run in the old folder: in one step it is moved
+// aside (so it stops being the work copy at once), then deleted, and git first runs in a fresh, empty folder. { ok: true } or { ok: false }.
+// When it is false:
+//   - if git could not even be started in the fresh folder (or the address is not usable), no folder is left, and the next tick says
+//     "not a clone" until the owner makes one (the guide's step 3, "The work copy");
+//   - if the fresh folder was made and given the runner's config but the team repo could not be fetched or checked out, that folder is
+//     kept: it holds nothing but what the runner wrote, and the next tick's reset (resetWorkCopy) fetches into it and heals it.
 //
-// It is not a `git clone <address>`: the address would be on git's command line, and an address can carry a token
-// (https://x-access-token:...@github.com/...) that other programs on the computer can read there. Instead an empty repo is made, its
-// config is written as a file - the very text resetWorkCopy writes before every order - and git fetches and checks out `origin` by name,
-// as every tick does. What comes out is what the clone gave: main, at the team repo's main, everything checked out. Fetching `origin`
-// uses the same address and the same credential helper or SSH key that a clone of that address would.
+// How it is made: an empty repo (git init), its config written as a file - the very text resetWorkCopy writes before every order - then
+// a fetch and a checkout of `origin` by name, as every tick does. What comes out is what a clone gave: main, at the team repo's main,
+// everything checked out, with the same credential helper or SSH key a clone would use. This does NOT keep a login in the address
+// private: git hands the whole address to the program that talks to the server (git-remote-https) on its command line on every fetch
+// and push, however the address was given to git. So an address with a password or a token in it is refused before anything runs
+// (addressHasLogin, here and in resetWorkCopy and the daily check), and the login stays with git's sign-in helper.
+//
+// init is told the formats (sha1 objects, files for refs) so a computer whose git makes sha256 or reftable repos by default still gets
+// a copy that can fetch the team repo. They are -c settings, not --object-format/--ref-format switches: an older git ignores a setting it
+// does not know, where a switch it does not know (--ref-format before git 2.45) is an error.
+const INIT_FORMATS = ['-c', 'init.defaultObjectFormat=sha1', '-c', 'init.defaultRefFormat=files']
+// Files that would send git to another folder's settings (commondir) or add settings of their own (config.worktree). The fresh repo has
+// neither unless something put them there (an init template, say): then no git is run in it.
+const ELSEWHERE = ['commondir', 'config.worktree']
+
 export async function remakeWorkCopy({ git, work, emptyHooks, before }) {
-  await rm(work, { recursive: true, force: true })
-  if (typeof before?.address !== 'string' || before.address === '') return { ok: false }
   const run = pinnedGit(git, emptyHooks)
+  const aside = join(dirname(work), `.${basename(work)}.old-${randomBytes(6).toString('hex')}`)
+  let made = false
   try {
+    await rename(work, aside).catch((error) => {
+      if (error?.code !== 'ENOENT') throw error
+    })
+    // The old folder is no longer the work copy whatever happens here; a part that cannot be deleted now is left beside it, never used.
+    await rm(aside, { recursive: true, force: true }).catch(() => {})
+    if (typeof before?.address !== 'string' || before.address === '' || addressHasLogin(before.address)) return { ok: false }
     const config = configText({ url: before.address, emptyHooks })
     await mkdir(work, { recursive: true })
-    await run(['init', '--quiet'], work)
+    await run([...INIT_FORMATS, 'init', '--quiet'], work)
     await writeFile(join(work, '.git', 'config'), config)
+    for (const name of ELSEWHERE) {
+      if (await lstat(join(work, '.git', name)).then(() => true, () => false)) throw new Error(`gitguard: a ${name} is in the fresh .git`)
+    }
+    made = true
     await run(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', BRANCH], work)
     await run(['checkout', '--quiet', '--force', '-B', BRANCH, `refs/remotes/origin/${BRANCH}`], work)
     return { ok: true }
   } catch {
-    // Nothing half-made is left (an empty folder, or a repo with a config and no files): the folder is gone, as the line above says.
-    await rm(work, { recursive: true, force: true }).catch(() => {})
+    // Before the runner's config was in place (or the old folder could not be moved), nothing is kept: the folder is removed.
+    if (!made) await rm(work, { recursive: true, force: true }).catch(() => {})
     return { ok: false }
   }
 }
