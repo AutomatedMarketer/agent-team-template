@@ -4,6 +4,8 @@
 //   node scripts/mailbox-runner.mjs --once        one tick now, whatever the pace (a supervised first order)
 //   node scripts/mailbox-runner.mjs --preflight   say in plain words what is ready and what is not; changes nothing
 //   node scripts/mailbox-runner.mjs --selftest    run the real Claude against planted traps and files it must not touch; no run is done until it passes
+//   node scripts/mailbox-runner.mjs --codex-login     sign the runner's own Codex home in (codex login --device-auth), once, by hand
+//   node scripts/mailbox-runner.mjs --codex-selftest  prove the walls around Codex (codex-selftest.mjs); no Codex job runs until it passes
 //   --state-dir D  --work-dir D  --env-file F     use these places instead of the usual ones
 //
 // Output is plain lines for a person to read: never a key, a path with a user name in it, or a word anyone typed.
@@ -17,11 +19,14 @@ import { readAllowedOrders } from './allow.mjs'
 import { readMailboxEnv } from './keys.mjs'
 import { checkPlaces, defaultPlaces } from './places.mjs'
 import { MINIMUM_VERSION, claudeFolders, followToFile, killTree, preflight, originMatches } from './claude.mjs'
+import { CODEX_MINIMUM_VERSION, codexEnv, codexFolders, codexPreflight, unsafeCodexEnv, writeCodexHome } from './codex.mjs'
+import { codexSelftest } from './codex-selftest.mjs'
+import { codexMayRun, knownJobs } from './jobs.mjs'
 import { pointsElsewhere, readOrigin } from './workcopy.mjs'
 import { workCopyStuck } from './gitguard.mjs'
 import { runTick } from './tick.mjs'
 import { selftest } from './selftest.mjs'
-import { proofHolds } from './proof.mjs'
+import { codexProofHolds, proofHolds } from './proof.mjs'
 import { createLive, listenForSignals, signalHandler } from './signals.mjs'
 import { releaseLock } from '../status/commit.mjs'
 
@@ -31,11 +36,13 @@ export const USAGE = [
   '  --once        one tick now, whatever the pace',
   '  --preflight   say what is ready and what is not; changes nothing',
   '  --selftest    run the real Claude against planted traps and files it must not touch (runs wait for it to pass)',
+  '  --codex-login     sign in the runner\'s own Codex (its own home, never ~/.codex), once',
+  '  --codex-selftest  run the real Codex against planted traps and files it must not touch (Codex jobs wait for it to pass)',
   '  --help        this text',
   '  --state-dir D, --work-dir D, --env-file F   use these places instead of the usual ones'
 ].join('\n')
 
-const MODES = { '--once': 'tick', '--preflight': 'preflight', '--selftest': 'selftest' }
+const MODES = { '--once': 'tick', '--preflight': 'preflight', '--selftest': 'selftest', '--codex-selftest': 'codex-selftest', '--codex-login': 'codex-login' }
 const PATHS = { '--state-dir': 'stateDir', '--work-dir': 'workDir', '--env-file': 'envFile' }
 
 // { ok: true, mode, force, paths } or { ok: false, help? }
@@ -175,9 +182,92 @@ async function report(ctx, places, out) {
   const originProblem = ['origin-has-login', 'origin-mismatch'].find(has)
   say(originProblem === undefined, originProblem !== undefined ? `team repo: ${PROBLEM_WORDS[originProblem]}` : 'team repo: the work copy\'s origin is the team repo')
 
+  await codexReport(ctx, places, allowed, empty, say)
+
   for (const line of lines) out(line)
   out(ready ? 'Everything is ready.' : 'Not everything is ready. Fix the lines marked PROBLEM and run this again.')
   return ready ? 0 : 1
+}
+
+// Codex, in plain words - only for a computer whose allowlist gives it a job. Everywhere else it is not used, never looked for, and can
+// never make the check fail.
+const CODEX_WORDS = {
+  'codex-missing': 'Codex was not found on the fixed list of folders. Install it with the standalone installer (https://learn.chatgpt.com/docs/codex/cli) and run this again.',
+  'codex-version-unknown': 'Codex did not say which version it is.',
+  'codex-too-old': `Codex is too old: the walls need ${CODEX_MINIMUM_VERSION.join('.')} or later (codex update).`,
+  'codex-home-failed': 'the runner could not write Codex\'s own home folder (next to the state folder).',
+  'codex-not-logged-in': 'the runner\'s own Codex home is not signed in. Run `node scripts/mailbox-runner.mjs --codex-login` once and sign in with your ChatGPT account.',
+  'codex-wrong-login': 'the runner\'s own Codex home is signed in another way than with ChatGPT (an API key bills per token). Run `node scripts/mailbox-runner.mjs --codex-login` and sign in with ChatGPT.',
+  'codex-key-in-environment': 'an OpenAI key or address is set in the environment (OPENAI_API_KEY, CODEX_API_KEY and the like); take it out. No Codex job runs while it is there.',
+  'codex-selftest-needed': 'not passed for this Codex version and these settings. Run `node scripts/mailbox-runner.mjs --codex-selftest` (a few minutes, with the real Codex); no Codex job runs until it passes.'
+}
+const SANDBOX_WORDS = {
+  mac: 'Codex\'s sandbox did not start with the runner\'s walls. Update Codex (codex update) and run this again. Until then no Codex job runs.',
+  win32: 'this Windows computer has no container sandbox (mxc, Windows 11 24H2 or 25H2 with recent updates), and Codex\'s other Windows sandboxes cannot keep it inside the work copy. No Codex job runs here. Claude jobs are not affected.'
+}
+
+async function codexReport(ctx, places, allowed, empty, say) {
+  const given = allowed.state === 'ok' ? [...allowed.allow.workers].filter(([slug, worker]) => worker === 'codex' && knownJobs().includes(slug) && allowed.allow.jobs.has(slug)).map(([slug]) => slug).sort() : []
+  if (given.length === 0) {
+    say(true, 'Codex: not used - no job in the allowlist says worker: codex')
+    return
+  }
+  for (const slug of given.filter((one) => !codexMayRun(one))) say(false, `Codex: ${slug} needs the web, which Codex never has, so it is not offered`)
+  const jobs = given.filter((one) => codexMayRun(one))
+  if (jobs.length === 0) return
+  const checks = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: places.stateDir, codeDir: places.codeDir, emptyDir: empty, env: ctx.env, platform: ctx.platform })
+  const has = (problem) => checks.problems.includes(problem)
+  if (has('codex-missing')) say(false, `Codex: ${CODEX_WORDS['codex-missing']}`)
+  else say(!has('codex-version-unknown') && !has('codex-too-old'), has('codex-too-old') ? `Codex: ${CODEX_WORDS['codex-too-old']}` : has('codex-version-unknown') ? `Codex: ${CODEX_WORDS['codex-version-unknown']}` : `Codex: found, version ${checks.version.join('.')}; it does ${jobs.join(', ')}`)
+  if (has('codex-home-failed')) say(false, `Codex home: ${CODEX_WORDS['codex-home-failed']}`)
+  if (!has('codex-missing') && !has('codex-home-failed')) {
+    const login = ['codex-not-logged-in', 'codex-wrong-login'].find(has)
+    say(login === undefined, login === undefined ? 'Codex login: a ChatGPT login in the runner\'s own Codex home' : `Codex login: ${CODEX_WORDS[login]}`)
+    say(!has('codex-no-sandbox'), has('codex-no-sandbox') ? `Codex sandbox: ${ctx.platform === 'win32' ? SANDBOX_WORDS.win32 : SANDBOX_WORDS.mac}` : 'Codex sandbox: it starts with the runner\'s walls')
+  }
+  say(!has('codex-key-in-environment'), has('codex-key-in-environment') ? `Codex API key: ${CODEX_WORDS['codex-key-in-environment']}` : 'Codex API key: none set')
+  if (checks.version) {
+    const file = await followToFile((await ctx.find('codex')).path, ctx.realpath ?? realpath)
+    const proof = await codexProofHolds({ stateDir: places.stateDir, codeDir: places.codeDir, version: checks.version, file })
+    say(proof.holds, proof.holds ? `Codex self-test: passed on ${proof.at.slice(0, 10)} for this Codex and these settings` : `Codex self-test: ${CODEX_WORDS['codex-selftest-needed']}`)
+  }
+}
+
+// --codex-login: Codex's own sign-in, started by its full path with the person's terminal, in the runner's Codex home and with the small
+// environment - so the login lands there and never in ~/.codex. The settings are written first: a ChatGPT login, kept in a file.
+async function codexLogin(ctx, places, out) {
+  if (unsafeCodexEnv(ctx.env).length) {
+    out(`Codex: ${CODEX_WORDS['codex-key-in-environment']}`)
+    return 1
+  }
+  const found = await ctx.find('codex')
+  const file = found.state === 'found' ? await followToFile(found.path, ctx.realpath ?? realpath) : null
+  if (file === null) {
+    out(`Codex: ${CODEX_WORDS['codex-missing']}`)
+    return 1
+  }
+  const home = await writeCodexHome({ stateDir: places.stateDir, codeDir: places.codeDir })
+  if (!home.ok) {
+    out(`Codex home: ${CODEX_WORDS['codex-home-failed']}`)
+    return 1
+  }
+  const empty = join(places.stateDir, 'empty-cwd')
+  await rm(empty, { recursive: true, force: true })
+  await mkdir(empty, { recursive: true })
+  out('Signing in the runner\'s own Codex (its own home, never your ~/.codex). Use your ChatGPT account. Follow what Codex shows.')
+  const code = await new Promise((resolve) => {
+    let child
+    try {
+      child = ctx.spawn(file, ['login', '--device-auth'], { cwd: empty, env: codexEnv(ctx.env, ctx.platform, home.home), stdio: 'inherit', shell: false, windowsHide: false })
+    } catch {
+      resolve(null)
+      return
+    }
+    child.on('error', () => resolve(null))
+    child.on('close', (exit) => resolve(exit))
+  })
+  out(code === 0 ? 'Codex is signed in. Now run --preflight, then --codex-selftest.' : 'Codex did not sign in. Run --codex-login again.')
+  return code === 0 ? 0 : 1
 }
 
 export async function main({ argv = [], home, tick = runTick, out = console.log, err = console.error, codeDir, ...rest }) {
@@ -193,7 +283,8 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
   // Claude Code is found by one fixed list of folders (claude.mjs, claudeFolders), the same in a terminal and under launchd. Any other program
   // is found as before. `claudeFolders` in the arguments is for the tests, which cannot have a real /opt/homebrew/bin.
   const folders = Array.isArray(rest.claudeFolders) ? rest.claudeFolders : claudeFolders(home, rest.platform)
-  const where = (name) => ({ clone: places.workDir, ...(name === 'claude' ? { folders } : {}) })
+  const codexAt = Array.isArray(rest.codexFolders) ? rest.codexFolders : codexFolders(home, rest.platform)
+  const where = (name) => ({ clone: places.workDir, ...(name === 'claude' ? { folders } : name === 'codex' ? { folders: codexAt } : {}) })
   const find = typeof rest.find === 'function' ? (name) => rest.find(name, where(name)) : undefined
   const findAll = typeof rest.findAll === 'function' ? (name) => rest.findAll(name, where(name)) : undefined
   // What is alive, so that a signal (launchctl bootout, Ctrl-C) kills Claude, releases the lock, and exits (signals.mjs). `proc` is the real process.
@@ -210,6 +301,14 @@ export async function main({ argv = [], home, tick = runTick, out = console.log,
 
   try {
     if (parsed.mode === 'preflight') return await report(ctx, places, out)
+    if (parsed.mode === 'codex-login') return await codexLogin(ctx, places, out)
+    if (parsed.mode === 'codex-selftest') {
+      const result = await codexSelftest(ctx)
+      out(result.ok ? 'Codex self-test passed: the sandbox, what Codex is told and a real run all kept it inside the work copy, and Codex jobs may run.' : 'Codex self-test FAILED:')
+      for (const problem of result.problems) out(`  - ${problem}`)
+      if (!result.ok) out('No Codex job runs until a Codex self-test passes.')
+      return result.ok ? 0 : 1
+    }
     if (parsed.mode === 'selftest') {
       const result = await selftest(ctx)
       out(result.ok ? 'Self-test passed: the traps did not fire, nothing outside the work copy could be read or written, and jobs may run.' : 'Self-test FAILED:')

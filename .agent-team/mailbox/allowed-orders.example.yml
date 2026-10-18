@@ -18,11 +18,14 @@ actions: [task, move, approve, pause, run, arm, skill, agent]
 
 # The jobs Claude may run from the board, and the most minutes each gets (30 at most). A job
 # that is not named here is never run, whatever the board or the repo says.
+# A job may add "worker: codex" to be done by Codex instead (only a job with no web; see the guide,
+# "Codex as a second worker"). Without it, the job is Claude's.
 jobs:
   - slug: morning-intel
     minutes: 20
   - slug: task-sweep
     minutes: 30
+    # worker: codex
 
 # The most this Mac will do in one New York day. These numbers cannot go above 40 orders and 6 runs.
 per_day:

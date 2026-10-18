@@ -39,6 +39,8 @@ If you are not sure you need this, leave the board on cloud. Nothing here is nee
 | The state folder | `~/.local/state/agent-mailbox` | What the runner remembers: the allowlist, the claims, the day's counts, the pause switch, its log |
 | The secrets | `~/.config/agent-mailbox/env` | Only you can read it. The runner reads it itself; no shell ever loads it |
 | The self-test folder | `~/.local/share/agent-mailbox/selftest` | Made by `--selftest` next to the work copy, where a real job works, and removed when the test ends |
+| Codex's own home | `~/.local/state/agent-mailbox-codex` | Only if you give Codex a job. Its settings and its sign-in. Never your `~/.codex` |
+| The Codex self-test folder | `~/.local/share/agent-mailbox/codex-selftest` | Made by `--codex-selftest` next to the work copy, and removed when the test ends |
 
 The runner refuses to start if any of these is inside another one.
 
@@ -308,6 +310,14 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | `not-ready (work-...)` | The work copy could not be brought level with the team repo | Check the network and that `git push` works from the work copy (step 3) |
 | `not-ready (work-points-elsewhere)` | The work copy's `.git` holds a file that sends git to other settings or objects (`commondir`, `config.worktree` or `objects/info/alternates`). A clone you made has none, so no git is run in it | Delete the work copy and clone it again (step 3) |
 | `not-ready (work-copy-stuck)` | A run changed the work copy's git settings, and the runner could not move the folder aside to make it again: a program has a window or a terminal open in it. No git runs in it until then | Close whatever is open in the work copy folder (a terminal, an editor, a file window). The next tick moves it aside and makes it again by itself |
+| An order refused as `worker-not-allowed` | The order asked for one worker, and your allowlist gives that job to the other | Order it again from the board, which then asks for the right one. Or change `worker:` in the allowlist |
+| A Codex run refused as `not ready (codex-...)`, or a `PROBLEM Codex` line in `--preflight` | One Codex check failed. The word in the log names it | Run `--preflight` and fix the `Codex` lines. Claude jobs go on as before |
+| `codex-not-logged-in` or `codex-wrong-login` | The runner's own Codex home is not signed in with ChatGPT | Run `--codex-login` once and sign in with your ChatGPT account |
+| `codex-too-old` | The walls need Codex 0.160.0 or later | `codex update`, then `--codex-selftest` again |
+| `codex-no-sandbox` | Codex's sandbox did not start with the runner's walls. On Windows: no container sandbox | Update Codex. On Windows, update Windows 11. Until then no Codex job runs here |
+| `codex-key-in-environment` | An OpenAI key or address is set for the runner (`OPENAI_API_KEY`, `CODEX_API_KEY` and the like) | Remove it. Codex runs on your ChatGPT plan, never a key |
+| `codex-selftest-needed` | No Codex self-test has passed for this Codex and these settings | Run `--codex-selftest` |
+| A Codex run **failed** as `codex-failed` | Codex stopped with an error, or its turn did not finish | Look at the claim folder's transcript |
 | `stopped (store)` | The claims folder could not be opened | Check the disk and the state folder's rights |
 | `stopped (claim-failed)` | A claim could not be written to disk, so nothing was done | Check the disk and the state folder's rights |
 | `stopped (counts-damaged)` | The day's counts file is damaged; it reads as full | Look at `counts/`, delete that day's file once you know why |
@@ -342,6 +352,71 @@ The flags and settings are the ones Claude Code documents. Read the [CLI referen
 [running Claude Code programmatically](https://code.claude.com/docs/en/headless) and
 [permissions](https://code.claude.com/docs/en/permissions). The last one says what a `claude -p` run reads from a
 folder it was never asked to trust. It also says why a tool name with no path is allowed everywhere, and what the path patterns mean.
+
+## Codex as a second worker
+
+Codex can do a job instead of Claude. Only a job you give it, on this computer, and only when the order asks for Codex.
+
+- **Only the jobs you mark.** In `allowed-orders.yml`, add `worker: codex` under a job. Every other job stays with Claude.
+- **Only when the order asks.** The board sends `worker: codex` for that job. An order that asks for the other worker is refused as `worker-not-allowed`.
+- **Never a job that needs the web.** Codex never has the network. So the morning intel stays with Claude, whatever the file says.
+- **A shell, inside a sandbox.** Codex runs commands. They can read and write the work copy, and read what programs need to start. Nothing else, and no network.
+- **A home of its own.** The runner gives Codex its own home folder, next to the state folder. Your `~/.codex` is never read. Your MCP servers, hooks, skills and login there are never used.
+- **No key.** Codex signs in with your ChatGPT account, in that home. An OpenAI key in the environment stops every Codex job.
+
+### Turn Codex on
+
+First, Codex 0.160.0 or later. Install it with the [standalone installer](https://learn.chatgpt.com/docs/codex/cli) or Homebrew.
+`codex --version` says which one you have. `codex update` updates it.
+
+Then mark the job in `allowed-orders.yml`:
+
+```yaml
+jobs:
+  - slug: task-sweep
+    minutes: 30
+    worker: codex
+```
+
+Sign the runner's own Codex in, once. It shows a code or opens a sign-in page. Use your ChatGPT account, not an API key.
+
+```bash
+# on the Mac Mini - sign in the runner's own Codex (never your ~/.codex)
+cd ~/.local/share/agent-mailbox/runner-code
+node scripts/mailbox-runner.mjs --codex-login
+```
+
+Check it with `--preflight`. Every line that starts with `Codex` must say `ok`.
+Then prove the walls with the real Codex. It takes a few minutes and a little of your Codex plan.
+
+```bash
+# on the Mac Mini - prove the walls around Codex
+cd ~/.local/share/agent-mailbox/runner-code
+node scripts/mailbox-runner.mjs --codex-selftest
+```
+
+No Codex job runs until it passes. Run it again after Codex or the runner's code changes.
+The board offers Codex for a job only when the status file says Codex is ready.
+
+### The walls around Codex
+
+| Wall | How |
+|---|---|
+| Only its own folder | A permission profile in [`codex-config.toml`](codex-config.toml): read and write the work copy, read what programs need, deny everything else. The older `--sandbox workspace-write` is not used: it lets commands read the whole disk |
+| No network | The profile has the network off, and the web search tool is off |
+| No connectors, MCP servers, hooks or plugins | All switched off in the settings. The team repo's own `.codex` settings are never read, because the runner trusts no project |
+| No instructions from the repo | `AGENTS.md` is read as 0 bytes, and no skill is offered |
+| Nothing it may not use | Every line Codex prints is read. An MCP tool, a web search, a helper agent or anything unknown stops the run on the spot |
+| Settings it cannot change | The runner writes them into Codex's home before every start. `--strict-config` makes Codex refuse a setting it does not know, so an older Codex stops instead of running without a wall |
+| Proven on this computer | `--codex-selftest` tries every wall three ways: plain commands through Codex's sandbox, what Codex would be told, and a real run asked to break out. The proof is kept with the Codex version and a code worked out from the settings |
+| The same checks after the run | The `.git` guard, the changed-file check and the push are the ones a Claude run gets |
+
+**Windows.** Codex has three sandboxes on Windows. Only Microsoft's container sandbox (`mxc`) keeps Codex inside the work copy with the network off.
+It needs Windows 11 24H2 or 25H2 with recent updates. The runner names it in the settings, so Codex fails where it is missing.
+The default Windows sandbox refuses the runner's walls, and a looser one could read files outside the work copy.
+So on a computer without `mxc`, `--preflight` says `Codex sandbox` is a problem and no Codex job runs. Claude jobs are not affected.
+On 2026-10-18 the sandbox part of the self-test ran on a Windows 11 25H2 computer with Codex 0.160.0, and every wall held.
+The real run has not yet been tried on Windows or on a Mac.
 
 ## On a Windows computer
 
