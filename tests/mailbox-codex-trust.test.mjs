@@ -74,8 +74,12 @@ test('the REAL Codex trusts a folder with a .codex folder by itself when nothing
   await writeFile(join(work, '.codex', 'config.toml'), '# nothing here\n')
   // The pinned settings alone, as the runner wrote them before the fix.
   await copyFile(join(repoRoot, ...CODEX_CONFIG_FILE.split('/')), join(home, 'config.toml'))
-  await execOnce(file, work, home)
-  const text = await readFile(join(home, 'config.toml'), 'utf8')
+  // Up to three tries: on a busy computer a start can end before Codex gets that far (seen once in a full run of the suite).
+  let text = ''
+  for (let attempt = 1; attempt <= 3 && !/trust_level = "trusted"/.test(text); attempt += 1) {
+    await execOnce(file, work, home)
+    text = await readFile(join(home, 'config.toml'), 'utf8')
+  }
   const written = [...text.matchAll(/^\[projects\.(?:'([^']*)'|"((?:[^"\\]|\\.)*)")\]\s*\ntrust_level = "trusted"/gm)].map((match) => match[1] ?? JSON.parse(`"${match[2]}"`))
   if (written.length === 0) return t.skip('SKIPPED, not passed: this Codex did not write a trust entry by itself, so the key form could not be compared.')
   assert.deepEqual(written, [codexTrustKey(work, process.platform)])
