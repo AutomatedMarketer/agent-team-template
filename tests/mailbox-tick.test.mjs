@@ -99,7 +99,7 @@ const CARD_ORDERS = [
   ['move', { action: 'move', task: '2026-08-18-call-supplier', status: 'doing' }, 'tasks/2026-08-18-call-supplier.md', (text) => text.includes('status: doing')],
   ['approve', { action: 'approve', task: 'Writing the newsletter' }, 'proposals.yml', (text) => text.includes('approved: true')],
   ['pause', { action: 'pause', workflow: 'morning-intel' }, 'workflows/morning-intel.yml', (text) => text.includes('# schedule: "daily 06:30"')],
-  ['arm', { action: 'arm', workflow: 'morning-intel' }, 'tasks/2026-10-12-set-up-a-mac-schedule-for-morning-intel.md', (text) => text.includes('This one needs you, not an agent')],
+  ['arm', { action: 'arm', workflow: 'morning-intel' }, 'tasks/2026-10-12-set-up-a-schedule-for-morning-intel.md', (text) => text.includes('This one needs you, not an agent')],
   ['skill', { action: 'skill', title: 'Summarise a sales call' }, 'tasks/2026-10-12-add-a-skill-summarise-a-sales-call.md', (text) => text.includes('/new-skill')],
   ['agent', { action: 'agent', title: 'A bookkeeper who reconciles receipts' }, 'tasks/2026-10-12-add-an-agent-a-bookkeeper-who-reconciles.md', (text) => text.includes('/new-agent')]
 ]

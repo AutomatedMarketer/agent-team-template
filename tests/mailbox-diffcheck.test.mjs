@@ -95,7 +95,7 @@ const paths = (result) => result.files.map((file) => file.path)
 
 const CARD_ACTIONS = [
   ['task', { title: 'Chase the invoice', details: 'Ask about it.' }, [['tasks/2026-10-12-chase-the-invoice.md', 'added']]],
-  ['arm', { workflow: 'morning-intel' }, [['tasks/2026-10-12-set-up-a-mac-schedule-for-morning-intel.md', 'added']]],
+  ['arm', { workflow: 'morning-intel' }, [['tasks/2026-10-12-set-up-a-schedule-for-morning-intel.md', 'added']]],
   ['skill', { title: 'Summarise a sales call' }, [['tasks/2026-10-12-add-a-skill-summarise-a-sales-call.md', 'added']]],
   ['agent', { title: 'A bookkeeper who reconciles receipts' }, [['tasks/2026-10-12-add-an-agent-a-bookkeeper-who-reconciles.md', 'added']]],
   ['move', { task: '2026-08-18-call-supplier', status: 'doing' }, [['tasks/2026-08-18-call-supplier.md', 'modified']]],

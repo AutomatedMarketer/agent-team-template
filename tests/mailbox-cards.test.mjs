@@ -132,7 +132,7 @@ test('a card is only ever built from a title that is one line, an agent that is 
 
 test('Arm, Add skill and Add agent are not done on the Mac: each files a card that says it needs the owner, and nothing is created or armed', () => {
   const arm = needsYouCard('arm', { workflow: 'morning-intel' })
-  assert.equal(arm.heading, 'Set up a Mac schedule for morning-intel')
+  assert.equal(arm.heading, 'Set up a schedule for morning-intel')
   const skill = needsYouCard('skill', { title: 'Summarise a sales call', details: 'Keep it short.\nTwo lines.' })
   assert.equal(skill.heading, 'Add a skill: Summarise a sales call')
   const agent = needsYouCard('agent', { title: 'A bookkeeper who reconciles receipts' })
@@ -513,7 +513,7 @@ test('Arm, Add skill and Add agent each file one card for the owner and nothing 
   try {
     const before = await snapshot(work.dir)
     const arm = await applyCard({ root: work.dir, action: 'arm', fields: { workflow: 'morning-intel' }, ...OPTIONS })
-    assert.deepEqual(arm, { ok: true, paths: ['tasks/2026-10-12-set-up-a-mac-schedule-for-morning-intel.md'], changed: true })
+    assert.deepEqual(arm, { ok: true, paths: ['tasks/2026-10-12-set-up-a-schedule-for-morning-intel.md'], changed: true })
     const skill = await applyCard({ root: work.dir, action: 'skill', fields: { title: 'Summarise a sales call', details: 'Keep it short.' }, ...OPTIONS })
     assert.deepEqual(skill.paths, ['tasks/2026-10-12-add-a-skill-summarise-a-sales-call.md'])
     const agent = await applyCard({ root: work.dir, action: 'agent', fields: { title: 'A bookkeeper who reconciles receipts' }, ...OPTIONS })

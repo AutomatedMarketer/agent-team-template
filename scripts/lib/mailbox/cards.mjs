@@ -95,7 +95,7 @@ export function needsYouCard(action, fields) {
   let heading
   let paragraphs
   if (action === 'arm') {
-    heading = `Set up a Mac schedule for ${fields.workflow}`
+    heading = `Set up a schedule for ${fields.workflow}`
     paragraphs = [
       `${NEEDS_YOU}a new schedule on your computer has to be set up with you in a session, never unattended.`,
       `You tapped Arm on your board for the job \`${fields.workflow}\`. Nothing has been armed or scheduled.`,
