@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path'
 import { spawn as realSpawn } from 'node:child_process'
 import { repoRoot } from './helpers/repo.mjs'
 import { fakeCodex } from './helpers/fake-codex.mjs'
-import { CODEX_SELFTEST_MARKER, CODEX_WALLS, codexSelftest, countingServer, plantCodexWalls, probeCommands, probeWalls } from '../scripts/lib/mailbox/codex-selftest.mjs'
-import { codexFolders, codexHomeOf, writeCodexHome } from '../scripts/lib/mailbox/codex.mjs'
+import { CODEX_SELFTEST_MARKER, CODEX_WALLS, codexSelftest, countingServer, plantCodexWalls, probeCommands, probeWalls, promptWalls } from '../scripts/lib/mailbox/codex-selftest.mjs'
+import { buildCodexArgv, codexEnv, codexFolders, codexHomeOf, codexHomeTrusts, codexTrustKey, writeCodexHome } from '../scripts/lib/mailbox/codex.mjs'
 import { CODEX_PROOF_FILE, codexProofHolds, codexProofKept, PROOF_FILE } from '../scripts/lib/mailbox/proof.mjs'
 import { createRunner } from '../scripts/lib/status/programs.mjs'
 
@@ -183,12 +183,14 @@ test('the REAL Codex sandbox, with the runner\'s profile and settings, holds eve
   })
   const stateDir = join(root, 'state')
   await mkdir(stateDir)
-  assert.equal((await writeCodexHome({ stateDir, codeDir: repoRoot })).ok, true)
+  await mkdir(codexHomeOf(stateDir), { recursive: true })
   const env = Object.fromEntries(['HOME', 'PATH', 'USER', 'LANG', 'TMPDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'Path'].filter((name) => typeof process.env[name] === 'string').map((name) => [name, process.env[name]]))
   const exec = createRunner({ spawn: realSpawn, platform: process.platform, env })
   const tmp = join(root, 'tmp')
   await mkdir(tmp)
   const walls = await plantCodexWalls({ folder: join(root, 'sel'), home: homedir(), tmp, codexHome: codexHomeOf(stateDir), planted })
+  // As a job: the folder Codex is started in is marked untrusted (the trapped repo has a .codex folder that would open every wall).
+  assert.equal((await writeCodexHome({ stateDir, codeDir: repoRoot, untrusted: [walls.repo] })).ok, true)
   const probe = await exec(file, ['sandbox', '-P', 'mailbox-work', '-C', walls.repo, '--', ...probeCommands(process.platform, env).read(walls.paths.insideRead)], { cwd: walls.repo, env: { ...env, CODEX_HOME: codexHomeOf(stateDir) }, timeout: 60_000, acceptAnyExit: true }).catch(() => null)
   if (!probe || !String(probe.stdout).includes(walls.secrets.inside)) {
     // Not a pass: on Windows without the container sandbox Codex refuses the profile, which is the runner's own answer (codex-no-sandbox).
@@ -197,6 +199,14 @@ test('the REAL Codex sandbox, with the runner\'s profile and settings, holds eve
   }
   const problems = await probeWalls({ exec, file, planted: walls, server, env, platform: process.platform, codexHome: codexHomeOf(stateDir) })
   assert.deepEqual(problems, [])
+  assert.deepEqual(server.hits, [])
+  // Then one `codex exec` in the trapped repo, with no login (it stops at the first model request): the T14 review's way in. Codex must not
+  // trust the repo, start its MCP server or hook, or let its profile table and AGENTS.md in - parts 1 and 2 are tried again after it.
+  await exec(file, buildCodexArgv({ prompt: 'hello', workDir: walls.repo }), { cwd: walls.repo, env: codexEnv(env, process.platform, codexHomeOf(stateDir)), timeout: 45_000, acceptAnyExit: true }).catch(() => null)
+  assert.equal(await codexHomeTrusts(codexHomeOf(stateDir)), false, 'Codex trusted the repo')
+  for (const trap of walls.traps) assert.equal(await exists(trap.path), false, `${trap.name}: something the repo planted ran`)
+  assert.deepEqual(await probeWalls({ exec, file, planted: walls, server, env, platform: process.platform, codexHome: codexHomeOf(stateDir) }), [])
+  assert.deepEqual(await promptWalls({ exec, file, planted: walls, env, platform: process.platform, codexHome: codexHomeOf(stateDir) }), [])
   assert.deepEqual(server.hits, [])
 })
 
@@ -222,4 +232,48 @@ test('the REAL whole Codex self-test, only when a signed-in runner state folder 
     now: Date.now
   })
   assert.deepEqual(result.problems, [])
+})
+
+/* ---------- the T14 review: trust, links, and a network check with a control ----------------------------------------------- */
+
+test('the trapped repo is marked untrusted in the Codex home before any part runs, as a job\'s work copy is', async (t) => {
+  const w = await world(t)
+  let seen = null
+  const exec = w.codex.exec
+  w.ctx.exec = async (file, args, options) => {
+    if (args[0] === 'sandbox' && seen === null && args.includes('--') && !args.includes('/bin/echo')) seen = await readFile(join(codexHomeOf(w.places.stateDir), 'config.toml'), 'utf8')
+    return exec(file, args, options)
+  }
+  assert.equal((await codexSelftest(w.ctx)).ok, true)
+  assert.ok(seen.toLowerCase().includes(JSON.stringify(codexTrustKey(join(dirname(w.places.workDir), 'codex-selftest', 'repo'))).toLowerCase() + ']' + String.fromCharCode(10) + 'trust_level = "untrusted"'), seen.slice(-400))
+})
+
+test('a sandbox that lets a link made inside read a secret outside fails part 1', async (t) => {
+  const w = await world(t, { leak: ['links'] })
+  const result = await codexSelftest(w.ctx)
+  assert.equal(result.ok, false)
+  assert.ok(result.problems.some((problem) => /through a link it made|through a hard link it made/.test(problem)), result.problems.join(' | '))
+  assert.equal(w.codex.state.runs.length, 0)
+})
+
+test('the network wall is not proven when the program it is tried with does not start in the sandbox', async (t) => {
+  const w = await world(t, { leak: ['noNetControl'] })
+  const result = await codexSelftest(w.ctx)
+  assert.equal(result.ok, false)
+  assert.ok(result.problems.some((problem) => problem.includes('network wall is not proven')), result.problems.join(' | '))
+})
+
+test('on Windows the network is tried with PowerShell, shown to start first; curl.exe cannot start inside the container sandbox', () => {
+  const commands = probeCommands('win32', { SystemRoot: 'C:\Windows' })
+  assert.ok(commands.control[0].endsWith(['WindowsPowerShell', 'v1.0', 'powershell.exe'].join(String.fromCharCode(92))), commands.control[0])
+  assert.match(commands.reach('http://127.0.0.1:1/x')[0], /powershell\.exe$/)
+  assert.ok(!commands.reach('http://127.0.0.1:1/x').join(' ').includes('curl'))
+})
+
+test('a real run after which the Codex home trusts a folder fails, with no proof', async (t) => {
+  const w = await world(t, { run: { trust: true } })
+  const result = await codexSelftest(w.ctx)
+  assert.equal(result.ok, false)
+  assert.ok(result.problems.some((problem) => problem.includes('Codex trusted a folder')), result.problems.join(' | '))
+  assert.equal(await proofThere(w.places), false)
 })

@@ -4,10 +4,12 @@
 //   version, login ('chatgpt' | 'apiKey' | 'none'), noSandbox (the probe fails)
 //   leak        walls (CODEX_WALLS keys, or 'network') the SANDBOX lets through in part 1
 //   tells       'agents' | 'skill': what Codex would be told includes the repo's AGENTS.md or skill (part 2)
-//   run         { leak: [...walls], skip: [...walls or 'network'], item: 'mcp_tool_call', trap: 'AGENTS-RAN', fail: true }: the real run
+//   run         { leak: [...walls], skip: [...walls or 'network'], item: 'mcp_tool_call', trap: 'AGENTS-RAN', fail: true, trust: true }: the real run
+//               (trust: Codex writes a trusted entry into its home during the run)
+//   leak may also hold 'links' (a link made inside reads as the secret) and 'noNetControl' (the network program does not start)
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { dirname, relative, isAbsolute, join, resolve } from 'node:path'
 
 const inside = (root, path) => {
@@ -32,6 +34,25 @@ export const wallOf = (path) => WALL_NAMES.find(([shape]) => shape.test(String(p
 async function sandboxed(command, cwd, { leak = [] } = {}) {
   const program = command[0].split(/[\\/]/).at(-1).toLowerCase()
   if (program === 'echo' || (program === 'cmd.exe' && command[3] === 'echo SANDBOX_OK')) return { stdout: 'SANDBOX_OK\n', code: 0 }
+  // The program the network is tried with must first be shown to start (probeCommands' control); then the attempt.
+  if ((program === 'sh' && String(command[2]).includes('--version')) || (program === 'powershell.exe' && String(command.at(-1)).startsWith('Write-Output'))) {
+    return leak.includes('noNetControl') ? { stdout: '', code: 1 } : { stdout: 'NET_CONTROL_OK\n', code: 0 }
+  }
+  if (program === 'powershell.exe') {
+    const url = /'(http[^']+)'/.exec(command.at(-1))?.[1]
+    if (leak.includes('network') && url) {
+      await fetch(url).catch(() => {})
+      return { stdout: 'REACHED', code: 0 }
+    }
+    return { stdout: 'BLOCKED\n', code: 0 }
+  }
+  // A link to a file outside: refused, as the sandbox does - unless the test lets it through (then the link reads as the secret).
+  if (program === 'ln' || (program === 'cmd.exe' && command[3] === 'mklink')) {
+    const [target, path] = program === 'ln' ? command.slice(-2) : [command.at(-1), command.at(-2)]
+    if (!leak.includes('links')) return { stdout: 'Access is denied.\n', code: 1 }
+    await writeFile(path, await readFile(target, 'utf8'))
+    return { stdout: '', code: 0 }
+  }
   if (program === 'curl' || program === 'curl.exe') {
     if (leak.includes('network')) {
       await fetch(command.at(-1)).catch(() => {})
@@ -41,7 +62,9 @@ async function sandboxed(command, cwd, { leak = [] } = {}) {
   }
   const reading = program === 'cat' || (program === 'cmd.exe' && command[3] === 'type')
   const path = command.at(-1)
-  const allowed = leak.includes(wallOf(path)) || (inside(cwd, path) && !(inGit(cwd, path) && !reading))
+  // A link is followed to where it leads, as the sandbox checks it: a link inside that leads outside is outside.
+  const real = await realpath(path).catch(() => path)
+  const allowed = leak.includes(wallOf(path)) || (inside(cwd, path) && inside(cwd, real) && !(inGit(cwd, path) && !reading))
   if (!allowed) return { stdout: 'Access is denied.\n', code: 1 }
   if (reading) {
     try {
@@ -109,6 +132,10 @@ export function fakeCodex({ version = 'codex-cli 0.160.0', login = 'chatgpt', no
         await command(reading ? `cat ${path}` : `sh -c 'echo done > ${path}'`, answer)
       }
       if (run.trap) await writeFile(join(options.cwd, run.trap), 'ran')
+      if (run.trust) await writeFile(join(options.env.CODEX_HOME, 'config.toml'), `${await readFile(join(options.env.CODEX_HOME, 'config.toml'), 'utf8')}
+[projects.'x']
+trust_level = "trusted"
+`)
       if (run.item) out({ type: 'item.started', item: { id: 'item_x', type: run.item, server: 'evil', tool: 'evil' } })
       out({ type: 'item.completed', item: { id: 'item_end', type: 'agent_message', text: 'Done.' } })
       if (!run.item) out(run.fail ? { type: 'turn.failed', error: { message: 'boom' } } : { type: 'turn.completed', usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } })

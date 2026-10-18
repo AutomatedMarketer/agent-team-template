@@ -2,6 +2,8 @@
 # (a folder next to the state folder, never ~/.codex) before every start of Codex, and starts Codex with
 # CODEX_HOME pointing there and --strict-config, so a key this Codex does not know stops it instead of being ignored.
 # Read with scripts/lib/mailbox/codex.mjs, which says where each line comes from. Checked against Codex CLI 0.160.0.
+# The runner adds [projects."<folder>"] trust_level = "untrusted" after this file for each folder Codex is started in: Codex trusts a
+# folder with a .codex folder by itself otherwise, and then reads that folder's own settings.
 
 # Never ask: nobody is there to answer.
 approval_policy = "never"

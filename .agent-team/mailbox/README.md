@@ -316,6 +316,7 @@ after an hour. For the others the line also gives a reason in brackets. This is 
 | `codex-too-old` | The walls need Codex 0.160.0 or later | `codex update`, then `--codex-selftest` again |
 | `codex-no-sandbox` | Codex's sandbox did not start with the runner's walls. On Windows: no container sandbox | Update Codex. On Windows, update Windows 11. Until then no Codex job runs here |
 | `codex-key-in-environment` | An OpenAI key or address is set for the runner (`OPENAI_API_KEY`, `CODEX_API_KEY` and the like) | Remove it. Codex runs on your ChatGPT plan, never a key |
+| A Codex run refused as `codex-repo-refused` | The team repo has a `.codex` or `.agents` folder at its top, or a link or hard link. The log says which | Remove it from the team repo. Claude jobs are not affected |
 | `codex-selftest-needed` | No Codex self-test has passed for this Codex and these settings | Run `--codex-selftest` |
 | A Codex run **failed** as `codex-failed` | Codex stopped with an error, or its turn did not finish | Look at the claim folder's transcript |
 | `stopped (store)` | The claims folder could not be opened | Check the disk and the state folder's rights |
@@ -404,18 +405,22 @@ The board offers Codex for a job only when the status file says Codex is ready.
 |---|---|
 | Only its own folder | A permission profile in [`codex-config.toml`](codex-config.toml): read and write the work copy, read what programs need, deny everything else. The older `--sandbox workspace-write` is not used: it lets commands read the whole disk |
 | No network | The profile has the network off, and the web search tool is off |
-| No connectors, MCP servers, hooks or plugins | All switched off in the settings. The team repo's own `.codex` settings are never read, because the runner trusts no project |
-| No instructions from the repo | `AGENTS.md` is read as 0 bytes, and no skill is offered |
+| No connectors, MCP servers, hooks or plugins | All switched off in the settings |
+| The team repo cannot change Codex's settings | Codex trusts a folder with a `.codex` folder by itself, and then reads its settings. A trap there could start a program outside the sandbox, or open the walls. So the runner marks the work copy "untrusted" in Codex's home before every start. And it refuses a Codex job, as `codex-repo-refused`, when the team repo has a `.codex` or `.agents` folder at its top |
+| No links out | A link or a hard link could lead outside the work copy. The runner refuses a Codex job when the work copy holds one, outside `.git`. git never checks out a hard link, and the runner never makes one |
+| No instructions from the repo | `AGENTS.md` is read as 0 bytes, and no skill is offered. An `AGENTS.md` in Codex's own home would still be read, so the runner deletes it before every start |
 | Nothing it may not use | Every line Codex prints is read. An MCP tool, a web search, a helper agent or anything unknown stops the run on the spot |
 | Settings it cannot change | The runner writes them into Codex's home before every start. `--strict-config` makes Codex refuse a setting it does not know, so an older Codex stops instead of running without a wall |
-| Proven on this computer | `--codex-selftest` tries every wall three ways: plain commands through Codex's sandbox, what Codex would be told, and a real run asked to break out. The proof is kept with the Codex version and a code worked out from the settings |
-| The same checks after the run | The `.git` guard, the changed-file check and the push are the ones a Claude run gets |
+| Proven on this computer | `--codex-selftest` tries every wall three ways: plain commands through Codex's sandbox, what Codex would be told, and a real run asked to break out. It does this in a repo with a trapped `.codex` folder, and tries links out too. After the real run, Codex must trust no folder, and the first two ways are tried again. The proof is kept with the Codex version and a code worked out from the settings |
+| The same checks after the run | The `.git` guard, the changed-file check and the push are the ones a Claude run gets. And if Codex trusted a folder all the same, the order fails and no Codex job runs before a new self-test |
 
 **Windows.** Codex has three sandboxes on Windows. Only Microsoft's container sandbox (`mxc`) keeps Codex inside the work copy with the network off.
 It needs Windows 11 24H2 or 25H2 with recent updates. The runner names it in the settings, so Codex fails where it is missing.
 The default Windows sandbox refuses the runner's walls, and a looser one could read files outside the work copy.
 So on a computer without `mxc`, `--preflight` says `Codex sandbox` is a problem and no Codex job runs. Claude jobs are not affected.
 On 2026-10-18 the sandbox part of the self-test ran on a Windows 11 25H2 computer with Codex 0.160.0, and every wall held.
+That includes links made inside, a link planted from outside, and the network tried with PowerShell after it was shown to start.
+A `codex exec` in the trapped repo, with no sign-in, did not make Codex trust it, start its MCP server, or open its walls.
 The real run has not yet been tried on Windows or on a Mac.
 
 ## On a Windows computer

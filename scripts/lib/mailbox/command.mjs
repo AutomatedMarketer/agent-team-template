@@ -215,7 +215,7 @@ async function codexReport(ctx, places, allowed, empty, say) {
   for (const slug of given.filter((one) => !codexMayRun(one))) say(false, `Codex: ${slug} needs the web, which Codex never has, so it is not offered`)
   const jobs = given.filter((one) => codexMayRun(one))
   if (jobs.length === 0) return
-  const checks = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: places.stateDir, codeDir: places.codeDir, emptyDir: empty, env: ctx.env, platform: ctx.platform })
+  const checks = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: places.stateDir, codeDir: places.codeDir, emptyDir: empty, env: ctx.env, platform: ctx.platform, workDir: places.workDir })
   const has = (problem) => checks.problems.includes(problem)
   if (has('codex-missing')) say(false, `Codex: ${CODEX_WORDS['codex-missing']}`)
   else say(!has('codex-version-unknown') && !has('codex-too-old'), has('codex-too-old') ? `Codex: ${CODEX_WORDS['codex-too-old']}` : has('codex-version-unknown') ? `Codex: ${CODEX_WORDS['codex-version-unknown']}` : `Codex: found, version ${checks.version.join('.')}; it does ${jobs.join(', ')}`)
@@ -246,7 +246,7 @@ async function codexLogin(ctx, places, out) {
     out(`Codex: ${CODEX_WORDS['codex-missing']}`)
     return 1
   }
-  const home = await writeCodexHome({ stateDir: places.stateDir, codeDir: places.codeDir })
+  const home = await writeCodexHome({ stateDir: places.stateDir, codeDir: places.codeDir, untrusted: [places.workDir] })
   if (!home.ok) {
     out(`Codex home: ${CODEX_WORDS['codex-home-failed']}`)
     return 1

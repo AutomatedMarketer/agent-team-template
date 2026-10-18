@@ -20,7 +20,7 @@ test('the guide names the oldest Codex the runner will start, and that is the fl
 test('every Codex word in the guide is a word the code makes, and every switch it names is one the runner knows', async () => {
   const doc = await read(GUIDE)
   const sources = (await Promise.all(['codex.mjs', 'tick.mjs', 'allow.mjs', 'codex-selftest.mjs', 'command.mjs'].map((name) => read(`scripts/lib/mailbox/${name}`)))).join('\n')
-  for (const word of ['worker-not-allowed', 'codex-not-logged-in', 'codex-wrong-login', 'codex-too-old', 'codex-no-sandbox', 'codex-key-in-environment', 'codex-selftest-needed', 'codex-failed']) {
+  for (const word of ['worker-not-allowed', 'codex-repo-refused', 'codex-not-logged-in', 'codex-wrong-login', 'codex-too-old', 'codex-no-sandbox', 'codex-key-in-environment', 'codex-selftest-needed', 'codex-failed']) {
     assert.ok(doc.includes(word), `the guide does not show ${word}`)
     assert.ok(sources.includes(`'${word}'`), `the code does not make ${word}`)
   }

@@ -44,8 +44,8 @@ import { pollBoard } from './board.mjs'
 import { applyCard, readRepoFile, todayIn } from './cards.mjs'
 import { JOBS, codexMayRun, knownJobs, planRun, runPrompt } from './jobs.mjs'
 import { MINIMUM_VERSION, atLeast, buildArgv, claudeEnv, followToFile, localProblems, originMatches, parseVersion, preflight, runClaude, toolsFor, versionOfFile } from './claude.mjs'
-import { codexProofHolds, codexProofKept, proofHolds, proofKept } from './proof.mjs'
-import { buildCodexArgv, codexEnv, codexPreflight, runCodex, unsafeCodexEnv, writeCodexHome, CODEX_MINIMUM_VERSION } from './codex.mjs'
+import { codexProofHolds, codexProofKept, dropCodexProof, proofHolds, proofKept } from './proof.mjs'
+import { buildCodexArgv, codexEnv, codexHomeTrusts, codexPreflight, codexRepoProblem, runCodex, unsafeCodexEnv, writeCodexHome, CODEX_MINIMUM_VERSION } from './codex.mjs'
 import { checkChanges, finishRunLogs } from './diffcheck.mjs'
 import { gitUnchanged, remakeWorkCopy, snapshotGit, sweepAside, unstickWorkCopy, workCopyStuck } from './gitguard.mjs'
 import { commitPaths, landedCommit, pinnedGit, pointsElsewhere, pushCommits, readOrigin, resetWorkCopy } from './workcopy.mjs'
@@ -293,7 +293,7 @@ async function codexDailyCheck(s, emptyCwd) {
     const found = await ctx.find('codex')
     if (found.state === 'found') return { ok: keyed.length === 0, version: cached.version, problems: keyed, codexPath: found.path }
   }
-  const result = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, emptyDir: emptyCwd, env: ctx.env, platform: ctx.platform })
+  const result = await codexPreflight({ find: ctx.find, exec: ctx.exec, stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, emptyDir: emptyCwd, env: ctx.env, platform: ctx.platform, workDir: ctx.places.workDir })
   if (result.ok) await keepJson(path, { day: today, ok: true, version: result.version })
   else await rm(path, { force: true })
   return { ...result, codexPath: result.ok ? (await ctx.find('codex')).path ?? null : null }
@@ -473,11 +473,17 @@ async function versionToRun(s) {
 
 // The same for Codex: the link followed once, the version asked of that file in the runner's Codex home, and a Codex proof for that very
 // file and version (codex-selftest.mjs). The settings file is written again into the Codex home just before, so what runs is pinned.
+const CODEX_REPO_WORDS = {
+  'codex-settings': 'the team repo has a .codex or .agents folder at its top, which are Codex\'s own settings and skills. Remove it from the team repo; Claude jobs are not affected.',
+  link: 'the work copy holds a link, a junction or a hard-linked file, which Codex\'s sandbox could follow out of the work copy. Remove it from the team repo.',
+  'too-big': 'the work copy has too many files to look at all of them.'
+}
+
 async function codexToRun(s) {
   const { ctx } = s
   const file = await followToFile(s.codexPath, ctx.realpath ?? realpath)
   if (file === null) return { ok: false, why: 'codex-missing', words: 'The Codex program could not be found, so no job was started.' }
-  const home = await writeCodexHome({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir })
+  const home = await writeCodexHome({ stateDir: ctx.places.stateDir, codeDir: ctx.places.codeDir, untrusted: [ctx.places.workDir] })
   if (!home.ok) return { ok: false, why: 'codex-home-failed', words: 'The Codex home could not be written, so no job was started.' }
   let version = null
   try {
@@ -506,6 +512,12 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
 
   const claimDir = join(stateDir, CLAIMS_STORE.folder, `${id}.claim`)
   const codex = worker === 'codex'
+  // What Codex would read or follow in the team repo: a .codex or .agents folder, a link or a hard link (codex.mjs, codexRepoProblem).
+  const repoProblem = codex ? await codexRepoProblem(workDir) : null
+  if (repoProblem !== null) {
+    s.log(`mailbox: a Codex run was refused (codex-repo-refused): ${CODEX_REPO_WORDS[repoProblem]}`)
+    return settle(s, id, action, { state: 'refused', why: 'codex-repo-refused' })
+  }
   const prompt = await runPrompt(plan, { codeDir, worker })
   // The last thing before Claude (or Codex) starts: which version is it now? Not the one the daily check saw.
   const fit = codex ? await codexToRun(s) : await versionToRun(s)
@@ -554,6 +566,14 @@ async function executeRun(s, { id, action, fields, minutes, startedMs, reset, fa
       live: ctx.live,
       onEvent: progress.onEvent
     })
+    // Codex trusts a folder by itself when nothing says otherwise. The runner said otherwise; if a folder is trusted now all the same,
+    // this Codex does not do what was proven, so the order fails and no Codex job runs again before a new self-test.
+    if (codex && (await codexHomeTrusts(fit.home))) {
+      s.log('mailbox: Codex trusted a folder during the run although the runner had marked it untrusted, so the order failed and a new --codex-selftest is needed')
+      await dropCodexProof(stateDir)
+      s.codexReady = false
+      ran = { ...ran, ok: false, why: 'codex-failed' }
+    }
     return await afterRun()
   } finally {
     ctx.live?.cleanups.delete(closeProgress)

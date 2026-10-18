@@ -36,7 +36,7 @@ export const MAILBOX_REASONS = {
 // keys word for word: a board that has not learned these reads those exactly as before.
 export const MAILBOX_WORKERS = ['claude', 'codex']
 export const MAILBOX_WORKER_REASONS = {
-  refused: ['worker-not-allowed'],
+  refused: ['worker-not-allowed', 'codex-repo-refused'],
   failed: ['codex-failed']
 }
 const ALL_REFUSED = [...MAILBOX_REASONS.refused, ...MAILBOX_WORKER_REASONS.refused]

@@ -23,6 +23,8 @@
 // permission profile off), -m (the account's own default model is used), --dangerously-*, --add-dir, --search, -c, --enable, --profile.
 // Everything else is in the settings file, which the runner writes into a Codex home of its own before every start (writeCodexHome):
 // CODEX_HOME points there, so the owner's ~/.codex - its MCP servers, hooks, AGENTS.md, skills, plugins, memories, login - is never read.
+// The same writer marks the work copy untrusted: Codex trusts a folder with a .codex folder by itself and would then read the team repo's
+// own settings (T14 review). And a Codex job is refused outright in a work copy with a .codex or .agents folder, or a link (codexRepoProblem).
 //
 // Codex's main tool is a shell. It runs inside the sandbox: on a Mac, Seatbelt; on Windows only Microsoft's container sandbox (mxc), named
 // in the settings so it fails closed where it is missing. The default Windows sandbox refuses this profile ("Restricted read-only access
@@ -116,9 +118,48 @@ export function unsafeCodexEnv(env) {
   return UNSAFE_NAMES.filter((name) => typeof env?.[name] === 'string' && env[name] !== '')
 }
 
+// The key Codex files a folder under in [projects."<key>"]: on Windows the full path in lower case, as Codex itself writes it (seen with
+// Codex 0.160.0, and compared with the real Codex by tests/mailbox-codex-trust.test.mjs); elsewhere the path as given.
+export function codexTrustKey(path, platform = process.platform) {
+  return platform === 'win32' ? win32.resolve(path).toLowerCase() : path
+}
+
+// Whether the Codex home's config.toml trusts any folder. The runner never writes such an entry; Codex writes one by itself for a folder
+// it is started in that has no entry of its own.
+export async function codexHomeTrusts(home, fs = realFs) {
+  try {
+    return /^\s*trust_level\s*=\s*["']trusted["']/m.test(await fs.readFile(join(home, 'config.toml'), 'utf8'))
+  } catch {
+    return false
+  }
+}
+
+const HOME_FILES_REMOVED = Object.freeze(['AGENTS.md', 'AGENTS.override.md', 'hooks.json'])
+
+// WHY: `codex exec -C <folder>` trusts a folder that has a .codex folder BY ITSELF - it appends [projects.'<folder>'] trust_level =
+// "trusted" to its own config.toml - and then loads <folder>/.codex/config.toml: an MCP server there starts a program outside the sandbox
+// before any model call, a [permissions.mailbox-work] table there merges into the runner's profile, and its project_doc_max_bytes lets
+// the repo's AGENTS.md in (found by the T14 review with Codex 0.160.0; tests/mailbox-codex-trust.test.mjs proves the fix with the real
+// Codex). A folder that already has an entry is left as it is. So each folder Codex is started in gets trust_level = "untrusted" here,
+// under Codex's own key for it and, when that differs, the key of its real path. (And the runner refuses a Codex job in a work copy with a
+// .codex or .agents folder at all: codexRepoProblem.)
+async function untrustedEntries(folders, fs) {
+  const keys = new Set()
+  for (const folder of folders) {
+    if (typeof folder !== 'string' || !isAbsolute(folder)) continue
+    keys.add(codexTrustKey(folder))
+    const real = await fs.realpath(folder).catch(() => null)
+    if (typeof real === 'string') keys.add(codexTrustKey(real))
+  }
+  if (keys.size === 0) return ''
+  const blocks = [...keys].map((key) => `[projects.${JSON.stringify(key)}]\ntrust_level = "untrusted"\n`)
+  return `\n# Written by the runner before this start: Codex trusts none of these folders, so it never reads their .codex settings.\n${blocks.join('\n')}`
+}
+
 // The Codex home made (0700) and its config.toml written from the pinned file (0600), every time: an edit there never survives to the next
-// start. A home that is a link, or anything but a folder, is never written through. -> { ok, home }
-export async function writeCodexHome({ stateDir, codeDir, fs = realFs }) {
+// start, and an entry Codex wrote there itself is gone. `untrusted`: the folders Codex will be started in (above). A home that is a link,
+// or anything but a folder, is never written through. -> { ok, home }
+export async function writeCodexHome({ stateDir, codeDir, untrusted = [], fs = realFs }) {
   const home = codexHomeOf(stateDir)
   try {
     let info = null
@@ -129,7 +170,9 @@ export async function writeCodexHome({ stateDir, codeDir, fs = realFs }) {
     }
     if (info !== null && !info.isDirectory()) return { ok: false, home }
     if (info === null) await fs.mkdir(home, { recursive: true, mode: 0o700 })
-    const text = await fs.readFile(join(codeDir, ...CODEX_CONFIG_FILE.split('/')), 'utf8')
+    // Codex reads these from its home whatever project_doc_max_bytes says (found by the T14 review): none may be there at a start.
+    for (const name of HOME_FILES_REMOVED) await fs.rm(join(home, name), { force: true })
+    const text = `${await fs.readFile(join(codeDir, ...CODEX_CONFIG_FILE.split('/')), 'utf8')}${await untrustedEntries(untrusted, fs)}`
     const target = join(home, 'config.toml')
     const existing = await fs.lstat(target).catch(() => null)
     if (existing !== null && !existing.isFile()) return { ok: false, home }
@@ -139,6 +182,47 @@ export async function writeCodexHome({ stateDir, codeDir, fs = realFs }) {
     return { ok: true, home }
   } catch {
     return { ok: false, home }
+  }
+}
+
+/* ---------- what Codex would read or follow in the work copy ---------------------------------------------------------- */
+
+const MOST_ENTRIES = 50_000
+
+// Checked just before every Codex run, in the work copy as the team repo has it (tick.mjs). null, or the word for what is wrong:
+//   codex-settings  a .codex or .agents at the top (a folder, a file, anything). They are Codex's own settings and skills: the untrusted
+//                   entry keeps Codex from reading .codex, and this is the second wall, in case a Codex version treats trust differently.
+//                   The team repo made from this template has neither; nothing it needs is lost. (Not AGENTS.md: project_doc_max_bytes = 0
+//                   keeps it out, only a project .codex could raise that, and .codex is refused here; the self-test proves it per version.)
+//   link            a link, a junction or a file with more than one name (a hard link) anywhere outside .git. Codex's sandbox follows a hard
+//                   link made before it started (T14 review: read and write through one worked), so the runner never starts Codex beside one.
+//                   git never makes one in a checkout; the hard links it makes for a clone from a folder are its own objects, inside .git,
+//                   which the sandbox keeps read-only and which hold only the team repo. Nothing in the runner makes a link.
+//   too-big         more than MOST_ENTRIES files and folders, so it was not all looked at
+export async function codexRepoProblem(workDir, fs = realFs) {
+  for (const name of ['.codex', '.agents']) {
+    if (await fs.lstat(join(workDir, name)).then(() => true, (error) => error?.code !== 'ENOENT')) return 'codex-settings'
+  }
+  let seen = 0
+  const walk = async (folder, top) => {
+    for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
+      if (top && entry.name === '.git') continue
+      seen += 1
+      if (seen > MOST_ENTRIES) return 'too-big'
+      const path = join(folder, entry.name)
+      const info = await fs.lstat(path)
+      if (info.isSymbolicLink()) return 'link'
+      if (info.isDirectory()) {
+        const below = await walk(path, false)
+        if (below) return below
+      } else if (!info.isFile() || info.nlink > 1) return 'link'
+    }
+    return null
+  }
+  try {
+    return await walk(workDir, true)
+  } catch {
+    return 'link'
   }
 }
 
@@ -339,19 +423,22 @@ const systemRootOf = (env) => {
   return key !== undefined && typeof env[key] === 'string' && win32.isAbsolute(env[key]) ? env[key] : 'C:\\Windows'
 }
 
-// The probe's folder: inside the Codex home (never the state folder, see codexHomeOf), made empty each time.
+// The probe's folder when there is no work copy yet: inside the Codex home (never the state folder, see codexHomeOf), made empty each time.
 export const probeDirOf = (stateDir) => join(codexHomeOf(stateDir), 'probe')
 
 // The checks before any Codex job, every problem named in a word and all of them returned:
 //   codex-key-in-environment  codex-missing  codex-version-unknown  codex-too-old  codex-home-failed  codex-not-logged-in  codex-wrong-login
 //   codex-no-sandbox
-// Every question is asked of the file found, from an empty folder, in the runner's Codex home, with the small environment.
-export async function codexPreflight({ find, exec, stateDir, codeDir, emptyDir, env, platform, fs = realFs }) {
+// Every question is asked of the file found, from an empty folder, in the runner's Codex home, with the small environment. The sandbox probe
+// runs in the real work copy (`workDir`) when there is one, so it starts with whatever Codex would read there.
+export async function codexPreflight({ find, exec, stateDir, codeDir, emptyDir, env, platform, workDir = null, fs = realFs }) {
   const problems = unsafeCodexEnv(env).length ? ['codex-key-in-environment'] : []
   let version = null
   const found = await find('codex')
   if (found.state !== 'found') return { ok: false, version, problems: [...problems, 'codex-missing'] }
-  const home = await writeCodexHome({ stateDir, codeDir, fs })
+  const workThere = typeof workDir === 'string' && isAbsolute(workDir) && (await fs.lstat(workDir).then((info) => info.isDirectory(), () => false))
+  const probeDir = workThere ? workDir : probeDirOf(stateDir)
+  const home = await writeCodexHome({ stateDir, codeDir, untrusted: [probeDir], fs })
   const options = (extra = {}) => ({ cwd: emptyDir, env: codexEnv(env, platform, home.home), timeout: ASK_TIMEOUT_MS, ...extra })
   try {
     version = parseVersion((await exec(found.path, ['--version'], options())).stdout)
@@ -369,11 +456,12 @@ export async function codexPreflight({ find, exec, stateDir, codeDir, emptyDir, 
   }
   const word = loginWord(login)
   if (word !== null) problems.push(word)
-  const probeDir = probeDirOf(stateDir)
   let probed = false
   try {
-    await fs.rm(probeDir, { recursive: true, force: true })
-    await fs.mkdir(probeDir, { recursive: true })
+    if (!workThere) {
+      await fs.rm(probeDir, { recursive: true, force: true })
+      await fs.mkdir(probeDir, { recursive: true })
+    }
     const answer = await exec(found.path, sandboxProbeArgv({ dir: probeDir, platform, systemRoot: systemRootOf(env) }), options({ timeout: PROBE_TIMEOUT_MS }))
     probed = String(answer.stdout).split(/\r?\n/).some((text) => text.trim() === PROBE_WORD)
   } catch {

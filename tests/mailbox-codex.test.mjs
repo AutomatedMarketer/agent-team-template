@@ -361,7 +361,10 @@ test('a Codex that is found, new enough, signed in with ChatGPT and whose sandbo
   assert.deepEqual(exec.calls[1].args, ['login', 'status'])
   assert.equal(exec.calls[1].options.stderr, true, 'the login line is read from the error stream, where Codex prints it')
   assert.deepEqual(exec.calls[2].args, sandboxProbeArgv({ dir: exec.calls[2].args[4], platform: 'darwin' }))
-  assert.equal(await readFile(join(codexHomeOf(stateDir), 'config.toml'), 'utf8'), await readFile(join(repoRoot, ...CODEX_CONFIG_FILE.split('/')), 'utf8'))
+  const written = await readFile(join(codexHomeOf(stateDir), 'config.toml'), 'utf8')
+  assert.ok(written.startsWith(await readFile(join(repoRoot, ...CODEX_CONFIG_FILE.split('/')), 'utf8')), 'the pinned settings, then the folders Codex must not trust')
+  assert.match(written, /trust_level = "untrusted"/)
+  assert.doesNotMatch(written, /trust_level = "trusted"/)
 })
 
 test('the sandbox probe starts the plainest command through Codex\'s own sandbox, with the runner\'s profile', () => {
@@ -405,4 +408,62 @@ test('the runner\'s program starter keeps the error stream only when asked, for 
   assert.ok(!Object.hasOwn(dropped, 'stderr'), 'nobody asked, so the error stream is not kept')
   const good = await exec(process.execPath, ['-e', 'console.error("Logged in using ChatGPT")'], { stderr: true, acceptAnyExit: true })
   assert.equal(loginWord(good), null)
+})
+
+/* ---------- the T14 review: what Codex would read or follow in the work copy ---------------------------------------------- */
+
+test('a work copy is refused for Codex when it has .codex or .agents at its top, or a link or a hard-linked file anywhere outside .git', async (t) => {
+  const { codexRepoProblem } = await import('../scripts/lib/mailbox/codex.mjs')
+  const { link } = await import('node:fs/promises')
+  const root = await mkdtemp(join(tmpdir(), 'codex-repo-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const work = join(root, 'work')
+  await mkdir(join(work, '.git', 'objects'), { recursive: true })
+  await mkdir(join(work, 'tasks'), { recursive: true })
+  await writeFile(join(work, 'tasks', 'card.md'), 'x\n')
+  await writeFile(join(root, 'secret.txt'), 'secret\n')
+  assert.equal(await codexRepoProblem(work), null)
+  // git keeps hard links of its own objects for a clone from a folder: inside .git they are not looked at.
+  await link(join(root, 'secret.txt'), join(work, '.git', 'objects', 'pack-linked'))
+  assert.equal(await codexRepoProblem(work), null)
+  for (const name of ['.codex', '.agents']) {
+    await mkdir(join(work, name))
+    assert.equal(await codexRepoProblem(work), 'codex-settings', name)
+    await rm(join(work, name), { recursive: true })
+  }
+  await writeFile(join(work, '.codex'), 'a file, not a folder\n')
+  assert.equal(await codexRepoProblem(work), 'codex-settings', 'a .codex that is a file')
+  await rm(join(work, '.codex'))
+  await link(join(root, 'secret.txt'), join(work, 'tasks', 'hard.md'))
+  assert.equal(await codexRepoProblem(work), 'link', 'a pre-made hard link reads through Codex\'s sandbox, so it is refused')
+  await rm(join(work, 'tasks', 'hard.md'))
+  assert.equal(await codexRepoProblem(work), null)
+  try {
+    await symlink(join(root, 'secret.txt'), join(work, 'tasks', 'soft.md'))
+  } catch {
+    t.diagnostic('this computer cannot make a symbolic link without rights; the junction half below still runs')
+  }
+  if (await stat(join(work, 'tasks', 'soft.md')).then(() => true, () => false)) {
+    assert.equal(await codexRepoProblem(work), 'link')
+    await rm(join(work, 'tasks', 'soft.md'))
+  }
+  await mkdir(join(root, 'elsewhere'))
+  await symlink(join(root, 'elsewhere'), join(work, 'tasks', 'junction'), 'junction')
+  assert.equal(await codexRepoProblem(work), 'link')
+})
+
+test('the check before any Codex job probes the sandbox in the real work copy when there is one, and names it untrusted for Codex', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-check-work-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateDir = join(root, 'state')
+  const work = join(root, 'work')
+  await mkdir(stateDir)
+  await mkdir(work)
+  const exec = fakeExec()
+  const { codexTrustKey } = await import('../scripts/lib/mailbox/codex.mjs')
+  const result = await codexPreflight({ find: async () => ({ state: 'found', path: '/fake/bin/codex' }), exec, stateDir, codeDir: repoRoot, emptyDir: root, env: { HOME: root }, platform: 'darwin', workDir: work })
+  assert.equal(result.ok, true)
+  const probe = exec.calls.find((call) => call.args[0] === 'sandbox')
+  assert.equal(probe.args[4], work)
+  assert.ok((await readFile(join(codexHomeOf(stateDir), 'config.toml'), 'utf8')).includes(`[projects.${JSON.stringify(codexTrustKey(work))}]\ntrust_level = "untrusted"`))
 })

@@ -111,8 +111,8 @@ test('a Codex job ordered for Codex runs with Codex - its file, its fixed argume
   assert.equal(entryFor(status, sent.id).state, 'ok')
   assert.equal(entryFor(status, sent.id).steps, 2, 'one command and one file change')
   assert.deepEqual(checkMailbox(status, { hostname: 'nunos-mac', username: 'nunotavares', home: w.root }), [])
-  // The settings Codex ran with are the pinned ones, written into its own home.
-  assert.equal(await readFile(join(codexHomeOf(w.places.stateDir), 'config.toml'), 'utf8'), await readFile(join(w.places.codeDir, '.agent-team', 'mailbox', 'codex-config.toml'), 'utf8'))
+  // The settings Codex ran with are the pinned ones, written into its own home, then the folders it must not trust.
+  assert.ok((await readFile(join(codexHomeOf(w.places.stateDir), 'config.toml'), 'utf8')).startsWith(await readFile(join(w.places.codeDir, '.agent-team', 'mailbox', 'codex-config.toml'), 'utf8')))
 }))
 
 test('an order that does not ask for the job\'s worker is refused as worker-not-allowed, and neither worker starts', () => withWorld({}, async (w) => {
@@ -234,4 +234,49 @@ test('a good Codex check is remembered for the day, like Claude\'s; a key in the
   await runTick(keyed.ctx({ force: true }))
   assert.equal(entryFor(await statusIn(w), sent.id).why, 'not-ready')
   await rm(join(w.places.stateDir, 'codex-preflight.json'), { force: true })
+}))
+
+/* ---------- the T14 review: what Codex would read in the team repo ------------------------------------------------------ */
+
+for (const [label, files] of [['a .codex folder', { '.codex/config.toml': '[mcp_servers.evil]\ncommand = "x"\n' }], ['a .agents folder', { '.agents/skills/evil/SKILL.md': '---\nname: evil\n---\n' }]]) {
+  test(`a team repo with ${label} at its top: the Codex job is refused as codex-repo-refused and Codex never starts; Claude jobs still run`, () => withWorld({ files }, async (w) => {
+    w.claude.script = w.claude.good
+    const c = codexWorld(w)
+    const sent = w.send({ action: 'run', workflow: 'task-sweep', worker: 'codex' })
+    const logs = []
+    await runTick(c.ctx({ log: (line) => logs.push(line) }))
+    assert.deepEqual([entryFor(await statusIn(w), sent.id).state, entryFor(await statusIn(w), sent.id).why], ['refused', 'codex-repo-refused'])
+    assert.equal(c.codexRuns.length, 0)
+    assert.ok(logs.some((line) => line.includes('.codex or .agents')), logs.join('\n'))
+    const claudeOrder = w.send({ action: 'run', workflow: 'morning-intel' })
+    await runTick(c.ctx({ force: true }))
+    assert.equal(entryFor(await statusIn(w), claudeOrder.id).state, 'ok')
+  }))
+}
+
+test('the Codex home a run starts with says the work copy is untrusted, in Codex\'s own key for it', () => withWorld({}, async (w) => {
+  let seen = null
+  const c = codexWorld(w, { script: async (cwd, args) => {
+    seen = await readFile(join(codexHomeOf(w.places.stateDir), 'config.toml'), 'utf8')
+    return sweep(w)(cwd, args)
+  } })
+  w.send({ action: 'run', workflow: 'task-sweep', worker: 'codex' })
+  await runTick(c.ctx())
+  const { codexTrustKey } = await import('../scripts/lib/mailbox/codex.mjs')
+  assert.ok(seen.includes(`[projects.${JSON.stringify(codexTrustKey(w.places.workDir))}]\ntrust_level = "untrusted"`), seen.slice(-300))
+}))
+
+test('a Codex that trusted a folder anyway during its run: the order fails, nothing is pushed, and the Codex proof is dropped so no Codex job runs before a new self-test', () => withWorld({}, async (w) => {
+  const { appendFile } = await import('node:fs/promises')
+  const c = codexWorld(w, { script: async (cwd, args) => {
+    await appendFile(join(codexHomeOf(w.places.stateDir), 'config.toml'), `\n[projects.'x']\ntrust_level = "trusted"\n`)
+    return sweep(w)(cwd, args)
+  } })
+  const sent = w.send({ action: 'run', workflow: 'task-sweep', worker: 'codex' })
+  const logs = []
+  await runTick(c.ctx({ log: (line) => logs.push(line) }))
+  assert.deepEqual([entryFor(await statusIn(w), sent.id).state, entryFor(await statusIn(w), sent.id).why], ['failed', 'codex-failed'])
+  assert.equal(await w.inOrigin.file('inbox/2026-10-12/task-sweep.md'), null)
+  assert.ok(!(await exists(join(w.places.stateDir, CODEX_PROOF_FILE))), 'the proof is dropped')
+  assert.ok(logs.some((line) => line.includes('trusted')), logs.join('\n'))
 }))

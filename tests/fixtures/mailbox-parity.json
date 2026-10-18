@@ -1604,7 +1604,8 @@
       ],
       "reasons": {
         "refused": {
-          "worker-not-allowed": "that job is set to another worker on that computer"
+          "worker-not-allowed": "that job is set to another worker on that computer",
+          "codex-repo-refused": "the team repo holds something Codex would read or follow (a .codex or .agents folder at its top, or a link)"
         },
         "failed": {
           "codex-failed": "Codex stopped with an error"
