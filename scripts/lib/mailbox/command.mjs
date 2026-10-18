@@ -170,7 +170,7 @@ async function report(ctx, places, out) {
   // --preflight must not say "Everything is ready".
   const stuck = await workCopyStuck(places.stateDir)
   const elsewhere = !stuck && (await pointsElsewhere(places.workDir))
-  if (stuck) say(false, 'work copy: a run changed its git settings and it could not be moved aside to be made again. Close whatever is open in the work copy folder (a terminal, an editor, a file window); the next tick makes it again by itself.')
+  if (stuck) say(false, 'work copy: a run changed its git settings and it could not be moved aside to be made again. Close whatever is open in the work copy folder (a terminal, an editor, a file window); the next tick makes it again by itself. Do not run git in it.')
   else if (elsewhere) say(false, 'work copy: its .git holds a file that sends git to other settings or objects (commondir, config.worktree or objects/info/alternates). Delete the work copy folder and clone it again (step 3); do not run git in it.')
   const originProblem = ['origin-has-login', 'origin-mismatch'].find(has)
   say(originProblem === undefined, originProblem !== undefined ? `team repo: ${PROBLEM_WORDS[originProblem]}` : 'team repo: the work copy\'s origin is the team repo')

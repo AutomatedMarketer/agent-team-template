@@ -146,7 +146,7 @@ const PROBLEMS = [
   ['a team repo address that holds a token', async (w) => git(['remote', 'set-url', 'origin', ['https://x-access-token', 'abc123@github.com/ExampleOwner/example-team.git'].join(':')], w.places.workDir), {},
     /PROBLEM team repo: The team repo's address holds a user name, password or token\. git puts the whole address on a command line while it runs, where any program on this computer can read it\. Clone it with a plain https:\/\/github\.com\/\.\.\. address and let Git's sign-in helper hold the login \(Git Credential Manager on Windows, the keychain on a Mac\)\./],
   ['a work copy left stuck by a remake', async (w) => writeFile(join(w.places.stateDir, 'work-copy-stuck.json'), '{"address":null}\n'), {},
-    /PROBLEM work copy: a run changed its git settings and it could not be moved aside to be made again\. Close whatever is open in the work copy folder \(a terminal, an editor, a file window\); the next tick makes it again by itself\./],
+    /PROBLEM work copy: a run changed its git settings and it could not be moved aside to be made again\. Close whatever is open in the work copy folder \(a terminal, an editor, a file window\); the next tick makes it again by itself\. Do not run git in it\./],
   ['a work copy whose .git points elsewhere', async (w) => writeFile(join(w.places.workDir, '.git', 'commondir'), 'evil\n'), {},
     /PROBLEM work copy: its \.git holds a file that sends git to other settings or objects \(commondir, config\.worktree or objects\/info\/alternates\)\. Delete the work copy folder and clone it again \(step 3\); do not run git in it\./],
   ['no self-test passed yet', async (w) => rm(join(w.places.stateDir, 'selftest.json')), {}, /PROBLEM self-test: .*--selftest/],
